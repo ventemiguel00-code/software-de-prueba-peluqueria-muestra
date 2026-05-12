@@ -1,0 +1,49 @@
+/* Ajustes online Barber Delux: titulos de login fluidos y sin desbordes. */
+.login-view h1,
+.admin-title,
+.barber-panel-title {
+  max-width: 100%;
+  text-transform: uppercase;
+  font-size: clamp(2rem, 4vw, 3.6rem);
+  line-height: 1;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: unset;
+  letter-spacing: -1px;
+}
+
+.login-panel,
+.barber-panel-card {
+  overflow: hidden;
+}
+
+.login-panel .admin-title,
+.login-panel .barber-panel-title,
+.login-panel h1 {
+  font-size: clamp(2rem, 4vw, 3.6rem);
+}
+
+@media (min-width: 768px) {
+  .login-view h1,
+  .admin-title,
+  .barber-panel-title,
+  .login-panel .admin-title,
+  .login-panel .barber-panel-title,
+  .login-panel h1 {
+    font-size: clamp(2.2rem, 3.2vw, 3.4rem);
+  }
+}
+
+@media (max-width: 480px) {
+  .login-view h1,
+  .admin-title,
+  .barber-panel-title,
+  .login-panel .admin-title,
+  .login-panel .barber-panel-title,
+  .login-panel h1 {
+    font-size: clamp(1.8rem, 9vw, 2.6rem);
+    white-space: normal;
+    line-height: 1.05;
+  }
+}
