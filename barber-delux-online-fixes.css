@@ -25,13 +25,12 @@
 .login-panel h1 {
   max-width: 100%;
   margin-bottom: 0;
-  font-size: clamp(1.9rem, 4.6vw, 3.8rem);
+  font-size: clamp(1.7rem, 4vw, 3.3rem);
   line-height: 0.98;
   letter-spacing: -0.03em;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: normal;
-  text-wrap: balance;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
 }
 
 .dashboard-head .eyebrow,
@@ -61,7 +60,7 @@
   .dashboard-head h1,
   .barber-heading h1,
   .login-panel h1 {
-    font-size: clamp(2.3rem, 3.1vw, 3.7rem);
+    font-size: clamp(2rem, 2.8vw, 3.2rem);
   }
 }
 
@@ -77,8 +76,8 @@
   .barber-panel-title,
   .barber-heading h1,
   .login-panel h1 {
-    font-size: clamp(1.85rem, 8vw, 2.75rem);
-    line-height: 1.02;
+    font-size: clamp(1.5rem, 6.8vw, 2.25rem);
+    line-height: 1;
     letter-spacing: -0.02em;
   }
 
