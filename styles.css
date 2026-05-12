@@ -1,0 +1,1642 @@
+:root {
+  --black: #050607;
+  --matte: #0b0e10;
+  --graphite: #151b1f;
+  --graphite-2: #222a2f;
+  --petrol: #9f7622;
+  --petrol-bright: #f2cf7b;
+  --white: #f4f7f6;
+  --muted: #a7b4b8;
+  --silver: #d7ddde;
+  --line: rgba(230, 238, 239, 0.16);
+  --line-strong: rgba(230, 238, 239, 0.26);
+  --glass: rgba(13, 17, 19, 0.74);
+  --glass-soft: rgba(255, 255, 255, 0.055);
+  --shadow: 0 28px 90px rgba(0, 0, 0, 0.52);
+  --inner-light: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color-scheme: dark;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 82% -12%, rgba(242, 207, 123, 0.22), transparent 30rem),
+    radial-gradient(circle at 8% 18%, rgba(255, 244, 211, 0.11), transparent 24rem),
+    linear-gradient(135deg, #050607 0%, #17130b 44%, #080706 100%);
+  color: var(--white);
+}
+
+.global-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  overflow: hidden;
+  background: #050505;
+}
+
+.global-bg-video,
+.global-bg-image,
+.global-bg-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.global-bg-video,
+.global-bg-image {
+  object-fit: cover;
+  filter: brightness(1.12) saturate(1.04);
+}
+
+.global-bg-image {
+  background:
+    linear-gradient(90deg, rgba(5, 5, 5, 0.94), rgba(5, 5, 5, 0.64) 42%, rgba(5, 5, 5, 0.22)),
+    radial-gradient(circle at 72% 36%, rgba(245, 215, 110, 0.22), transparent 22rem),
+    url("./assets/atelier-luxury-hero.png") center/cover;
+}
+
+.global-bg-overlay {
+  background:
+    radial-gradient(circle at 80% 0%, rgba(212, 175, 55, 0.2), transparent 28rem),
+    linear-gradient(180deg, rgba(5, 5, 5, 0.54), rgba(5, 5, 5, 0.78));
+}
+
+button,
+input,
+a {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.44;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px clamp(16px, 4vw, 48px);
+  border-bottom: 1px solid rgba(230, 238, 239, 0.14);
+  background:
+    linear-gradient(180deg, rgba(15, 19, 22, 0.9), rgba(5, 6, 7, 0.76)),
+    rgba(8, 10, 11, 0.86);
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(24px) saturate(1.15);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  background: transparent;
+  color: var(--white);
+  padding: 0;
+}
+
+.brand-mark {
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(215, 221, 222, 0.68);
+  background:
+    linear-gradient(135deg, transparent 41%, rgba(242, 207, 123, 0.96) 41% 57%, transparent 57%),
+    radial-gradient(circle at 72% 22%, rgba(255, 249, 230, 0.58), transparent 22%),
+    linear-gradient(145deg, #201a10, #9f7622 62%, #0e0a05);
+  box-shadow:
+    inset 0 0 0 7px rgba(255, 255, 255, 0.035),
+    0 12px 34px rgba(242, 207, 123, 0.18);
+}
+
+.brand strong,
+.brand small {
+  display: block;
+  line-height: 1;
+  text-align: left;
+}
+
+.brand strong {
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.brand small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.nav-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.035);
+  box-shadow: var(--inner-light);
+}
+
+.nav-tabs button {
+  min-height: 38px;
+  padding: 0 16px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.nav-tabs button.active {
+  background:
+    linear-gradient(180deg, rgba(244, 247, 246, 0.96), rgba(193, 205, 207, 0.92));
+  color: var(--black);
+  box-shadow: 0 10px 28px rgba(215, 221, 222, 0.14);
+}
+
+.hero {
+  position: relative;
+  min-height: clamp(460px, 72vh, 720px);
+  display: grid;
+  align-items: end;
+  padding: clamp(28px, 6vw, 72px);
+  overflow: hidden;
+  border-bottom: 1px solid rgba(230, 238, 239, 0.16);
+}
+
+.hero-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(5, 6, 7, 0.94), rgba(5, 6, 7, 0.62) 42%, rgba(5, 6, 7, 0.2)),
+    radial-gradient(circle at 72% 36%, rgba(242, 207, 123, 0.2), transparent 22rem),
+    linear-gradient(0deg, rgba(5, 6, 7, 0.98), transparent 52%),
+    url("./assets/atelier-luxury-hero.png") center/cover;
+  transform: scale(1.02);
+}
+
+.hero-bg.video-backed {
+  background:
+    linear-gradient(90deg, rgba(5, 5, 5, 0.9), rgba(5, 5, 5, 0.56) 42%, rgba(5, 5, 5, 0.16)),
+    radial-gradient(circle at 72% 36%, rgba(245, 215, 110, 0.18), transparent 22rem),
+    linear-gradient(0deg, rgba(5, 5, 5, 0.82), rgba(5, 5, 5, 0.12) 54%, rgba(5, 5, 5, 0.44));
+}
+
+.hero-copy {
+  position: relative;
+  width: min(680px, 100%);
+  padding-bottom: 24px;
+}
+
+.eyebrow {
+  color: var(--petrol-bright);
+  text-transform: uppercase;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+.hero h1,
+.dashboard-head h1,
+.login-view h1 {
+  margin-bottom: 16px;
+  font-size: clamp(42px, 8vw, 92px);
+  line-height: 0.94;
+  letter-spacing: 0;
+  text-shadow: 0 18px 54px rgba(0, 0, 0, 0.58);
+}
+
+.hero p:not(.eyebrow) {
+  max-width: 620px;
+  color: #e4ebea;
+  font-size: clamp(16px, 2vw, 21px);
+  line-height: 1.55;
+}
+
+.hero-panel {
+  position: absolute;
+  right: clamp(18px, 5vw, 64px);
+  bottom: 32px;
+  width: min(310px, calc(100% - 36px));
+  padding: 18px;
+  border: 1px solid var(--line-strong);
+  background:
+    linear-gradient(180deg, rgba(24, 30, 34, 0.82), rgba(8, 10, 11, 0.76)),
+    var(--glass);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(22px) saturate(1.16);
+}
+
+.hero-panel span,
+.hero-panel small {
+  display: block;
+  color: var(--muted);
+}
+
+.hero-panel strong {
+  display: block;
+  margin: 6px 0;
+  font-size: 28px;
+}
+
+.workspace,
+.admin-layout,
+.barber-board {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: clamp(18px, 4vw, 44px);
+}
+
+.public-grid {
+  display: flex;
+  flex-direction: column;
+  width: min(1180px, 100%);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.checkout {
+  position: relative;
+  align-self: start;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  gap: 0;
+  box-sizing: border-box;
+}
+
+.rail,
+.booking-surface,
+.checkout,
+.admin-sidebar,
+.admin-main,
+.login-panel {
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.025)),
+    var(--glass);
+  box-shadow: var(--shadow), var(--inner-light);
+  backdrop-filter: blur(20px) saturate(1.12);
+}
+
+.rail,
+.booking-surface,
+.checkout,
+.admin-sidebar,
+.admin-main {
+  padding: 18px;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.section-title span {
+  display: grid;
+  place-items: center;
+  min-width: 34px;
+  height: 34px;
+  border: 1px solid rgba(215, 221, 222, 0.42);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--silver);
+  font-weight: 800;
+}
+
+.section-title h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.barber-list {
+  display: grid;
+  gap: 10px;
+}
+
+.barber-option {
+  display: grid;
+  gap: 8px;
+}
+
+.mini-wa,
+.inline-link {
+  color: var(--petrol-bright);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.mini-wa {
+  justify-self: end;
+  font-size: 12px;
+  margin-right: 10px;
+}
+
+.rail > .barber-list {
+  max-height: 360px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 8px;
+  box-sizing: border-box;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(242, 207, 123, 0.74) rgba(255, 255, 255, 0.06);
+}
+
+.rail > .barber-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.rail > .barber-list::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.rail > .barber-list::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(215, 221, 222, 0.72), rgba(242, 207, 123, 0.74));
+  border: 2px solid rgba(8, 10, 11, 0.88);
+}
+
+.barber-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 78px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: var(--glass-soft);
+  color: var(--white);
+  text-align: left;
+  box-shadow: var(--inner-light);
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.barber-card.active {
+  border-color: rgba(242, 207, 123, 0.84);
+  background:
+    linear-gradient(135deg, rgba(242, 207, 123, 0.17), rgba(255, 255, 255, 0.035));
+  box-shadow:
+    0 18px 46px rgba(159, 118, 34, 0.2),
+    var(--inner-light);
+}
+
+.barber-card:hover {
+  border-color: rgba(215, 221, 222, 0.32);
+  transform: translateY(-1px);
+}
+
+.barber-card.inactive {
+  opacity: 0.56;
+  filter: grayscale(0.35);
+}
+
+.barber-card.inactive:hover {
+  border-color: var(--line);
+  transform: none;
+}
+
+.barber-card strong,
+.barber-card small,
+.selected-card strong,
+.selected-card small {
+  display: block;
+}
+
+.barber-card small,
+.selected-card small,
+.slot small,
+.slot-client small {
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(238, 243, 242, 0.34);
+  background-size: cover !important;
+  background-position: center !important;
+  color: var(--black);
+  font-weight: 900;
+  box-shadow: inset 0 0 0 1px rgba(5, 6, 7, 0.4), 0 12px 28px rgba(0, 0, 0, 0.34);
+}
+
+.avatar.lg {
+  width: 68px;
+  height: 68px;
+}
+
+.avatar.md {
+  width: 50px;
+  height: 50px;
+}
+
+.avatar span {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  background: rgba(238, 243, 242, 0.18);
+}
+
+.date-strip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(62px, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+
+.date-strip button {
+  min-height: 64px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--muted);
+  box-shadow: var(--inner-light);
+}
+
+.date-strip button.active {
+  background:
+    linear-gradient(180deg, rgba(242, 207, 123, 0.34), rgba(159, 118, 34, 0.82));
+  border-color: rgba(242, 207, 123, 0.92);
+  color: var(--white);
+  box-shadow: 0 18px 42px rgba(159, 118, 34, 0.26), var(--inner-light);
+}
+
+.date-strip span,
+.date-strip strong {
+  display: block;
+}
+
+.date-strip strong {
+  margin-top: 4px;
+  font-size: 20px;
+}
+
+.slot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
+  gap: 10px;
+}
+
+.slot {
+  min-height: 84px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  color: var(--white);
+  text-align: left;
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: var(--inner-light);
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.slot strong,
+.slot span,
+.slot small {
+  display: block;
+}
+
+.slot strong {
+  font-size: 19px;
+}
+
+.slot.picked,
+.slot.available:hover {
+  outline: 1px solid rgba(215, 221, 222, 0.92);
+  background:
+    linear-gradient(135deg, rgba(242, 207, 123, 0.17), rgba(244, 247, 246, 0.08));
+  transform: translateY(-1px);
+}
+
+.available {
+  --state: #79e0b2;
+}
+
+.reserved {
+  --state: #ff6f78;
+}
+
+.fixed {
+  --state: #6aa7ff;
+}
+
+.blocked {
+  --state: #aeb8bb;
+}
+
+.slot.available,
+.slot-row.available {
+  border-color: rgba(121, 224, 178, 0.38);
+}
+
+.slot.reserved,
+.slot-row.reserved {
+  border-color: rgba(255, 111, 120, 0.44);
+  background: rgba(255, 111, 120, 0.1);
+}
+
+.slot.fixed,
+.slot-row.fixed {
+  border-color: rgba(106, 167, 255, 0.44);
+  background: rgba(106, 167, 255, 0.1);
+}
+
+.slot.blocked,
+.slot-row.blocked {
+  border-color: rgba(174, 184, 187, 0.44);
+  background: rgba(174, 184, 187, 0.09);
+}
+
+.selected-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 80px;
+  padding: 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(135deg, rgba(215, 221, 222, 0.09), rgba(242, 207, 123, 0.075));
+  box-shadow: var(--inner-light);
+}
+
+.selected-card > div:last-child {
+  min-width: 0;
+}
+
+.selected-card strong,
+.selected-card small {
+  overflow-wrap: anywhere;
+}
+
+.form-stack {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+input {
+  width: 100%;
+  max-width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(230, 238, 239, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(0, 0, 0, 0.18));
+  color: var(--white);
+  padding: 0 12px;
+  outline: 0;
+  box-shadow: var(--inner-light);
+}
+
+select {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(230, 238, 239, 0.18);
+  background: var(--graphite);
+  color: var(--white);
+  padding: 0 12px;
+  outline: 0;
+  box-shadow: var(--inner-light);
+}
+
+input:focus {
+  border-color: var(--petrol-bright);
+  box-shadow: 0 0 0 3px rgba(242, 207, 123, 0.15), var(--inner-light);
+}
+
+.primary-action,
+.secondary-action,
+.icon-action {
+  min-height: 44px;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  padding: 0 14px;
+  text-decoration: none;
+}
+
+.primary-action {
+  background:
+    linear-gradient(180deg, #ffffff, #c7d2d4);
+  color: var(--black);
+  font-weight: 800;
+  box-shadow:
+    0 18px 38px rgba(215, 221, 222, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.secondary-action,
+.icon-action {
+  display: inline-grid;
+  place-items: center;
+  border-color: var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.03));
+  color: var(--white);
+  box-shadow: var(--inner-light);
+}
+
+.icon-action {
+  min-height: 36px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.danger {
+  color: #ffb4b4;
+}
+
+.microcopy {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.form-error {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid rgba(255, 111, 120, 0.42);
+  background: rgba(255, 111, 120, 0.1);
+  color: #ffc4c8;
+  font-weight: 800;
+}
+
+.form-note {
+  margin: 0 0 14px;
+  padding: 12px;
+  border: 1px solid rgba(242, 207, 123, 0.38);
+  background: rgba(242, 207, 123, 0.1);
+  color: var(--petrol-bright);
+  font-weight: 800;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.dashboard-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: clamp(24px, 5vw, 54px) clamp(18px, 4vw, 48px);
+  border-bottom: 1px solid var(--line);
+  background:
+    radial-gradient(circle at 86% 0%, rgba(242, 207, 123, 0.16), transparent 24rem),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent);
+}
+
+.dashboard-head h1,
+.login-view h1 {
+  font-size: clamp(34px, 5vw, 64px);
+  margin-bottom: 0;
+}
+
+.metric-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(92px, 1fr));
+  gap: 10px;
+}
+
+.metric-row div {
+  min-height: 76px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.028));
+  box-shadow: var(--inner-light);
+}
+
+.metric-row strong,
+.metric-row span {
+  display: block;
+}
+
+.metric-row strong {
+  font-size: 26px;
+}
+
+.metric-row span {
+  color: var(--muted);
+}
+
+.admin-layout {
+  display: grid;
+  grid-template-columns: 350px minmax(0, 1fr);
+  gap: 18px;
+}
+
+.admin-stack {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: clamp(18px, 4vw, 44px);
+  display: grid;
+  gap: 18px;
+}
+
+.admin-barber-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 12px;
+}
+
+.admin-person-card {
+  min-height: 112px;
+}
+
+.admin-account-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.admin-account-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: var(--glass-soft);
+  box-shadow: var(--inner-light);
+}
+
+.admin-account-card.locked {
+  border-color: rgba(242, 207, 123, 0.38);
+}
+
+.admin-account-card h3,
+.admin-account-card p {
+  margin-bottom: 6px;
+}
+
+.background-preview {
+  width: 100%;
+  max-height: 280px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  border-radius: 18px;
+  background: #050505;
+  box-shadow: var(--inner-light);
+}
+
+.static-preview {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  background:
+    linear-gradient(90deg, rgba(5, 5, 5, 0.78), rgba(5, 5, 5, 0.36)),
+    url("./assets/atelier-luxury-hero.png") center/cover;
+  color: var(--petrol-bright);
+  font-weight: 900;
+}
+
+.selected-admin-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.profile-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  margin-bottom: 18px;
+  border: 1px solid var(--line);
+  background: var(--glass-soft);
+  box-shadow: var(--inner-light);
+}
+
+.danger-zone {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 111, 120, 0.22);
+}
+
+.compact .barber-card {
+  min-height: 62px;
+}
+
+.editor-card {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.toggle-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toggle-line input {
+  width: 18px;
+  min-height: 18px;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agenda-toolbar {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  align-items: start;
+}
+
+.status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 16px;
+}
+
+.status-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  box-shadow: var(--inner-light);
+}
+
+.status-legend i {
+  width: 10px;
+  height: 10px;
+  background: var(--state);
+}
+
+.admin-slots {
+  display: grid;
+  gap: 10px;
+}
+
+.slot-row {
+  display: grid;
+  grid-template-columns: 110px minmax(160px, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  min-height: 76px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.026));
+  box-shadow: var(--inner-light);
+  color: var(--white);
+  text-align: left;
+}
+
+button.slot-row {
+  width: 100%;
+  cursor: pointer;
+}
+
+.slot-row.picked {
+  outline: 1px solid rgba(215, 221, 222, 0.9);
+  box-shadow: 0 18px 42px rgba(242, 207, 123, 0.17), var(--inner-light);
+}
+
+.week-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 10px;
+}
+
+.week-cards button {
+  min-height: 88px;
+  border: 1px solid var(--line);
+  background: var(--glass-soft);
+  color: var(--muted);
+  box-shadow: var(--inner-light);
+}
+
+.week-cards button.active {
+  border-color: rgba(242, 207, 123, 0.92);
+  background: linear-gradient(180deg, rgba(242, 207, 123, 0.34), rgba(159, 118, 34, 0.82));
+  color: var(--white);
+}
+
+.week-cards span,
+.week-cards strong {
+  display: block;
+}
+
+.week-cards strong {
+  margin-top: 4px;
+  font-size: 26px;
+}
+
+.slot-row > div:first-child strong,
+.slot-row > div:first-child span,
+.slot-client strong,
+.slot-client small {
+  display: block;
+}
+
+.slot-row > div:first-child strong {
+  font-size: 20px;
+}
+
+.slot-row > div:first-child span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+dialog {
+  width: min(430px, calc(100% - 32px));
+  border: 1px solid var(--line-strong);
+  background:
+    linear-gradient(180deg, rgba(28, 35, 39, 0.96), rgba(8, 10, 11, 0.96));
+  color: var(--white);
+  padding: 0;
+  box-shadow: var(--shadow), var(--inner-light);
+}
+
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(10px);
+}
+
+.modal-card {
+  padding: 18px;
+}
+
+.confirm-card {
+  display: grid;
+  gap: 16px;
+}
+
+.confirm-card p {
+  margin: 0;
+  color: var(--silver);
+  font-size: 18px;
+  line-height: 1.45;
+}
+
+.danger-action {
+  background: linear-gradient(180deg, #ffe9a7, #c49a3a);
+}
+
+.booking-confirm-card {
+  width: min(520px, calc(100vw - 34px));
+}
+
+.confirmation-summary {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) 1fr;
+  gap: 10px 16px;
+  padding: 16px;
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  border-radius: 18px;
+  background: rgba(212, 175, 55, 0.08);
+}
+
+.confirmation-summary span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.confirmation-summary strong {
+  color: var(--white);
+  overflow-wrap: anywhere;
+}
+
+.login-view {
+  display: grid;
+  min-height: calc(100vh - 75px);
+  place-items: center;
+  padding: 20px;
+}
+
+.login-panel {
+  width: min(480px, 100%);
+  padding: clamp(24px, 5vw, 46px);
+}
+
+.barber-heading {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.barber-heading span {
+  color: var(--muted);
+}
+
+.readonly .slot-row {
+  grid-template-columns: 120px 1fr;
+}
+
+.realtime-toast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  max-width: calc(100vw - 36px);
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(24, 30, 34, 0.9), rgba(8, 10, 11, 0.88));
+  color: var(--silver);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+}
+
+.realtime-toast span {
+  width: 9px;
+  height: 9px;
+  background: #9fe6d5;
+}
+
+.shake {
+  animation: shake 0.35s;
+}
+
+@keyframes shake {
+  20% {
+    transform: translateX(-5px);
+  }
+  40% {
+    transform: translateX(5px);
+  }
+  60% {
+    transform: translateX(-3px);
+  }
+  80% {
+    transform: translateX(3px);
+  }
+}
+
+@media (max-width: 1100px) {
+  .admin-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .checkout {
+    max-width: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 14px;
+  }
+
+  .nav-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .nav-tabs button {
+    padding: 0 8px;
+  }
+
+  .hero {
+    min-height: 560px;
+    padding: 22px;
+  }
+
+  .hero-bg {
+    background:
+      linear-gradient(0deg, rgba(5, 6, 7, 0.97), rgba(5, 6, 7, 0.46)),
+      radial-gradient(circle at 70% 22%, rgba(242, 207, 123, 0.2), transparent 18rem),
+      url("./assets/atelier-luxury-hero.png") center/cover;
+  }
+
+  .hero-panel {
+    position: relative;
+    right: auto;
+    bottom: auto;
+    margin-top: 22px;
+  }
+
+  .date-strip {
+    grid-template-columns: repeat(7, 68px);
+  }
+
+  .dashboard-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .metric-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .agenda-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .slot-row,
+  .readonly .slot-row {
+    grid-template-columns: 1fr;
+  }
+
+  .row-actions {
+    justify-content: stretch;
+  }
+
+  .row-actions > * {
+    flex: 1 1 92px;
+  }
+
+  .checkout {
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .dashboard-cards {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .dashboard-cards div {
+    min-height: 92px;
+    padding: 14px;
+  }
+
+  .slot,
+  .slot-row,
+  .barber-card {
+    min-height: 74px;
+  }
+
+  .primary-action,
+  .secondary-action,
+  .icon-action,
+  input,
+  select {
+    min-height: 48px;
+  }
+}
+
+@media (max-width: 440px) {
+  .dashboard-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Barber Delux premium gold refinement */
+:root {
+  --black: #050505;
+  --matte: #0b0b0b;
+  --graphite: #111111;
+  --graphite-2: #1a1a1a;
+  --petrol: #d4af37;
+  --petrol-bright: #f5d76e;
+  --white: #ffffff;
+  --muted: #b8b8b8;
+  --silver: #e7dfc4;
+  --line: rgba(212, 175, 55, 0.35);
+  --line-strong: rgba(245, 215, 110, 0.58);
+  --glass: rgba(17, 17, 17, 0.78);
+  --glass-soft: rgba(212, 175, 55, 0.07);
+  --shadow: 0 26px 80px rgba(0, 0, 0, 0.62);
+  --inner-light: inset 0 1px 0 rgba(245, 215, 110, 0.14);
+}
+
+body {
+  background:
+    radial-gradient(circle at 78% -10%, rgba(245, 215, 110, 0.22), transparent 32rem),
+    radial-gradient(circle at 12% 18%, rgba(138, 106, 31, 0.18), transparent 26rem),
+    linear-gradient(135deg, #050505 0%, #10100d 42%, #090806 100%);
+}
+
+.topbar {
+  padding: 18px clamp(16px, 4vw, 52px);
+  border-bottom-color: rgba(212, 175, 55, 0.28);
+  background:
+    linear-gradient(180deg, rgba(18, 18, 16, 0.94), rgba(5, 5, 5, 0.82)),
+    rgba(5, 5, 5, 0.92);
+  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.48);
+}
+
+.brand-mark,
+.section-title span,
+.realtime-toast span {
+  border-radius: 10px;
+}
+
+.brand-mark {
+  border-color: rgba(245, 215, 110, 0.78);
+  background:
+    linear-gradient(135deg, #6d5117 0%, #f5d76e 46%, #8a6a1f 48%, #2b210c 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 14px 34px rgba(212, 175, 55, 0.22);
+}
+
+.brand strong {
+  font-size: 20px;
+}
+
+.nav-tabs {
+  border-radius: 18px;
+  border-color: rgba(212, 175, 55, 0.26);
+  background: rgba(17, 17, 17, 0.72);
+  padding: 7px;
+}
+
+.nav-tabs button {
+  border-radius: 14px;
+  color: var(--muted);
+  transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.nav-tabs button:hover {
+  color: var(--white);
+  background: rgba(212, 175, 55, 0.1);
+}
+
+.nav-tabs button.active,
+.primary-action {
+  background: linear-gradient(180deg, #f5d76e 0%, #d4af37 52%, #8a6a1f 100%);
+  color: #090806;
+  box-shadow:
+    0 16px 36px rgba(212, 175, 55, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.46);
+}
+
+.hero {
+  border-bottom-color: rgba(212, 175, 55, 0.28);
+}
+
+.hero-bg {
+  background:
+    linear-gradient(90deg, rgba(5, 5, 5, 0.94), rgba(5, 5, 5, 0.64) 42%, rgba(5, 5, 5, 0.22)),
+    radial-gradient(circle at 72% 36%, rgba(245, 215, 110, 0.22), transparent 22rem),
+    linear-gradient(0deg, rgba(5, 5, 5, 0.98), transparent 52%),
+    url("./assets/atelier-luxury-hero.png") center/cover;
+}
+
+.rail,
+.booking-surface,
+.checkout,
+.admin-sidebar,
+.admin-main,
+.login-panel,
+.barber-board,
+.hero-panel {
+  border-color: rgba(212, 175, 55, 0.32);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(212, 175, 55, 0.035)),
+    linear-gradient(135deg, rgba(17, 17, 17, 0.92), rgba(8, 8, 8, 0.88));
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.56),
+    inset 0 1px 0 rgba(245, 215, 110, 0.12);
+}
+
+.section-title span {
+  border-color: rgba(245, 215, 110, 0.48);
+  background:
+    linear-gradient(180deg, rgba(245, 215, 110, 0.15), rgba(138, 106, 31, 0.14));
+  color: #f5d76e;
+}
+
+.barber-card,
+.slot,
+.slot-row,
+.selected-card,
+.metric-row div,
+.status-legend span,
+.week-cards button,
+.admin-account-card,
+.profile-card {
+  border-color: rgba(212, 175, 55, 0.28);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(212, 175, 55, 0.035)),
+    #111111;
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(245, 215, 110, 0.1);
+}
+
+.barber-card:hover,
+.slot.available:hover,
+.slot.picked,
+.slot-row.picked,
+.week-cards button.active {
+  border-color: rgba(245, 215, 110, 0.76);
+  background:
+    linear-gradient(135deg, rgba(212, 175, 55, 0.18), rgba(255, 255, 255, 0.035)),
+    #141414;
+  box-shadow:
+    0 20px 50px rgba(212, 175, 55, 0.15),
+    inset 0 1px 0 rgba(245, 215, 110, 0.18);
+}
+
+.barber-card.active,
+.date-strip button.active,
+.week-cards button.active {
+  border-color: rgba(245, 215, 110, 0.86);
+  background: linear-gradient(180deg, rgba(245, 215, 110, 0.28), rgba(138, 106, 31, 0.64));
+}
+
+.date-strip button.past-date,
+.date-strip button:disabled.past-date {
+  opacity: 0.38;
+  filter: grayscale(0.7);
+  border-color: rgba(184, 184, 184, 0.18);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.date-strip button.past-date:hover {
+  transform: none;
+  box-shadow: var(--inner-light);
+}
+
+button,
+input,
+select,
+dialog,
+.primary-action,
+.secondary-action,
+.icon-action {
+  border-radius: 14px;
+}
+
+input,
+select {
+  border-color: rgba(212, 175, 55, 0.28);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0.26)),
+    #111111;
+}
+
+textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 88px;
+  border: 1px solid rgba(212, 175, 55, 0.28);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0.26)),
+    #111111;
+  color: var(--white);
+  padding: 12px;
+  outline: 0;
+  font: inherit;
+}
+
+textarea:focus {
+  border-color: rgba(245, 215, 110, 0.78);
+  box-shadow: 0 0 0 4px rgba(212, 175, 55, 0.13);
+}
+
+input:focus,
+select:focus {
+  border-color: rgba(245, 215, 110, 0.78);
+  box-shadow: 0 0 0 4px rgba(212, 175, 55, 0.13);
+}
+
+.secondary-action,
+.icon-action {
+  border-color: rgba(212, 175, 55, 0.32);
+  background:
+    linear-gradient(180deg, rgba(245, 215, 110, 0.08), rgba(255, 255, 255, 0.025)),
+    #111111;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.primary-action,
+.secondary-action,
+.icon-action {
+  font-weight: 800;
+}
+
+.primary-action:hover,
+.secondary-action:hover,
+.icon-action:hover {
+  transform: translateY(-1px);
+  border-color: rgba(245, 215, 110, 0.78);
+  box-shadow: 0 18px 38px rgba(212, 175, 55, 0.16);
+}
+
+.danger,
+.form-error {
+  color: #ffc7c7;
+}
+
+dialog {
+  border-color: rgba(245, 215, 110, 0.42);
+  background:
+    radial-gradient(circle at 80% 0%, rgba(212, 175, 55, 0.16), transparent 18rem),
+    linear-gradient(180deg, #1a1a1a, #080808);
+  box-shadow: 0 40px 120px rgba(0, 0, 0, 0.72);
+}
+
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(7px);
+}
+
+.date-strip button,
+.week-cards button {
+  border-radius: 16px;
+}
+
+.dashboard-head {
+  background:
+    radial-gradient(circle at 82% 0%, rgba(212, 175, 55, 0.18), transparent 26rem),
+    linear-gradient(180deg, rgba(212, 175, 55, 0.05), transparent);
+}
+
+.realtime-toast {
+  border-color: rgba(212, 175, 55, 0.34);
+  border-radius: 999px;
+  animation: toastFloat 260ms ease both;
+}
+
+.dashboard-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+}
+
+.dashboard-cards div {
+  position: relative;
+  overflow: hidden;
+  min-height: 104px;
+  padding: 16px;
+  border: 1px solid rgba(212, 175, 55, 0.28);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(245, 215, 110, 0.09), rgba(255, 255, 255, 0.025)),
+    #111111;
+  box-shadow: var(--inner-light);
+}
+
+.dashboard-cards div::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-120%);
+  background: linear-gradient(90deg, transparent, rgba(245, 215, 110, 0.08), transparent);
+  animation: softShimmer 3.8s ease-in-out infinite;
+}
+
+.dashboard-cards span,
+.dashboard-cards strong {
+  display: block;
+  position: relative;
+  z-index: 1;
+}
+
+.dashboard-cards span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.dashboard-cards strong {
+  margin-top: 12px;
+  font-size: clamp(24px, 4vw, 34px);
+  line-height: 1.05;
+}
+
+.client-history {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 12px;
+  padding: 12px;
+  border: 1px solid rgba(212, 175, 55, 0.24);
+  border-radius: 14px;
+  background: rgba(212, 175, 55, 0.055);
+}
+
+.client-history span {
+  color: var(--muted);
+}
+
+.sound-toggle {
+  margin-top: 14px;
+}
+
+.admin-main,
+.rail,
+.booking-surface,
+.checkout,
+.login-panel,
+.barber-board,
+.modal-card {
+  animation: panelIn 220ms ease both;
+}
+
+.slot,
+.slot-row,
+.barber-card,
+.date-strip button,
+.week-cards button {
+  will-change: transform, border-color, box-shadow;
+}
+
+@keyframes panelIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toastFloat {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes softShimmer {
+  0%,
+  64% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+@media (max-width: 760px) {
+  .rail,
+  .booking-surface,
+  .checkout,
+  .admin-main,
+  .login-panel,
+  .barber-board {
+    border-radius: 18px;
+  }
+
+  .hero-bg {
+    background:
+      linear-gradient(0deg, rgba(5, 5, 5, 0.97), rgba(5, 5, 5, 0.46)),
+      radial-gradient(circle at 70% 22%, rgba(245, 215, 110, 0.22), transparent 18rem),
+      url("./assets/atelier-luxury-hero.png") center/cover;
+  }
+}
+
