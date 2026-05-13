@@ -525,6 +525,144 @@ p {
   font-size: 19px;
 }
 
+.public-slots {
+  grid-template-columns: repeat(auto-fit, minmax(188px, 1fr));
+  gap: 14px;
+}
+
+.public-slots .slot {
+  position: relative;
+  min-height: 132px;
+  padding: 16px 16px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.025)),
+    linear-gradient(145deg, rgba(14, 18, 24, 0.96), rgba(29, 34, 42, 0.92));
+  box-shadow:
+    0 20px 36px rgba(4, 6, 10, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  display: grid;
+  align-content: space-between;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.public-slots .slot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 46%);
+  pointer-events: none;
+}
+
+.public-slots .slot strong,
+.public-slots .slot span,
+.public-slots .slot small {
+  position: relative;
+  z-index: 1;
+}
+
+.public-slots .slot strong {
+  font-size: 22px;
+  line-height: 1.04;
+  letter-spacing: -0.03em;
+}
+
+.public-slots .slot span {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(236, 242, 248, 0.74);
+}
+
+.public-slots .slot .slot-state {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.public-slots .slot.available {
+  border-color: rgba(67, 210, 158, 0.34);
+  background:
+    linear-gradient(180deg, rgba(95, 237, 185, 0.12), rgba(255, 255, 255, 0.02)),
+    linear-gradient(145deg, rgba(10, 31, 27, 0.96), rgba(18, 42, 38, 0.92));
+}
+
+.public-slots .slot.available .slot-state {
+  background: rgba(79, 221, 169, 0.18);
+  color: #8ef3cf;
+}
+
+.public-slots .slot.reserved {
+  border-color: rgba(233, 114, 85, 0.36);
+  background:
+    linear-gradient(180deg, rgba(233, 114, 85, 0.12), rgba(255, 255, 255, 0.02)),
+    linear-gradient(145deg, rgba(39, 18, 17, 0.96), rgba(56, 27, 24, 0.92));
+}
+
+.public-slots .slot.reserved .slot-state {
+  background: rgba(233, 114, 85, 0.18);
+  color: #ffc2b3;
+}
+
+.public-slots .slot.fixed {
+  border-color: rgba(86, 135, 241, 0.34);
+  background:
+    linear-gradient(180deg, rgba(86, 135, 241, 0.13), rgba(255, 255, 255, 0.02)),
+    linear-gradient(145deg, rgba(14, 22, 43, 0.96), rgba(22, 32, 57, 0.92));
+}
+
+.public-slots .slot.fixed .slot-state {
+  background: rgba(86, 135, 241, 0.18);
+  color: #c7d9ff;
+}
+
+.public-slots .slot.blocked {
+  border-color: rgba(156, 166, 180, 0.28);
+  background:
+    linear-gradient(180deg, rgba(156, 166, 180, 0.11), rgba(255, 255, 255, 0.02)),
+    linear-gradient(145deg, rgba(25, 28, 34, 0.96), rgba(35, 39, 47, 0.92));
+}
+
+.public-slots .slot.blocked .slot-state {
+  background: rgba(156, 166, 180, 0.16);
+  color: #dde4ed;
+}
+
+.public-slots .slot.picked,
+.public-slots .slot.available:hover {
+  border-color: rgba(255, 255, 255, 0.26);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.035)),
+    linear-gradient(145deg, rgba(23, 28, 37, 0.98), rgba(34, 39, 49, 0.96));
+  box-shadow:
+    0 22px 40px rgba(8, 12, 19, 0.32),
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transform: translateY(-2px);
+}
+
+.public-slots .slot.picked .slot-state,
+.public-slots .slot.available:hover .slot-state {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+.public-slots .slot:disabled {
+  cursor: not-allowed;
+  opacity: 0.94;
+  transform: none;
+}
+
 .slot.picked,
 .slot.available:hover {
   outline: 1px solid rgba(215, 221, 222, 0.92);
@@ -1275,6 +1413,32 @@ dialog::backdrop {
   input,
   select {
     min-height: 48px;
+  }
+
+  .public-slots {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .public-slots .slot {
+    min-height: 118px;
+    padding: 14px;
+    border-radius: 20px;
+  }
+
+  .public-slots .slot strong {
+    font-size: 18px;
+  }
+
+  .public-slots .slot .slot-state {
+    padding: 5px 9px;
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 520px) {
+  .public-slots {
+    grid-template-columns: 1fr;
   }
 }
 

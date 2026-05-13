@@ -497,6 +497,14 @@ function publicSlotLabel(status, dayBlocked) {
   return dayBlocked ? "No disponible" : "Ocupado";
 }
 
+function publicSlotStateTag(status, dayBlocked, expired) {
+  if (expired) return "NO DISPONIBLE";
+  if (dayBlocked || status === "blocked") return "BLOQUEADO";
+  if (status === "fixed") return "FIJADA";
+  if (status === "reserved") return "OCUPADO";
+  return "DISPONIBLE";
+}
+
 function dateAnchor(date) {
   return new Date(`${date}T00:00:00`);
 }
@@ -675,6 +683,7 @@ function renderPublic() {
               const expired = slotHasPassed(app.selectedDate, time);
               const disabled = status !== "available" || expired;
               return `<button class="slot ${STATUS[status].tone} ${time === app.selectedSlot ? "picked" : ""}" data-slot="${time}" ${disabled ? "disabled" : ""}>
+                <small class="slot-state">${publicSlotStateTag(status, dayBlocked, expired)}</small>
                 <strong>${slotRange(time)}</strong>
                 <span>${expired ? "No disponible" : publicSlotLabel(status, dayBlocked)}</span>
               </button>`;
