@@ -77,7 +77,7 @@ body {
 }
 
 .app-view {
-  animation: viewFadeIn 180ms ease;
+  min-width: 0;
 }
 
 @keyframes viewFadeIn {
@@ -288,12 +288,68 @@ p {
   padding: clamp(18px, 4vw, 44px);
 }
 
-.public-grid {
+.public-grid,
+.public-flow {
   display: flex;
   flex-direction: column;
   width: min(1180px, 100%);
   gap: 18px;
   align-items: stretch;
+}
+
+.flow-card {
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.025)),
+    var(--glass);
+  box-shadow: var(--shadow), var(--inner-light);
+  backdrop-filter: blur(20px) saturate(1.12);
+  overflow: hidden;
+  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.flow-card.open {
+  border-color: rgba(242, 207, 123, 0.28);
+}
+
+.flow-card.locked {
+  opacity: 0.9;
+}
+
+.flow-card-head {
+  padding: 18px;
+}
+
+.flow-card-body {
+  padding: 0 18px 18px;
+  animation: viewFadeIn 160ms ease;
+}
+
+.flow-summary {
+  margin-top: -4px;
+}
+
+.flow-toolbar {
+  margin-top: 14px;
+  margin-bottom: 0;
+  flex-wrap: wrap;
+}
+
+.compact-selected {
+  margin-top: 4px;
+  padding: 12px 14px;
+}
+
+.summary-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid rgba(242, 207, 123, 0.26);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--petrol-bright);
+  font-weight: 800;
 }
 
 .checkout {

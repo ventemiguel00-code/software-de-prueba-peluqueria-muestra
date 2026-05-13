@@ -897,6 +897,10 @@ function ensurePersistentBackground() {
 }
 
 function appShell(content) {
+  return `<div class="app-view">${content}</div>`;
+}
+
+function renderLayoutShell() {
   const tabs = [
     ["public", "Agenda"],
     ["admin", "Admin"],
@@ -909,18 +913,13 @@ function appShell(content) {
         <span><strong>Barber</strong><small>Delux</small></span>
       </button>
       <nav class="nav-tabs" aria-label="Navegacion principal">
-        ${tabs
-          .map(
-            ([id, label]) =>
-              `<button class="${app.view === id ? "active" : ""}" data-view="${id}">${label}</button>`
-          )
-          .join("")}
+        ${tabs.map(([id, label]) => `<button class="${app.view === id ? "active" : ""}" data-view="${id}">${label}</button>`).join("")}
       </nav>
     </header>
-    <main><div class="app-view">${content}</div></main>
+    <main><div id="view-root"></div></main>
     <div class="realtime-toast">
       <span></span>
-      <strong>${escapeHTML(app.lastEvent)}</strong>
+      <strong></strong>
     </div>
   `;
 }
@@ -953,6 +952,20 @@ function dateStrip(selected, onClickAttr = "data-date") {
   }).join("")}</div>`;
 }
 
+function publicFlowCard({ step, title, state = "locked", summary = "", actions = "", body = "" }) {
+  return `<section class="flow-card ${state}">
+    <div class="flow-card-head">
+      <div class="section-title">
+        <span>${step}</span>
+        <h2>${title}</h2>
+      </div>
+      ${summary ? `<div class="flow-summary">${summary}</div>` : ""}
+      ${actions ? `<div class="step-toolbar flow-toolbar">${actions}</div>` : ""}
+    </div>
+    ${state === "open" ? `<div class="flow-card-body">${body}</div>` : ""}
+  </section>`;
+}
+
 function renderPublic() {
   if (isPastDate(app.selectedDate)) {
     app.selectedDate = todayISO();
@@ -965,10 +978,39 @@ function renderPublic() {
   const hasSelectedBarber = Boolean(selected);
   const hasSelectedDay = hasSelectedBarber && app.publicDaySelected;
   const hasSelectedSlot = hasSelectedDay && Boolean(app.selectedSlot);
-  const publicStep = hasSelectedSlot ? "step-4" : hasSelectedDay ? "step-3" : hasSelectedBarber ? "step-2" : "step-1";
   const availability = hasSelectedDay
     ? baseSlots.map((time) => ({ time, ...statusFor(selected.id, app.selectedDate, time) }))
     : [];
+  const selectedDayLabel = hasSelectedDay
+    ? `${longDayNames[new Date(`${app.selectedDate}T00:00:00`).getDay()]} · ${app.selectedDate}`
+    : "";
+  const barberSummary = selected
+    ? `<div class="selected-card compact-selected">
+        ${avatar(selected, "md")}
+        <div>
+          <strong>${escapeHTML(selected.name)}</strong>
+          <small>${escapeHTML(selected.specialty || "Servicio premium")}</small>
+        </div>
+      </div>`
+    : `<p class="microcopy">Elige un barbero para continuar.</p>`;
+  const daySummary = hasSelectedDay
+    ? `<div class="selected-card compact-selected">
+        <div class="summary-badge">${dayNames[new Date(`${app.selectedDate}T00:00:00`).getDay()]}</div>
+        <div>
+          <strong>${escapeHTML(selectedDayLabel)}</strong>
+          <small>Dia activo para consultar disponibilidad</small>
+        </div>
+      </div>`
+    : `<p class="microcopy">Selecciona primero un barbero para abrir este paso.</p>`;
+  const slotSummary = hasSelectedSlot
+    ? `<div class="selected-card compact-selected">
+        <div class="summary-badge">03</div>
+        <div>
+          <strong>${slotRange(app.selectedSlot)}</strong>
+          <small>${escapeHTML(selectedDayLabel)}</small>
+        </div>
+      </div>`
+    : `<p class="microcopy">Selecciona un dia para ver y escoger un horario.</p>`;
 
   return appShell(`
     <section class="hero">
@@ -980,13 +1022,16 @@ function renderPublic() {
       </div>
     </section>
 
-    <section class="workspace public-grid ${publicStep}">
-      <aside class="rail">
-        <div class="section-title">
-          <span>01</span>
-          <h2>Elige barbero</h2>
-        </div>
-        <div class="barber-list">
+    <section class="workspace public-flow">
+      ${publicFlowCard({
+        step: "01",
+        title: "Elegir barbero",
+        state: hasSelectedBarber ? "compact" : "open",
+        summary: barberSummary,
+        actions: hasSelectedBarber
+          ? `<button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button>`
+          : "",
+        body: `<div class="barber-list">
           ${publicBarbers
             .map(
               (barber) => `
@@ -999,80 +1044,79 @@ function renderPublic() {
               </div>`
             )
             .join("")}
-        </div>
-      </aside>
+        </div>`,
+      })}
 
-      ${
-        hasSelectedBarber
-          ? `<section class="booking-surface">
-        <div class="section-title">
-          <span>02</span>
-          <h2>Selecciona dia</h2>
-        </div>
-        <div class="step-toolbar">
-          <p class="microcopy">Primero elige el dia para ver los horarios disponibles.</p>
-          <button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button>
-        </div>
-        ${dateStrip(app.selectedDate, "data-public-date")}
-      </section>`
-          : ""
-      }
-
-      ${
-        hasSelectedDay
-          ? `<section class="booking-surface">
-        <div class="section-title">
-          <span>03</span>
-          <h2>Selecciona horario</h2>
-        </div>
-        <div class="step-toolbar">
-          <p class="microcopy">${longDayNames[new Date(`${app.selectedDate}T00:00:00`).getDay()]} · ${app.selectedDate}</p>
-          <button class="secondary-action" type="button" data-reset-day>Cambiar dia</button>
-        </div>
-        <div class="slot-grid public-slots">
-          ${availability
-            .map(({ time, status, appointment, dayBlocked }) => {
-              const expired = slotHasPassed(app.selectedDate, time);
-              const disabled = status !== "available" || expired;
-              return `<button class="slot ${STATUS[status].tone} ${time === app.selectedSlot ? "picked" : ""}" data-slot="${time}" ${disabled ? "disabled" : ""}>
-                <small class="slot-state">${publicSlotStateTag(status, dayBlocked, expired)}</small>
-                <strong>${slotRange(time)}</strong>
-                <span>${expired ? "No disponible" : publicSlotLabel(status, dayBlocked)}</span>
-              </button>`;
-            })
-            .join("")}
-        </div>
-      </section>`
-          : ""
-      }
-
-      ${
-        hasSelectedSlot
-          ? `<aside class="checkout">
-        <div class="section-title">
-          <span>04</span>
-          <h2>Reserva</h2>
-        </div>
-        <div class="step-toolbar">
-          <p class="microcopy">Confirma tus datos para completar la cita.</p>
-          <button class="secondary-action" type="button" data-reset-slot>Cambiar horario</button>
-        </div>
-        <div class="selected-card">
-          ${selected ? avatar(selected, "md") : ""}
-          <div>
-            <strong>${escapeHTML(selected.name)}</strong>
-            <small>${app.selectedDate} ${slotRange(app.selectedSlot)}</small>
+      ${publicFlowCard({
+        step: "02",
+        title: "Seleccionar dia",
+        state: hasSelectedBarber ? (hasSelectedDay ? "compact" : "open") : "locked",
+        summary: hasSelectedBarber ? daySummary : `<p class="microcopy">Elige un barbero para activar este paso.</p>`,
+        actions: hasSelectedBarber
+          ? `<button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button>${hasSelectedDay ? `<button class="secondary-action" type="button" data-reset-day>Cambiar dia</button>` : ""}`
+          : "",
+        body: `<div class="step-toolbar">
+            <p class="microcopy">Primero elige el dia para ver los horarios disponibles.</p>
           </div>
-        </div>
-        <form id="public-booking-form" class="form-stack">
-          <label>Nombre<input name="clientName" required placeholder="Tu nombre" /></label>
-          <label>WhatsApp<input name="whatsapp" required inputmode="tel" placeholder="300 123 4567" /></label>
-          <button class="primary-action">Confirmar cita</button>
-        </form>
-        <p class="microcopy">Confirmacion inmediata en esta version local. La integracion real se conecta despues con Supabase.</p>
-      </aside>`
-          : ""
-      }
+          ${dateStrip(app.selectedDate, "data-public-date")}`,
+      })}
+
+      ${publicFlowCard({
+        step: "03",
+        title: "Seleccionar horario",
+        state: hasSelectedDay ? (hasSelectedSlot ? "compact" : "open") : "locked",
+        summary: hasSelectedDay ? slotSummary : `<p class="microcopy">Selecciona un dia para mostrar horarios disponibles.</p>`,
+        actions: hasSelectedDay
+          ? `<button class="secondary-action" type="button" data-reset-day>Cambiar dia</button>${hasSelectedSlot ? `<button class="secondary-action" type="button" data-reset-slot>Cambiar horario</button>` : ""}`
+          : "",
+        body: `<div class="step-toolbar">
+            <p class="microcopy">${escapeHTML(selectedDayLabel)}</p>
+          </div>
+          <div class="slot-grid public-slots">
+            ${availability
+              .map(({ time, status, appointment, dayBlocked }) => {
+                const expired = slotHasPassed(app.selectedDate, time);
+                const disabled = status !== "available" || expired;
+                return `<button class="slot ${STATUS[status].tone} ${time === app.selectedSlot ? "picked" : ""}" data-slot="${time}" ${disabled ? "disabled" : ""}>
+                  <small class="slot-state">${publicSlotStateTag(status, dayBlocked, expired)}</small>
+                  <strong>${slotRange(time)}</strong>
+                  <span>${expired ? "No disponible" : publicSlotLabel(status, dayBlocked)}</span>
+                </button>`;
+              })
+              .join("")}
+          </div>`,
+      })}
+
+      ${publicFlowCard({
+        step: "04",
+        title: "Datos del cliente",
+        state: hasSelectedSlot ? "open" : "locked",
+        summary: hasSelectedSlot
+          ? `<div class="selected-card compact-selected">
+              ${selected ? avatar(selected, "md") : ""}
+              <div>
+                <strong>${escapeHTML(selected?.name || "")}</strong>
+                <small>${escapeHTML(app.selectedDate)} ${slotRange(app.selectedSlot || "08:00")}</small>
+              </div>
+            </div>`
+          : `<p class="microcopy">Selecciona un horario para abrir este ultimo paso.</p>`,
+        actions: hasSelectedSlot
+          ? `<button class="secondary-action" type="button" data-reset-slot>Cambiar horario</button>`
+          : "",
+        body: `<div class="selected-card">
+            ${selected ? avatar(selected, "md") : ""}
+            <div>
+              <strong>${escapeHTML(selected?.name || "")}</strong>
+              <small>${escapeHTML(app.selectedDate)} ${slotRange(app.selectedSlot || "08:00")}</small>
+            </div>
+          </div>
+          <form id="public-booking-form" class="form-stack">
+            <label>Nombre<input name="clientName" required placeholder="Tu nombre" /></label>
+            <label>WhatsApp<input name="whatsapp" required inputmode="tel" placeholder="300 123 4567" /></label>
+            <button class="primary-action">Confirmar cita</button>
+          </form>
+          <p class="microcopy">Confirmacion inmediata en esta version local. La integracion real se conecta despues con Supabase.</p>`,
+      })}
     </section>
     ${
       app.bookingConfirmation
@@ -1678,10 +1722,37 @@ function render() {
   const root = document.querySelector("#app");
   const views = { public: renderPublic, admin: renderAdminV2, barber: renderBarberV2 };
   ensurePersistentBackground();
-  root.innerHTML = views[app.view]();
+  if (root.dataset.shellReady !== "true") {
+    root.innerHTML = renderLayoutShell();
+    root.dataset.shellReady = "true";
+  }
+  if (root.dataset.chromeBound !== "true") {
+    bindChromeEvents();
+    root.dataset.chromeBound = "true";
+  }
+  document.querySelectorAll(".nav-tabs [data-view]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.view === app.view);
+  });
+  const toastLabel = document.querySelector(".realtime-toast strong");
+  if (toastLabel) {
+    toastLabel.textContent = app.lastEvent;
+  }
+  const viewRoot = document.querySelector("#view-root");
+  if (!viewRoot) return;
+  viewRoot.innerHTML = views[app.view]();
   bindEvents();
   document.querySelector("#booking-confirm-dialog")?.showModal();
   requestAnimationFrame(fitPanelTitles);
+}
+
+function bindChromeEvents() {
+  document.querySelectorAll("[data-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      app.view = button.dataset.view;
+      history.pushState(null, "", viewPath(app.view));
+      render();
+    });
+  });
 }
 
 let titleFitFrame = 0;
@@ -1714,14 +1785,6 @@ function fitPanelTitles() {
 }
 
 function bindEvents() {
-  document.querySelectorAll("[data-view]").forEach((button) => {
-    button.addEventListener("click", () => {
-      app.view = button.dataset.view;
-      history.pushState(null, "", viewPath(app.view));
-      render();
-    });
-  });
-
   document.querySelectorAll("[data-select-barber]").forEach((button) => {
     button.addEventListener("click", () => {
       app.selectedBarberId = button.dataset.selectBarber;
