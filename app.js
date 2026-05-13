@@ -776,7 +776,7 @@ const app = {
   barberDate: todayISO(),
   barberScheduleView: "hours",
   barberSession: JSON.parse(sessionStorage.getItem("noxora-barber-session") || "null"),
-  lastEvent: "Sistema local activo",
+  lastEvent: "",
 };
 
 function barberById(id) {
@@ -787,6 +787,10 @@ function statusFor(barberId, date, time) {
   if (store.isDayBlocked(barberId, date)) return { status: "blocked", dayBlocked: true };
   const appointment = store.getAppointment(barberId, date, time);
   return appointment ? { status: appointment.status, appointment } : { status: "available" };
+}
+
+function isUnavailableSlot(date, time, status) {
+  return isPastDate(date) || slotHasPassed(date, time) || status === "blocked";
 }
 
 function publicSlotLabel(status, dayBlocked) {
@@ -870,7 +874,7 @@ function avatar(barber, size = "lg") {
 function renderGlobalBackground() {
   const isVideo = app.backgroundMedia?.type === "video";
   const videoMarkup = isVideo
-    ? `<video class="global-bg-video" src="${app.backgroundMedia.src}" autoplay muted loop playsinline preload="auto"></video>`
+    ? `<video class="global-bg-video" src="${app.backgroundMedia.src}" autoplay muted loop playsinline preload="auto" poster="./assets/atelier-luxury-hero.png"></video>`
     : "";
   return `
     <div class="global-bg" aria-hidden="true" data-bg-kind="${isVideo ? "video" : "image"}">
@@ -894,6 +898,14 @@ function ensurePersistentBackground() {
     existing.outerHTML = renderGlobalBackground();
     document.body.dataset.backgroundSignature = signature;
   }
+  ensureBackgroundPlayback();
+}
+
+function ensureBackgroundPlayback() {
+  const video = document.querySelector(".global-bg-video");
+  if (!video) return;
+  const playback = video.play();
+  if (playback?.catch) playback.catch(() => {});
 }
 
 function appShell(content) {
@@ -933,7 +945,8 @@ function weekButtons(selected, attr = "data-admin-date") {
   return `<div class="week-cards">${getWeekDates()
     .map((date) => {
       const d = new Date(`${date}T00:00:00`);
-      return `<button class="${date === selected ? "active" : ""}" ${attr}="${date}">
+      const disabled = isPastDate(date);
+      return `<button class="${date === selected ? "active" : ""} ${disabled ? "past-date" : ""}" ${attr}="${date}" ${disabled ? "disabled" : ""}>
         <span>${longDayNames[d.getDay()]}</span>
         <strong>${String(d.getDate()).padStart(2, "0")}</strong>
       </button>`;
@@ -1007,7 +1020,6 @@ function renderPublic() {
               ${avatar(barber)}
               <span><strong>${escapeHTML(barber.name)}</strong><small>${barber.active ? escapeHTML(barber.specialty) : "No disponible"}</small></span>
             </button>
-            ${barber.whatsapp ? `<a class="mini-wa" href="https://wa.me/${moneylessPhone(barber.whatsapp)}" target="_blank" rel="noreferrer">WhatsApp</a>` : ""}
           </div>`
         )
         .join("")}
@@ -1051,12 +1063,12 @@ function renderPublic() {
     bookingCardBody = `<div class="slot-grid public-slots">
       ${availability
         .map(({ time, status, appointment, dayBlocked }) => {
-          const expired = slotHasPassed(app.selectedDate, time);
-          const disabled = status !== "available" || expired;
-          return `<button class="slot ${STATUS[status].tone} ${time === app.selectedSlot ? "picked" : ""}" data-slot="${time}" ${disabled ? "disabled" : ""}>
-            <small class="slot-state">${publicSlotStateTag(status, dayBlocked, expired)}</small>
+          const unavailable = isUnavailableSlot(app.selectedDate, time, status);
+          const disabled = status !== "available" || unavailable;
+          return `<button class="slot ${STATUS[status].tone} ${unavailable ? "unavailable" : ""} ${time === app.selectedSlot ? "picked" : ""}" data-slot="${time}" ${disabled ? "disabled" : ""}>
+            <small class="slot-state">${publicSlotStateTag(status, dayBlocked, unavailable && status === "available")}</small>
             <strong>${slotRange(time)}</strong>
-            <span>${expired ? "No disponible" : publicSlotLabel(status, dayBlocked)}</span>
+            <span>${unavailable && status === "available" ? "No disponible" : publicSlotLabel(status, dayBlocked)}</span>
           </button>`;
         })
         .join("")}
@@ -1321,13 +1333,12 @@ function adminSelectedHeader(barber) {
   return `<section class="admin-main selected-admin-head">
     <div class="barber-heading">
       ${avatar(barber, "lg")}
-      <div>
+      <div class="barber-heading-copy">
         <p class="eyebrow">${barber.active ? "Activo" : "Inactivo"}</p>
         <h1>${escapeHTML(barber.name)}</h1>
-        <span>${barber.whatsapp ? displayPhone(barber.whatsapp) : "Sin WhatsApp"}</span>
       </div>
     </div>
-    <div class="button-row">
+    <div class="button-row selected-admin-actions">
       <button class="secondary-action" data-admin-home>Inicio</button>
       <button class="secondary-action" data-admin-profile>Perfil</button>
       <button class="primary-action" data-admin-agenda>Agenda</button>
@@ -1646,14 +1657,17 @@ function adminHoursView(barber) {
   </div>
   <div class="admin-slots selectable">
     ${rows
-      .map(({ time, status, appointment, dayBlocked }) => `
-      <button class="slot-row ${STATUS[status].tone} ${app.adminSelectedSlots.includes(time) ? "picked" : ""}" data-admin-slot="${time}">
-        <div><strong>${slotRange(time)}</strong><span>${dayBlocked ? "Dia completo bloqueado" : STATUS[status].label}</span></div>
+      .map(({ time, status, appointment, dayBlocked }) => {
+        const unavailable = isUnavailableSlot(app.selectedDate, time, status);
+        return `
+      <button class="slot-row ${STATUS[status].tone} ${unavailable ? "unavailable" : ""} ${app.adminSelectedSlots.includes(time) ? "picked" : ""}" data-admin-slot="${time}" ${status === "blocked" || (status === "available" && unavailable) ? "disabled" : ""}>
+        <div><strong>${slotRange(time)}</strong><span>${dayBlocked ? "Dia completo bloqueado" : unavailable && status === "available" ? "No disponible" : STATUS[status].label}</span></div>
         <div class="slot-client">
           <strong>${escapeHTML(appointment?.clientName || "Sin cliente")}</strong>
           <small>${appointment?.whatsapp ? displayPhone(appointment.whatsapp) : "Sin WhatsApp"}</small>
         </div>
-      </button>`)
+      </button>`;
+      })
       .join("")}
   </div>
   <div class="day-counter-row">
@@ -1704,14 +1718,17 @@ function renderBarberV2() {
           </div>
           <div class="admin-slots readonly">
             ${rows
-              .map(({ time, status, appointment, dayBlocked }) => `
-              <article class="slot-row ${STATUS[status].tone}">
-                <div><strong>${slotRange(time)}</strong><span>${dayBlocked ? "Dia bloqueado" : STATUS[status].label}</span></div>
+              .map(({ time, status, appointment, dayBlocked }) => {
+                const unavailable = isUnavailableSlot(app.barberDate, time, status);
+                return `
+              <article class="slot-row ${STATUS[status].tone} ${unavailable ? "unavailable" : ""}">
+                <div><strong>${slotRange(time)}</strong><span>${dayBlocked ? "Dia bloqueado" : unavailable && status === "available" ? "No disponible" : STATUS[status].label}</span></div>
                 <div class="slot-client">
                   <strong>${escapeHTML(appointment?.clientName || (status === "available" ? "Disponible" : "Sin cliente"))}</strong>
                   <small>${appointment?.whatsapp ? displayPhone(appointment.whatsapp) : "Solo lectura"}</small>
                 </div>
-              </article>`)
+              </article>`;
+              })
               .join("")}
           </div>
           <div class="day-counter-row">
@@ -1738,9 +1755,11 @@ function render() {
     button.classList.toggle("active", button.dataset.view === app.view);
   });
   const toastLabel = document.querySelector(".realtime-toast strong");
+  const toast = document.querySelector(".realtime-toast");
   if (toastLabel) {
     toastLabel.textContent = app.lastEvent;
   }
+  toast?.classList.toggle("is-empty", !app.lastEvent);
   const viewRoot = document.querySelector("#view-root");
   if (!viewRoot) return;
   viewRoot.innerHTML = views[app.view]();
@@ -2405,6 +2424,12 @@ store.subscribe((state, event) => {
 window.addEventListener("resize", () => {
   cancelAnimationFrame(titleFitFrame);
   titleFitFrame = requestAnimationFrame(fitPanelTitles);
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    ensureBackgroundPlayback();
+  }
 });
 
 render();

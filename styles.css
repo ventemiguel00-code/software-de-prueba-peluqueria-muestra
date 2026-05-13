@@ -680,6 +680,18 @@ p {
   box-shadow: 0 18px 42px rgba(159, 118, 34, 0.26), var(--inner-light);
 }
 
+.date-strip button.past-date,
+.date-strip button:disabled.past-date,
+.week-cards button.past-date,
+.week-cards button:disabled.past-date {
+  opacity: 0.42;
+  filter: grayscale(0.88);
+  border-color: rgba(176, 182, 188, 0.2);
+  background: linear-gradient(180deg, rgba(112, 118, 125, 0.18), rgba(70, 75, 82, 0.18));
+  color: rgba(215, 221, 222, 0.54);
+  box-shadow: none;
+}
+
 .date-strip span,
 .date-strip strong {
   display: block;
@@ -828,6 +840,25 @@ p {
 .public-slots .slot.blocked .slot-state {
   background: rgba(156, 166, 180, 0.16);
   color: #dde4ed;
+}
+
+.public-slots .slot.unavailable,
+.slot.unavailable,
+.slot-row.unavailable {
+  border-color: rgba(156, 166, 180, 0.28);
+  background:
+    linear-gradient(180deg, rgba(128, 136, 148, 0.12), rgba(255, 255, 255, 0.02)),
+    linear-gradient(145deg, rgba(25, 28, 34, 0.96), rgba(35, 39, 47, 0.92));
+}
+
+.public-slots .slot.unavailable .slot-state,
+.slot.unavailable .slot-state {
+  background: rgba(156, 166, 180, 0.18);
+  color: #dde4ed;
+}
+
+.slot-row.unavailable {
+  color: rgba(232, 236, 240, 0.86);
 }
 
 .public-slots .slot.picked,
@@ -1204,6 +1235,10 @@ input:focus {
   gap: 18px;
 }
 
+.selected-admin-actions {
+  justify-content: flex-end;
+}
+
 .profile-card {
   display: flex;
   align-items: center;
@@ -1442,6 +1477,10 @@ dialog::backdrop {
   gap: 16px;
 }
 
+.barber-heading-copy {
+  flex: 1 1 auto;
+}
+
 .barber-heading span {
   color: var(--muted);
 }
@@ -1467,6 +1506,11 @@ dialog::backdrop {
   color: var(--silver);
   box-shadow: var(--shadow);
   backdrop-filter: blur(14px);
+}
+
+.realtime-toast.is-empty {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .realtime-toast span {
@@ -1522,6 +1566,35 @@ dialog::backdrop {
 
   .booking-card-body {
     min-height: 0;
+  }
+
+  .selected-admin-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .selected-admin-head .barber-heading {
+    align-items: flex-start;
+  }
+
+  .selected-admin-head .barber-heading-copy {
+    display: grid;
+    gap: 6px;
+  }
+
+  .selected-admin-head .barber-heading-copy .eyebrow,
+  .selected-admin-head .barber-heading-copy h1 {
+    margin: 0;
+  }
+
+  .selected-admin-actions {
+    width: 100%;
+  }
+
+  .selected-admin-actions .secondary-action,
+  .selected-admin-actions .primary-action {
+    flex: 1 1 calc(33.333% - 8px);
+    min-width: 0;
   }
 
   .topbar {
