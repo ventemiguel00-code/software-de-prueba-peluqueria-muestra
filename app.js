@@ -133,7 +133,7 @@ function escapeHTML(value) {
 }
 
 const defaultState = () => ({
-  meta: { weekKey: getWeekKey(), selectedDate: todayISO() },
+  meta: { dayKey: todayISO(), weekKey: getWeekKey(), selectedDate: todayISO() },
   barbers: [
     {
       id: "barber_mateo",
@@ -310,8 +310,9 @@ class StudioStore {
     this.remoteReady = false;
     this.syncInFlight = false;
     this.applyingRemote = false;
+    this.dailyResetPending = false;
     this.state = this.load();
-    this.applyWeeklyMaintenance();
+    this.applyDemoMaintenance();
 
     if (this.channel) {
       this.channel.onmessage = (event) => {
@@ -370,6 +371,10 @@ class StudioStore {
   }
 
   async bootstrapRemote() {
+    if (this.dailyResetPending) {
+      await this.persistRemote({ type: "RESET", table: "demo", reason: "daily_reset" });
+      this.dailyResetPending = false;
+    }
     await this.syncFromRemote({ quiet: true });
     this.emit({ type: "SYNC", table: "remote", reason: "remote_bootstrap" });
     this.subscribeRemote();
@@ -398,7 +403,12 @@ class StudioStore {
       const currentWeek = getWeekKey();
       const nextState = {
         ...defaultState(),
-        meta: { ...this.state.meta, weekKey: getWeekKey(), selectedDate: this.state.meta.selectedDate || todayISO() },
+        meta: {
+          ...this.state.meta,
+          dayKey: todayISO(),
+          weekKey: currentWeek,
+          selectedDate: this.state.meta.selectedDate || todayISO(),
+        },
         barbers: (barbersResult.data || []).map((row, index) => mapRowToBarber(row, index)),
         appointments: (appointmentsResult.data || [])
           .map(mapRowToAppointment)
@@ -455,6 +465,23 @@ class StudioStore {
 
   async persistRemote(event) {
     if (!this.supabase) return;
+    if (event.reason === "daily_reset") {
+      const appointmentsReset = await this.supabase.from("appointments").delete().not("id", "is", null);
+      if (appointmentsReset.error) throw appointmentsReset.error;
+
+      const blockedDaysReset = await this.supabase.from("blocked_days").delete().not("id", "is", null);
+      if (blockedDaysReset.error) throw blockedDaysReset.error;
+
+      const seedAppointments = this.state.appointments.map(mapAppointmentToRow);
+      if (seedAppointments.length) {
+        const appointmentsSeed = await this.supabase
+          .from("appointments")
+          .upsert(seedAppointments, { onConflict: "id" });
+        if (appointmentsSeed.error) throw appointmentsSeed.error;
+      }
+      return;
+    }
+
     if (event.reason === "weekly_cleanup") {
       const currentWeek = getWeekKey();
       const { error } = await this.supabase
@@ -517,19 +544,25 @@ class StudioStore {
     }
   }
 
-  applyWeeklyMaintenance() {
+  applyDemoMaintenance() {
+    const currentDay = todayISO();
     const currentWeek = getWeekKey();
-    if (this.state.meta.weekKey === currentWeek) {
-      this.persist({ type: "SYNC", table: "meta" });
+    if (this.state.meta.dayKey === currentDay) {
+      if (this.state.meta.weekKey !== currentWeek) {
+        this.state.meta.weekKey = currentWeek;
+        this.persist({ type: "SYNC", table: "meta" });
+      }
       return;
     }
 
-    this.state.appointments = this.state.appointments.filter((item) =>
-      ["fixed", "blocked"].includes(item.status)
-    );
+    const seededState = defaultState();
+    this.state.appointments = seededState.appointments;
+    this.state.blockedDays = seededState.blockedDays;
+    this.state.meta.dayKey = currentDay;
     this.state.meta.weekKey = currentWeek;
-    this.state.meta.selectedDate = todayISO();
-    this.persist({ type: "DELETE", table: "appointments", reason: "weekly_cleanup" });
+    this.state.meta.selectedDate = currentDay;
+    this.dailyResetPending = true;
+    this.persist({ type: "RESET", table: "demo", reason: "daily_reset" });
   }
 
   activeBarbers() {
@@ -834,6 +867,35 @@ function avatar(barber, size = "lg") {
   )}</span></div>`;
 }
 
+function renderGlobalBackground() {
+  const isVideo = app.backgroundMedia?.type === "video";
+  const videoMarkup = isVideo
+    ? `<video class="global-bg-video" src="${app.backgroundMedia.src}" autoplay muted loop playsinline preload="auto"></video>`
+    : "";
+  return `
+    <div class="global-bg" aria-hidden="true" data-bg-kind="${isVideo ? "video" : "image"}">
+      <div class="global-bg-image"></div>
+      ${videoMarkup}
+      <div class="global-bg-overlay"></div>
+    </div>
+  `;
+}
+
+function ensurePersistentBackground() {
+  const existing = document.querySelector(".global-bg");
+  const signature = `${app.backgroundMedia?.type || "image"}|${app.backgroundMedia?.src || ""}`;
+  if (!existing) {
+    document.body.insertAdjacentHTML("afterbegin", renderGlobalBackground());
+    document.body.dataset.backgroundSignature = signature;
+    return;
+  }
+
+  if (document.body.dataset.backgroundSignature !== signature) {
+    existing.outerHTML = renderGlobalBackground();
+    document.body.dataset.backgroundSignature = signature;
+  }
+}
+
 function appShell(content) {
   const tabs = [
     ["public", "Agenda"],
@@ -841,14 +903,6 @@ function appShell(content) {
     ["barber", "Barbero"],
   ];
   return `
-    <div class="global-bg" aria-hidden="true">
-      ${
-        app.backgroundMedia?.type === "video"
-          ? `<video class="global-bg-video" src="${app.backgroundMedia.src}" autoplay muted loop playsinline></video>`
-          : `<div class="global-bg-image"></div>`
-      }
-      <div class="global-bg-overlay"></div>
-    </div>
     <header class="topbar">
       <button class="brand" data-view="public" aria-label="Ir a agenda publica">
         <span class="brand-mark"></span>
@@ -863,7 +917,7 @@ function appShell(content) {
           .join("")}
       </nav>
     </header>
-    <main>${content}</main>
+    <main><div class="app-view">${content}</div></main>
     <div class="realtime-toast">
       <span></span>
       <strong>${escapeHTML(app.lastEvent)}</strong>
@@ -1623,6 +1677,7 @@ function renderBarberV2() {
 function render() {
   const root = document.querySelector("#app");
   const views = { public: renderPublic, admin: renderAdminV2, barber: renderBarberV2 };
+  ensurePersistentBackground();
   root.innerHTML = views[app.view]();
   bindEvents();
   document.querySelector("#booking-confirm-dialog")?.showModal();
@@ -2265,8 +2320,10 @@ store.subscribe((state, event) => {
   const action = event.type === "INSERT" ? "Creado" : event.type === "DELETE" ? "Eliminado" : "Actualizado";
   app.lastEvent =
     app.adminActionMessage ||
-    (event.reason === "weekly_cleanup"
-      ? "Limpieza semanal aplicada"
+    (event.reason === "daily_reset"
+      ? "Demo reiniciada para el nuevo dia"
+      : event.reason === "weekly_cleanup"
+        ? "Limpieza semanal aplicada"
       : event.reason === "remote_bootstrap"
         ? "Supabase sincronizado"
         : `${action}: ${event.table || "estado"}`);
