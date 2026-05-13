@@ -1273,6 +1273,36 @@ function render() {
   root.innerHTML = views[app.view]();
   bindEvents();
   document.querySelector("#booking-confirm-dialog")?.showModal();
+  requestAnimationFrame(fitPanelTitles);
+}
+
+let titleFitFrame = 0;
+
+function fitPanelTitles() {
+  const compactViewport = window.innerWidth <= 760;
+  const selectors = ".login-panel h1, .dashboard-head h1, .barber-heading h1";
+  document.querySelectorAll(selectors).forEach((title) => {
+    const parent = title.parentElement;
+    if (!parent) return;
+
+    title.style.whiteSpace = "nowrap";
+    title.style.fontSize = "";
+    title.style.lineHeight = compactViewport ? "1" : "0.98";
+
+    let size = Number.parseFloat(window.getComputedStyle(title).fontSize);
+    const minSize = compactViewport ? 16 : 24;
+    const maxWidth = Math.max(120, parent.clientWidth);
+
+    while (title.scrollWidth > maxWidth && size > minSize) {
+      size -= 1;
+      title.style.fontSize = `${size}px`;
+    }
+
+    if (title.scrollWidth > maxWidth) {
+      title.style.whiteSpace = "normal";
+      title.style.overflowWrap = "anywhere";
+    }
+  });
 }
 
 function bindEvents() {
@@ -1859,6 +1889,11 @@ store.subscribe((state, event) => {
     playReservationSound();
   }
   if (document.visibilityState === "visible") render();
+});
+
+window.addEventListener("resize", () => {
+  cancelAnimationFrame(titleFitFrame);
+  titleFitFrame = requestAnimationFrame(fitPanelTitles);
 });
 
 render();
