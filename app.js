@@ -216,7 +216,13 @@ const defaultState = () => ({
     },
   ],
   blockedDays: [],
-  services: [],
+  services: [
+    { id: "service_corte_clasico", name: "Corte clasico", value: 20000, adminPercentage: 50, barberPercentage: 50, active: true },
+    { id: "service_corte_barba", name: "Corte + barba", value: 30000, adminPercentage: 50, barberPercentage: 50, active: true },
+    { id: "service_barba", name: "Barba", value: 18000, adminPercentage: 50, barberPercentage: 50, active: true },
+    { id: "service_cejas", name: "Cejas", value: 12000, adminPercentage: 50, barberPercentage: 50, active: true },
+    { id: "service_diseno", name: "Diseno", value: 15000, adminPercentage: 50, barberPercentage: 50, active: true },
+  ],
 });
 
 function createSupabaseClient() {
@@ -252,7 +258,7 @@ function mapAppointmentToRow(appointment) {
     source: appointment.source || "admin",
     week_key: appointment.weekKey || "permanent",
     visit_state: appointment.visitState || "",
-    notes: appointment.notes || "",
+    notes: composeAppointmentNotes(appointment),
   };
 }
 
@@ -262,6 +268,31 @@ function mapBlockedDayToRow(day) {
     barber_id: day.barberId,
     date: day.date,
   };
+}
+
+function parseAppointmentNotes(rawNotes = "") {
+  const noteText = String(rawNotes || "");
+  const [firstLine, ...restLines] = noteText.split("\n");
+  if (!firstLine.startsWith("SERVICE_META::")) {
+    return { serviceId: "", serviceName: "", notes: noteText };
+  }
+  const [, serviceId = "", encodedName = ""] = firstLine.split("::");
+  return {
+    serviceId,
+    serviceName: decodeURIComponent(encodedName || ""),
+    notes: restLines.join("\n").trim(),
+  };
+}
+
+function composeAppointmentNotes(appointment) {
+  const notesBody = String(appointment.notes || "").trim();
+  if (!appointment.serviceId && !appointment.serviceName) {
+    return notesBody;
+  }
+  const serviceLine = `SERVICE_META::${appointment.serviceId || ""}::${encodeURIComponent(
+    appointment.serviceName || ""
+  )}`;
+  return notesBody ? `${serviceLine}\n${notesBody}` : serviceLine;
 }
 
 function mapServiceToRow(service) {
@@ -290,6 +321,7 @@ function mapRowToBarber(row, index = 0) {
 }
 
 function mapRowToAppointment(row) {
+  const parsedMeta = parseAppointmentNotes(row.notes || "");
   return {
     id: row.id,
     barberId: row.barber_id,
@@ -301,7 +333,9 @@ function mapRowToAppointment(row) {
     source: row.source || "admin",
     weekKey: row.week_key || "permanent",
     visitState: row.visit_state || "",
-    notes: row.notes || "",
+    notes: parsedMeta.notes,
+    serviceId: parsedMeta.serviceId,
+    serviceName: parsedMeta.serviceName,
   };
 }
 
@@ -418,7 +452,10 @@ class StudioStore {
       if (barbersResult.error) throw barbersResult.error;
       if (appointmentsResult.error) throw appointmentsResult.error;
       if (blockedDaysResult.error) throw blockedDaysResult.error;
-      const servicesData = servicesResult.error ? this.state.services : (servicesResult.data || []).map(mapRowToService);
+      const servicesData =
+        servicesResult.error || !servicesResult.data?.length
+          ? this.state.services
+          : (servicesResult.data || []).map(mapRowToService);
 
       if (!barbersResult.data?.length) {
         await this.seedRemoteFromLocal();
@@ -825,6 +862,7 @@ function loadSoundPreference() {
 
 const app = {
   view: location.pathname === "/admin-vip" ? "admin" : location.pathname === "/gestion-equipo" ? "barber" : "public",
+  selectedServiceId: "",
   selectedBarberId: "",
   selectedDate: store.state.meta.selectedDate,
   publicDaySelected: false,
@@ -1051,38 +1089,90 @@ function publicFlowCard({ step, title, state = "locked", summary = "", actions =
   </section>`;
 }
 
+function serviceById(id) {
+  return store.state.services.find((service) => service.id === id);
+}
+
+function isPublicDateAvailable(barberId, date) {
+  if (!barberId || isPastDate(date)) return false;
+  return baseSlots.some((time) => isPublicSlotBookable(barberId, date, time));
+}
+
 function renderPublic() {
   if (isPastDate(app.selectedDate)) {
     app.selectedDate = todayISO();
     app.publicDaySelected = false;
     app.selectedSlot = "";
   }
+  const publicServices = store.state.services.filter((service) => service.active);
+  const selectedService = serviceById(app.selectedServiceId) || null;
+  const hasSelectedService = Boolean(selectedService);
   const active = store.activeBarbers();
   const publicBarbers = store.state.barbers;
   const selected = active.find((barber) => barber.id === app.selectedBarberId) || null;
-  const hasSelectedBarber = Boolean(selected);
+  const hasSelectedBarber = hasSelectedService && Boolean(selected);
   const hasSelectedDay = hasSelectedBarber && app.publicDaySelected;
   const hasSelectedSlot = hasSelectedDay && Boolean(app.selectedSlot);
   const availability = hasSelectedDay
     ? baseSlots.map((time) => ({ time, ...statusFor(selected.id, app.selectedDate, time) }))
     : [];
-  const currentStep = hasSelectedSlot ? "details" : hasSelectedDay ? "slots" : hasSelectedBarber ? "days" : "barbers";
+  const currentStep = hasSelectedSlot
+    ? "details"
+    : hasSelectedDay
+      ? "slots"
+      : hasSelectedBarber
+        ? "days"
+        : hasSelectedService
+          ? "barbers"
+          : "services";
   const selectedDayLabel = hasSelectedDay
     ? `${longDayNames[new Date(`${app.selectedDate}T00:00:00`).getDay()]} · ${app.selectedDate}`
     : "";
   const bookingStepper = `<div class="booking-stepper">
-      <span class="${currentStep === "barbers" ? "active" : hasSelectedBarber ? "done" : ""}">1</span>
-      <span class="${currentStep === "days" ? "active" : hasSelectedDay || hasSelectedSlot ? "done" : ""}">2</span>
-      <span class="${currentStep === "slots" ? "active" : hasSelectedSlot ? "done" : ""}">3</span>
-      <span class="${currentStep === "details" ? "active" : ""}">4</span>
+      <span class="${currentStep === "services" ? "active" : hasSelectedService ? "done" : ""}">1</span>
+      <span class="${currentStep === "barbers" ? "active" : hasSelectedBarber ? "done" : ""}">2</span>
+      <span class="${currentStep === "days" ? "active" : hasSelectedDay || hasSelectedSlot ? "done" : ""}">3</span>
+      <span class="${currentStep === "slots" ? "active" : hasSelectedSlot ? "done" : ""}">4</span>
+      <span class="${currentStep === "details" ? "active" : ""}">5</span>
     </div>`;
-  let bookingCardTitle = "Elegir barbero";
-  let bookingCardMicrocopy = "Selecciona el profesional con quien quieres reservar.";
+  let bookingCardTitle = "Seleccionar servicio";
+  let bookingCardMicrocopy = "Elige el servicio que deseas reservar.";
   let bookingCardActions = "";
   let bookingCardSummary = "";
   let bookingCardBody = "";
 
+  if (currentStep === "services") {
+    bookingCardBody = `<div class="barber-list">
+      ${
+        publicServices.length
+          ? publicServices
+              .map(
+                (service) => `
+          <button class="barber-card ${service.id === app.selectedServiceId ? "active" : ""}" data-select-service="${service.id}">
+            <div class="summary-badge service-badge">$</div>
+            <span>
+              <strong>${escapeHTML(service.name)}</strong>
+              <small>${new Intl.NumberFormat("es-CO").format(service.value)} · Admin ${service.adminPercentage}% · Barbero ${service.barberPercentage}%</small>
+            </span>
+          </button>`
+              )
+              .join("")
+          : `<p class="microcopy">Aun no hay servicios disponibles.</p>`
+      }
+    </div>`;
+  }
+
   if (currentStep === "barbers") {
+    bookingCardTitle = "Elegir barbero";
+    bookingCardMicrocopy = "Selecciona el profesional con quien quieres reservar.";
+    bookingCardSummary = `<div class="selected-card compact-selected">
+      <div class="summary-badge service-badge">$</div>
+      <div>
+        <strong>${escapeHTML(selectedService?.name || "")}</strong>
+        <small>${selectedService ? new Intl.NumberFormat("es-CO").format(selectedService.value) : ""}</small>
+      </div>
+    </div>`;
+    bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button>`;
     bookingCardBody = `<div class="barber-list">
       ${publicBarbers
         .map(
@@ -1101,21 +1191,46 @@ function renderPublic() {
   if (currentStep === "days") {
     bookingCardTitle = "Seleccionar dia";
     bookingCardMicrocopy = "Elige el dia para consultar horarios disponibles.";
-    bookingCardSummary = `<div class="selected-card compact-selected">
-      ${selected ? avatar(selected, "md") : ""}
-      <div>
-        <strong>${escapeHTML(selected?.name || "")}</strong>
-        <small>${escapeHTML(selected?.specialty || "Servicio premium")}</small>
+    bookingCardSummary = `<div class="booking-selection-stack">
+      <div class="selected-card compact-selected">
+        <div class="summary-badge service-badge">$</div>
+        <div>
+          <strong>${escapeHTML(selectedService?.name || "")}</strong>
+          <small>${selectedService ? new Intl.NumberFormat("es-CO").format(selectedService.value) : ""}</small>
+        </div>
+      </div>
+      <div class="selected-card compact-selected">
+        ${selected ? avatar(selected, "md") : ""}
+        <div>
+          <strong>${escapeHTML(selected?.name || "")}</strong>
+          <small>${escapeHTML(selected?.specialty || "Servicio premium")}</small>
+        </div>
       </div>
     </div>`;
-    bookingCardActions = `<button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button>`;
-    bookingCardBody = `${dateStrip(app.selectedDate, "data-public-date")}`;
+    bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button>`;
+    bookingCardBody = `<div class="date-strip">${getWeekDates()
+      .map((date) => {
+        const d = new Date(`${date}T00:00:00`);
+        const disabled = !isPublicDateAvailable(selected.id, date);
+        return `<button class="${date === app.selectedDate ? "active" : ""} ${disabled ? "past-date" : ""}" data-public-date="${date}" ${disabled ? "disabled" : ""}>
+          <span>${dayNames[d.getDay()]}</span>
+          <strong>${String(d.getDate()).padStart(2, "0")}</strong>
+        </button>`;
+      })
+      .join("")}</div>`;
   }
 
   if (currentStep === "slots") {
     bookingCardTitle = "Seleccionar horario";
     bookingCardMicrocopy = selectedDayLabel;
     bookingCardSummary = `<div class="booking-selection-stack">
+      <div class="selected-card compact-selected">
+        <div class="summary-badge service-badge">$</div>
+        <div>
+          <strong>${escapeHTML(selectedService?.name || "")}</strong>
+          <small>${selectedService ? new Intl.NumberFormat("es-CO").format(selectedService.value) : ""}</small>
+        </div>
+      </div>
       <div class="selected-card compact-selected">
         ${selected ? avatar(selected, "md") : ""}
         <div>
@@ -1131,7 +1246,7 @@ function renderPublic() {
         </div>
       </div>
     </div>`;
-    bookingCardActions = `<button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action" type="button" data-reset-day>Cambiar dia</button>`;
+    bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action" type="button" data-reset-day>Cambiar fecha</button>`;
     bookingCardBody = `<div class="slot-grid public-slots">
       ${availability
         .map(({ time, status, appointment, dayBlocked }) => {
@@ -1148,9 +1263,16 @@ function renderPublic() {
   }
 
   if (currentStep === "details") {
-    bookingCardTitle = "Datos del cliente";
+    bookingCardTitle = "Confirmar reserva";
     bookingCardMicrocopy = "Completa tus datos para confirmar la reserva.";
     bookingCardSummary = `<div class="booking-selection-stack">
+      <div class="selected-card compact-selected">
+        <div class="summary-badge service-badge">$</div>
+        <div>
+          <strong>${escapeHTML(selectedService?.name || "")}</strong>
+          <small>${selectedService ? new Intl.NumberFormat("es-CO").format(selectedService.value) : ""}</small>
+        </div>
+      </div>
       <div class="selected-card compact-selected">
         ${selected ? avatar(selected, "md") : ""}
         <div>
@@ -1166,8 +1288,14 @@ function renderPublic() {
         </div>
       </div>
     </div>`;
-    bookingCardActions = `<button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action" type="button" data-reset-day>Cambiar dia</button><button class="secondary-action" type="button" data-reset-slot>Cambiar horario</button>`;
+    bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action" type="button" data-reset-day>Cambiar fecha</button><button class="secondary-action" type="button" data-reset-slot>Cambiar hora</button>`;
     bookingCardBody = `<form id="public-booking-form" class="form-stack">
+        <div class="confirmation-summary">
+          <span>Servicio</span><strong>${escapeHTML(selectedService?.name || "")}</strong>
+          <span>Barbero</span><strong>${escapeHTML(selected?.name || "")}</strong>
+          <span>Fecha</span><strong>${escapeHTML(app.selectedDate)}</strong>
+          <span>Hora</span><strong>${slotRange(app.selectedSlot || "08:00")}</strong>
+        </div>
         <label>Nombre<input name="clientName" required placeholder="Tu nombre" /></label>
         <label>WhatsApp<input name="whatsapp" required inputmode="tel" placeholder="300 123 4567" /></label>
         <button class="primary-action">Confirmar cita</button>
@@ -1214,6 +1342,7 @@ function renderPublic() {
             <p>Estimado/a ${escapeHTML(app.bookingConfirmation.clientName)}, su cita fue reservada exitosamente.</p>
             <div class="confirmation-summary">
               <span>Barbero</span><strong>${escapeHTML(app.bookingConfirmation.barberName)}</strong>
+              <span>Servicio</span><strong>${escapeHTML(app.bookingConfirmation.serviceName)}</strong>
               <span>Fecha</span><strong>${escapeHTML(app.bookingConfirmation.date)}</strong>
               <span>Horario</span><strong>${escapeHTML(app.bookingConfirmation.range)}</strong>
               <span>WhatsApp</span><strong>${escapeHTML(app.bookingConfirmation.whatsapp)}</strong>
@@ -1957,6 +2086,16 @@ function fitPanelTitles() {
 }
 
 function bindEvents() {
+  document.querySelectorAll("[data-select-service]").forEach((button) => {
+    button.addEventListener("click", () => {
+      app.selectedServiceId = button.dataset.selectService;
+      app.selectedBarberId = "";
+      app.publicDaySelected = false;
+      app.selectedSlot = "";
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-select-barber]").forEach((button) => {
     button.addEventListener("click", () => {
       app.selectedBarberId = button.dataset.selectBarber;
@@ -1999,6 +2138,14 @@ function bindEvents() {
     render();
   });
 
+  document.querySelector("[data-reset-service]")?.addEventListener("click", () => {
+    app.selectedServiceId = "";
+    app.selectedBarberId = "";
+    app.publicDaySelected = false;
+    app.selectedSlot = "";
+    render();
+  });
+
   document.querySelector("[data-reset-day]")?.addEventListener("click", () => {
     app.publicDaySelected = false;
     app.selectedSlot = "";
@@ -2012,7 +2159,7 @@ function bindEvents() {
 
   document.querySelector("#public-booking-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (!app.selectedBarberId || !app.selectedSlot) return;
+    if (!app.selectedServiceId || !app.selectedBarberId || !app.selectedSlot) return;
     if (!isPublicSlotBookable(app.selectedBarberId, app.selectedDate, app.selectedSlot)) {
       app.selectedSlot = "";
       render();
@@ -2020,9 +2167,12 @@ function bindEvents() {
     }
     const form = new FormData(event.currentTarget);
     const barber = barberById(app.selectedBarberId);
+    const service = serviceById(app.selectedServiceId);
     const clientName = String(form.get("clientName") || "").trim();
     const whatsapp = String(form.get("whatsapp") || "").trim();
     store.upsertAppointment({
+      serviceId: app.selectedServiceId,
+      serviceName: service?.name || "",
       barberId: app.selectedBarberId,
       date: app.selectedDate,
       time: app.selectedSlot,
@@ -2034,6 +2184,7 @@ function bindEvents() {
     app.bookingConfirmation = {
       clientName,
       whatsapp,
+      serviceName: service?.name || "Servicio",
       barberName: barber?.name || "Barbero",
       date: app.selectedDate,
       range: slotRange(app.selectedSlot),
