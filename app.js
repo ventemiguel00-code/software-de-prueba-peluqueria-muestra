@@ -1,5 +1,11 @@
 const APP_KEY = "noxora-studioos-state-v1";
 const CHANNEL = "noxora-studioos-realtime";
+const SUPABASE_URL = window.__SUPABASE_URL || "";
+const SUPABASE_ANON_KEY = window.__SUPABASE_ANON_KEY || "";
+const hasSupabaseBrowserClient =
+  Boolean(SUPABASE_URL) &&
+  Boolean(SUPABASE_ANON_KEY) &&
+  Boolean(window.supabase?.createClient);
 
 const STATUS = {
   available: { label: "Disponible", short: "Libre", tone: "available" },
@@ -212,30 +218,128 @@ const defaultState = () => ({
   blockedDays: [],
 });
 
+function createSupabaseClient() {
+  if (!hasSupabaseBrowserClient) return null;
+  return window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+function mapBarberToRow(barber) {
+  return {
+    id: barber.id,
+    name: barber.name,
+    user: barber.user,
+    password: barber.password,
+    whatsapp: barber.whatsapp || "",
+    active: Boolean(barber.active),
+    photo: barber.photo || "",
+    gradient: barber.gradient || "",
+    specialty: barber.specialty || "",
+  };
+}
+
+function mapAppointmentToRow(appointment) {
+  return {
+    id: appointment.id,
+    barber_id: appointment.barberId,
+    date: appointment.date,
+    time: appointment.time,
+    status: appointment.status,
+    client_name: appointment.clientName || "",
+    whatsapp: appointment.whatsapp || "",
+    source: appointment.source || "admin",
+    week_key: appointment.weekKey || "permanent",
+    visit_state: appointment.visitState || "",
+    notes: appointment.notes || "",
+  };
+}
+
+function mapBlockedDayToRow(day) {
+  return {
+    id: day.id,
+    barber_id: day.barberId,
+    date: day.date,
+  };
+}
+
+function mapRowToBarber(row, index = 0) {
+  return {
+    id: row.id,
+    name: row.name || "",
+    user: row.user || "",
+    password: row.password || "",
+    whatsapp: row.whatsapp || "",
+    active: row.active ?? true,
+    photo: row.photo || "",
+    gradient: row.gradient || avatarGradients[index % avatarGradients.length],
+    specialty: row.specialty || "Servicio premium",
+  };
+}
+
+function mapRowToAppointment(row) {
+  return {
+    id: row.id,
+    barberId: row.barber_id,
+    date: row.date,
+    time: row.time,
+    status: row.status,
+    clientName: row.client_name || "",
+    whatsapp: row.whatsapp || "",
+    source: row.source || "admin",
+    weekKey: row.week_key || "permanent",
+    visitState: row.visit_state || "",
+    notes: row.notes || "",
+  };
+}
+
+function mapRowToBlockedDay(row) {
+  return {
+    id: row.id,
+    barberId: row.barber_id,
+    date: row.date,
+  };
+}
+
 class StudioStore {
   constructor() {
     this.listeners = new Set();
     this.channel = "BroadcastChannel" in window ? new BroadcastChannel(CHANNEL) : null;
+    this.supabase = createSupabaseClient();
+    this.remoteChannel = null;
+    this.remoteReady = false;
+    this.syncInFlight = false;
+    this.applyingRemote = false;
     this.state = this.load();
     this.applyWeeklyMaintenance();
 
     if (this.channel) {
       this.channel.onmessage = (event) => {
         if (!event.data?.type) return;
-        this.state = this.load();
+        this.state = this.loadLocalState();
         this.emit(event.data);
       };
     }
 
     window.addEventListener("storage", (event) => {
       if (event.key === APP_KEY) {
-        this.state = this.load();
+        this.state = this.loadLocalState();
         this.emit({ type: "SYNC" });
       }
     });
+
+    if (this.supabase) {
+      this.bootstrapRemote().catch((error) => {
+        console.error("Supabase bootstrap failed", error);
+      });
+    }
   }
 
   load() {
+    return this.loadLocalState();
+  }
+
+  loadLocalState() {
     const raw = localStorage.getItem(APP_KEY);
     if (!raw) return defaultState();
     try {
@@ -249,6 +353,11 @@ class StudioStore {
     localStorage.setItem(APP_KEY, JSON.stringify(this.state));
     this.emit(event);
     this.channel?.postMessage(event);
+    if (this.supabase && !this.applyingRemote) {
+      this.persistRemote(event).catch((error) => {
+        console.error("Supabase sync failed", error);
+      });
+    }
   }
 
   emit(event) {
@@ -258,6 +367,154 @@ class StudioStore {
   subscribe(listener) {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  async bootstrapRemote() {
+    await this.syncFromRemote({ quiet: true });
+    this.emit({ type: "SYNC", table: "remote", reason: "remote_bootstrap" });
+    this.subscribeRemote();
+  }
+
+  async syncFromRemote({ quiet = false } = {}) {
+    if (!this.supabase || this.syncInFlight) return;
+    this.syncInFlight = true;
+
+    try {
+      const [barbersResult, appointmentsResult, blockedDaysResult] = await Promise.all([
+        this.supabase.from("barbers").select("*").order("created_at", { ascending: true }),
+        this.supabase.from("appointments").select("*").order("date", { ascending: true }).order("time", { ascending: true }),
+        this.supabase.from("blocked_days").select("*").order("date", { ascending: true }),
+      ]);
+
+      if (barbersResult.error) throw barbersResult.error;
+      if (appointmentsResult.error) throw appointmentsResult.error;
+      if (blockedDaysResult.error) throw blockedDaysResult.error;
+
+      if (!barbersResult.data?.length) {
+        await this.seedRemoteFromLocal();
+        return;
+      }
+
+      const currentWeek = getWeekKey();
+      const nextState = {
+        ...defaultState(),
+        meta: { ...this.state.meta, weekKey: getWeekKey(), selectedDate: this.state.meta.selectedDate || todayISO() },
+        barbers: (barbersResult.data || []).map((row, index) => mapRowToBarber(row, index)),
+        appointments: (appointmentsResult.data || [])
+          .map(mapRowToAppointment)
+          .filter((item) => item.status !== "reserved" || item.weekKey === currentWeek),
+        blockedDays: (blockedDaysResult.data || []).map(mapRowToBlockedDay),
+      };
+
+      this.applyingRemote = true;
+      this.state = nextState;
+      localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+      this.remoteReady = true;
+      if (!quiet) {
+        this.emit({ type: "SYNC", table: "remote" });
+        this.channel?.postMessage({ type: "SYNC", table: "remote" });
+      }
+    } finally {
+      this.applyingRemote = false;
+      this.syncInFlight = false;
+    }
+  }
+
+  async seedRemoteFromLocal() {
+    if (!this.supabase) return;
+
+    const seedState = this.loadLocalState();
+    const [barbersInsert, appointmentsInsert, blockedDaysInsert] = await Promise.all([
+      this.supabase.from("barbers").upsert(seedState.barbers.map(mapBarberToRow), { onConflict: "id" }),
+      this.supabase.from("appointments").upsert(seedState.appointments.map(mapAppointmentToRow), { onConflict: "id" }),
+      this.supabase.from("blocked_days").upsert(seedState.blockedDays.map(mapBlockedDayToRow), { onConflict: "id" }),
+    ]);
+
+    if (barbersInsert.error) throw barbersInsert.error;
+    if (appointmentsInsert.error) throw appointmentsInsert.error;
+    if (blockedDaysInsert.error) throw blockedDaysInsert.error;
+
+    await this.syncFromRemote();
+  }
+
+  subscribeRemote() {
+    if (!this.supabase || this.remoteChannel) return;
+    this.remoteChannel = this.supabase
+      .channel("barber-delux-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "barbers" }, () => {
+        this.syncFromRemote().catch((error) => console.error(error));
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => {
+        this.syncFromRemote().catch((error) => console.error(error));
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "blocked_days" }, () => {
+        this.syncFromRemote().catch((error) => console.error(error));
+      })
+      .subscribe();
+  }
+
+  async persistRemote(event) {
+    if (!this.supabase) return;
+    if (event.reason === "weekly_cleanup") {
+      const currentWeek = getWeekKey();
+      const { error } = await this.supabase
+        .from("appointments")
+        .delete()
+        .eq("status", "reserved")
+        .neq("week_key", currentWeek);
+      if (error) throw error;
+      return;
+    }
+
+    if (event.table === "appointments") {
+      if (event.type === "DELETE") {
+        const { error } = await this.supabase.from("appointments").delete().eq("id", event.id);
+        if (error) throw error;
+        return;
+      }
+      if (!event.record) return;
+      const { error } = await this.supabase
+        .from("appointments")
+        .upsert(mapAppointmentToRow(event.record), { onConflict: "id" });
+      if (error) throw error;
+      return;
+    }
+
+    if (event.table === "barbers") {
+      if (event.type === "DELETE") {
+        const { error } = await this.supabase.from("barbers").delete().eq("id", event.id);
+        if (error) throw error;
+        return;
+      }
+      if (!event.record) return;
+      const record = this.state.barbers.find((barber) => barber.id === event.record.id) || event.record;
+      const { error } = await this.supabase.from("barbers").upsert(mapBarberToRow(record), { onConflict: "id" });
+      if (error) throw error;
+      return;
+    }
+
+    if (event.table === "blocked_days") {
+      if (event.type === "DELETE") {
+        const record = event.record;
+        if (!record?.barberId || !record?.date) return;
+        const { error } = await this.supabase
+          .from("blocked_days")
+          .delete()
+          .eq("barber_id", record.barberId)
+          .eq("date", record.date);
+        if (error) throw error;
+        return;
+      }
+      if (!event.record) return;
+      const existing =
+        this.state.blockedDays.find(
+          (item) => item.barberId === event.record.barberId && item.date === event.record.date
+        ) || event.record;
+      const { error } = await this.supabase
+        .from("blocked_days")
+        .upsert(mapBlockedDayToRow(existing), { onConflict: "id" });
+      if (error) throw error;
+    }
   }
 
   applyWeeklyMaintenance() {
@@ -330,20 +587,25 @@ class StudioStore {
       this.state.barbers = this.state.barbers.map((barber) =>
         barber.id === payload.id ? { ...barber, ...payload } : barber
       );
-      this.persist({ type: "UPDATE", table: "barbers", record: payload });
+      this.persist({
+        type: "UPDATE",
+        table: "barbers",
+        record: this.state.barbers.find((barber) => barber.id === payload.id),
+      });
       return;
     }
 
     const { id, ...barberPayload } = payload;
-    this.state.barbers.push({
+    const created = {
       id: uid("barber"),
       gradient: avatarGradients[this.state.barbers.length % avatarGradients.length],
       photo: "",
       active: true,
       specialty: "Servicio premium",
       ...barberPayload,
-    });
-    this.persist({ type: "INSERT", table: "barbers", record: payload });
+    };
+    this.state.barbers.push(created);
+    this.persist({ type: "INSERT", table: "barbers", record: created });
   }
 
   blockDay(barberId, date) {
@@ -2001,7 +2263,13 @@ function fileToDataURL(file) {
 
 store.subscribe((state, event) => {
   const action = event.type === "INSERT" ? "Creado" : event.type === "DELETE" ? "Eliminado" : "Actualizado";
-  app.lastEvent = app.adminActionMessage || (event.reason === "weekly_cleanup" ? "Limpieza semanal aplicada" : `${action}: ${event.table || "estado"}`);
+  app.lastEvent =
+    app.adminActionMessage ||
+    (event.reason === "weekly_cleanup"
+      ? "Limpieza semanal aplicada"
+      : event.reason === "remote_bootstrap"
+        ? "Supabase sincronizado"
+        : `${action}: ${event.table || "estado"}`);
   app.adminActionMessage = "";
   if (event.type === "INSERT" && event.table === "appointments" && event.record?.source === "public") {
     app.lastEvent = `Nueva reserva: ${event.record.clientName || "Cliente"}`;
