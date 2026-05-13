@@ -1659,6 +1659,7 @@ function adminHoursView(barber) {
     ${rows
       .map(({ time, status, appointment, dayBlocked }) => {
         const unavailable = isUnavailableSlot(app.selectedDate, time, status);
+        const chatPhone = appointment?.whatsapp ? moneylessPhone(appointment.whatsapp) : "";
         return `
       <button class="slot-row ${STATUS[status].tone} ${unavailable ? "unavailable" : ""} ${app.adminSelectedSlots.includes(time) ? "picked" : ""}" data-admin-slot="${time}" ${status === "blocked" || (status === "available" && unavailable) ? "disabled" : ""}>
         <div><strong>${slotRange(time)}</strong><span>${dayBlocked ? "Dia completo bloqueado" : unavailable && status === "available" ? "No disponible" : STATUS[status].label}</span></div>
@@ -1666,6 +1667,13 @@ function adminHoursView(barber) {
           <strong>${escapeHTML(appointment?.clientName || "Sin cliente")}</strong>
           <small>${appointment?.whatsapp ? displayPhone(appointment.whatsapp) : "Sin WhatsApp"}</small>
         </div>
+        ${
+          chatPhone
+            ? `<div class="row-actions">
+                <span class="icon-action client-chat-action" data-client-chat="${chatPhone}" role="link" tabindex="-1">Chatear con cliente</span>
+              </div>`
+            : ""
+        }
       </button>`;
       })
       .join("")}
@@ -1830,6 +1838,16 @@ function bindEvents() {
     button.addEventListener("click", () => {
       app.selectedSlot = button.dataset.slot;
       render();
+    });
+  });
+
+  document.querySelectorAll("[data-client-chat]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const phone = event.currentTarget.dataset.clientChat;
+      if (!phone) return;
+      window.open(`https://wa.me/${phone}`, "_blank", "noopener,noreferrer");
     });
   });
 

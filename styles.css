@@ -1398,6 +1398,14 @@ button.slot-row {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
+  align-items: center;
+}
+
+.client-chat-action {
+  min-width: max-content;
+  padding: 0 12px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 dialog {
