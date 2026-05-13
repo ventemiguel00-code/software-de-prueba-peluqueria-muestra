@@ -461,10 +461,12 @@ const app = {
   view: location.pathname === "/admin-vip" ? "admin" : location.pathname === "/gestion-equipo" ? "barber" : "public",
   selectedBarberId: "",
   selectedDate: store.state.meta.selectedDate,
+  publicDaySelected: false,
   selectedSlot: "",
   bookingConfirmation: null,
   adminBarberId: "",
   adminView: "home",
+  adminOpenPanel: "",
   adminScheduleView: "hours",
   adminSelectedSlots: [],
   adminModalMode: "reserved",
@@ -536,6 +538,19 @@ function counterValue(group, barberId) {
 
 function renderCounter(value, extraClass = "") {
   return `<span class="counter-badge ${extraClass}">${value}</span>`;
+}
+
+function renderAccordionPanel(id, label, title, content, open = false) {
+  return `<section class="admin-main accordion-panel ${open ? "open" : ""}">
+    <button class="accordion-trigger" type="button" data-admin-panel="${id}" aria-expanded="${open ? "true" : "false"}">
+      <span class="section-title">
+        <span>${label}</span>
+        <h2>${title}</h2>
+      </span>
+      <strong>${open ? "−" : "+"}</strong>
+    </button>
+    ${open ? `<div class="accordion-content">${content}</div>` : ""}
+  </section>`;
 }
 
 function viewPath(view) {
@@ -625,15 +640,17 @@ function dateStrip(selected, onClickAttr = "data-date") {
 function renderPublic() {
   if (isPastDate(app.selectedDate)) {
     app.selectedDate = todayISO();
+    app.publicDaySelected = false;
     app.selectedSlot = "";
   }
   const active = store.activeBarbers();
   const publicBarbers = store.state.barbers;
   const selected = active.find((barber) => barber.id === app.selectedBarberId) || null;
   const hasSelectedBarber = Boolean(selected);
-  const hasSelectedSlot = hasSelectedBarber && Boolean(app.selectedSlot);
-  const publicStep = hasSelectedSlot ? "step-3" : hasSelectedBarber ? "step-2" : "step-1";
-  const availability = hasSelectedBarber
+  const hasSelectedDay = hasSelectedBarber && app.publicDaySelected;
+  const hasSelectedSlot = hasSelectedDay && Boolean(app.selectedSlot);
+  const publicStep = hasSelectedSlot ? "step-4" : hasSelectedDay ? "step-3" : hasSelectedBarber ? "step-2" : "step-1";
+  const availability = hasSelectedDay
     ? baseSlots.map((time) => ({ time, ...statusFor(selected.id, app.selectedDate, time) }))
     : [];
 
@@ -674,9 +691,28 @@ function renderPublic() {
           ? `<section class="booking-surface">
         <div class="section-title">
           <span>02</span>
+          <h2>Selecciona dia</h2>
+        </div>
+        <div class="step-toolbar">
+          <p class="microcopy">Primero elige el dia para ver los horarios disponibles.</p>
+          <button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button>
+        </div>
+        ${dateStrip(app.selectedDate, "data-public-date")}
+      </section>`
+          : ""
+      }
+
+      ${
+        hasSelectedDay
+          ? `<section class="booking-surface">
+        <div class="section-title">
+          <span>03</span>
           <h2>Selecciona horario</h2>
         </div>
-        ${dateStrip(app.selectedDate)}
+        <div class="step-toolbar">
+          <p class="microcopy">${longDayNames[new Date(`${app.selectedDate}T00:00:00`).getDay()]} · ${app.selectedDate}</p>
+          <button class="secondary-action" type="button" data-reset-day>Cambiar dia</button>
+        </div>
         <div class="slot-grid public-slots">
           ${availability
             .map(({ time, status, appointment, dayBlocked }) => {
@@ -698,8 +734,12 @@ function renderPublic() {
         hasSelectedSlot
           ? `<aside class="checkout">
         <div class="section-title">
-          <span>03</span>
+          <span>04</span>
           <h2>Reserva</h2>
+        </div>
+        <div class="step-toolbar">
+          <p class="microcopy">Confirma tus datos para completar la cita.</p>
+          <button class="secondary-action" type="button" data-reset-slot>Cambiar horario</button>
         </div>
         <div class="selected-card">
           ${selected ? avatar(selected, "md") : ""}
@@ -1126,12 +1166,9 @@ function renderAdminV2() {
               .join("")}
           </div>
         </section>
-        <section class="admin-main">
-          <div class="section-title"><span>+</span><h2>Nuevo barbero</h2></div>
-          ${barberEditorForm(null, "Crear barbero")}
-        </section>
-        ${backgroundSettingsSection()}
-        ${isPrincipalAdmin() ? adminAccountsSection() : ""}
+        ${renderAccordionPanel("new-barber", "+", "Nuevo barbero", barberEditorForm(null, "Crear barbero"), app.adminOpenPanel === "new-barber")}
+        ${renderAccordionPanel("dynamic-bg", "U", "Fondo dinamico", backgroundSettingsSection(), app.adminOpenPanel === "dynamic-bg")}
+        ${isPrincipalAdmin() ? renderAccordionPanel("admin-accounts", "U", "Gestionar administradores", adminAccountsSection(), app.adminOpenPanel === "admin-accounts") : ""}
       </section>`
         : ""
     }
@@ -1371,14 +1408,16 @@ function bindEvents() {
   document.querySelectorAll("[data-select-barber]").forEach((button) => {
     button.addEventListener("click", () => {
       app.selectedBarberId = button.dataset.selectBarber;
+      app.publicDaySelected = false;
       app.selectedSlot = "";
       render();
     });
   });
 
-  document.querySelectorAll("[data-date]").forEach((button) => {
+  document.querySelectorAll("[data-public-date]").forEach((button) => {
     button.addEventListener("click", () => {
-      app.selectedDate = button.dataset.date;
+      app.selectedDate = button.dataset.publicDate;
+      app.publicDaySelected = true;
       app.selectedSlot = "";
       render();
     });
@@ -1389,6 +1428,24 @@ function bindEvents() {
       app.selectedSlot = button.dataset.slot;
       render();
     });
+  });
+
+  document.querySelector("[data-reset-barber]")?.addEventListener("click", () => {
+    app.selectedBarberId = "";
+    app.publicDaySelected = false;
+    app.selectedSlot = "";
+    render();
+  });
+
+  document.querySelector("[data-reset-day]")?.addEventListener("click", () => {
+    app.publicDaySelected = false;
+    app.selectedSlot = "";
+    render();
+  });
+
+  document.querySelector("[data-reset-slot]")?.addEventListener("click", () => {
+    app.selectedSlot = "";
+    render();
   });
 
   document.querySelector("#public-booking-form")?.addEventListener("submit", (event) => {
@@ -1698,6 +1755,14 @@ function bindEvents() {
     document.querySelector("#manual-dialog")?.close();
     document.querySelector("#action-dialog")?.close();
     document.querySelector("#release-confirm-dialog")?.close();
+  });
+
+  document.querySelectorAll("[data-admin-panel]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const panel = button.dataset.adminPanel;
+      app.adminOpenPanel = app.adminOpenPanel === panel ? "" : panel;
+      render();
+    });
   });
 
   document.querySelectorAll("[data-admin-home]").forEach((button) => {

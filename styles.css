@@ -307,6 +307,18 @@ p {
   padding: 18px;
 }
 
+.step-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.step-toolbar .microcopy {
+  margin: 0;
+}
+
 .section-title {
   display: flex;
   align-items: center;
@@ -328,6 +340,45 @@ p {
 .section-title h2 {
   margin: 0;
   font-size: 18px;
+}
+
+.accordion-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.accordion-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px;
+  background: transparent;
+  border: 0;
+  color: var(--white);
+  text-align: left;
+}
+
+.accordion-trigger .section-title {
+  margin-bottom: 0;
+}
+
+.accordion-trigger strong {
+  display: inline-grid;
+  place-items: center;
+  min-width: 34px;
+  height: 34px;
+  border: 1px solid rgba(245, 215, 110, 0.34);
+  border-radius: 10px;
+  color: var(--petrol-bright);
+  font-size: 24px;
+  line-height: 1;
+}
+
+.accordion-content {
+  padding: 0 18px 18px;
+  border-top: 1px solid rgba(212, 175, 55, 0.16);
 }
 
 .barber-list {
@@ -1362,6 +1413,15 @@ dialog::backdrop {
 
   .agenda-toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .step-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .step-toolbar .secondary-action {
+    width: 100%;
   }
 
   .slot-row,
