@@ -7,6 +7,7 @@ const STATUS = {
   fixed: { label: "Cita fija", short: "Fija", tone: "fixed" },
   blocked: { label: "Bloqueado", short: "Bloq.", tone: "blocked" },
 };
+const COUNTABLE_STATUSES = new Set(["reserved", "fixed"]);
 
 const dayNames = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
 const longDayNames = ["Domingo", "Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"];
@@ -494,6 +495,39 @@ function statusFor(barberId, date, time) {
 function publicSlotLabel(status, dayBlocked) {
   if (status === "available") return "Disponible";
   return dayBlocked ? "No disponible" : "Ocupado";
+}
+
+function dateAnchor(date) {
+  return new Date(`${date}T00:00:00`);
+}
+
+function isCountableAppointment(item) {
+  return item && COUNTABLE_STATUSES.has(item.status);
+}
+
+function buildCounterSummary(anchorDate) {
+  const activeWeekDates = new Set(getWeekDates(dateAnchor(anchorDate)));
+  return store.state.appointments.reduce(
+    (summary, appointment) => {
+      if (!isCountableAppointment(appointment) || !activeWeekDates.has(appointment.date)) return summary;
+      summary.weeklyByBarber[appointment.barberId] =
+        (summary.weeklyByBarber[appointment.barberId] || 0) + 1;
+      if (appointment.date === anchorDate) {
+        summary.dailyByBarber[appointment.barberId] =
+          (summary.dailyByBarber[appointment.barberId] || 0) + 1;
+      }
+      return summary;
+    },
+    { weeklyByBarber: {}, dailyByBarber: {} }
+  );
+}
+
+function counterValue(group, barberId) {
+  return group[barberId] || 0;
+}
+
+function renderCounter(value, extraClass = "") {
+  return `<span class="counter-badge ${extraClass}">${value}</span>`;
 }
 
 function viewPath(view) {
@@ -1046,6 +1080,7 @@ function renderAdminV2() {
   }
 
   const selected = barberById(app.adminBarberId);
+  const counterSummary = buildCounterSummary(app.selectedDate);
   const selectedRecords = app.adminSelectedSlots
     .map((time) => selected && store.getAppointment(selected.id, app.selectedDate, time))
     .filter(Boolean);
@@ -1071,11 +1106,12 @@ function renderAdminV2() {
               .map(
                 (barber) => `<button class="barber-card admin-person-card ${barber.active ? "" : "inactive"}" data-admin-barber="${barber.id}">
                   ${avatar(barber, "md")}
-                  <span>
+                  <span class="barber-card-copy">
                     <strong>${escapeHTML(barber.name)}</strong>
                     <small>${barber.whatsapp ? displayPhone(barber.whatsapp) : "Sin WhatsApp"}</small>
                     <small>Usuario: ${escapeHTML(barber.user)} · Clave: ${escapeHTML(barber.password)}</small>
                   </span>
+                  ${renderCounter(counterValue(counterSummary.weeklyByBarber, barber.id))}
                 </button>`
               )
               .join("")}
@@ -1181,6 +1217,7 @@ function renderAdminV2() {
 }
 
 function adminHoursView(barber) {
+  const counterSummary = buildCounterSummary(app.selectedDate);
   const rows = baseSlots.map((time) => ({ time, ...statusFor(barber.id, app.selectedDate, time) }));
   return `<div class="agenda-toolbar">
     <div>
@@ -1208,6 +1245,9 @@ function adminHoursView(barber) {
         </div>
       </button>`)
       .join("")}
+  </div>
+  <div class="day-counter-row">
+    ${renderCounter(counterValue(counterSummary.dailyByBarber, barber.id), "day-counter")}
   </div>`;
 }
 
@@ -1223,16 +1263,18 @@ function renderBarberV2() {
     return renderBarber();
   }
   const rows = baseSlots.map((time) => ({ time, ...statusFor(barber.id, app.barberDate, time) }));
+  const counterSummary = buildCounterSummary(app.barberDate);
 
   return appShell(`
     <section class="dashboard-head">
       <div class="barber-heading">
         ${avatar(barber, "lg")}
-        <div>
+        <div class="barber-heading-copy">
           <p class="eyebrow">BARBEROS</p>
           <h1>${escapeHTML(barber.name)}</h1>
           <span>Usuario: ${escapeHTML(barber.user)}</span>
         </div>
+        ${renderCounter(counterValue(counterSummary.weeklyByBarber, barber.id), "header-counter")}
       </div>
       <button class="secondary-action" data-logout>Salir</button>
     </section>
@@ -1261,6 +1303,9 @@ function renderBarberV2() {
                 </div>
               </article>`)
               .join("")}
+          </div>
+          <div class="day-counter-row">
+            ${renderCounter(counterValue(counterSummary.dailyByBarber, barber.id), "day-counter")}
           </div>`
       }
     </section>

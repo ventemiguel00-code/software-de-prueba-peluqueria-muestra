@@ -778,6 +778,47 @@ input:focus {
 
 .admin-person-card {
   min-height: 112px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.barber-card-copy,
+.barber-heading-copy {
+  min-width: 0;
+}
+
+.counter-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 42px;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid rgba(242, 207, 123, 0.36);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(245, 215, 110, 0.14), rgba(255, 255, 255, 0.035)),
+    rgba(12, 12, 12, 0.56);
+  box-shadow: var(--inner-light);
+  color: var(--white);
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.header-counter {
+  align-self: center;
+}
+
+.day-counter-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.day-counter {
+  min-width: 38px;
+  min-height: 38px;
+  font-size: 18px;
 }
 
 .admin-account-list {
@@ -1188,6 +1229,14 @@ dialog::backdrop {
   .slot-row,
   .readonly .slot-row {
     grid-template-columns: 1fr;
+  }
+
+  .admin-person-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .admin-person-card .counter-badge {
+    justify-self: end;
   }
 
   .row-actions {
