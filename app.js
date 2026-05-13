@@ -981,36 +981,115 @@ function renderPublic() {
   const availability = hasSelectedDay
     ? baseSlots.map((time) => ({ time, ...statusFor(selected.id, app.selectedDate, time) }))
     : [];
+  const currentStep = hasSelectedSlot ? "details" : hasSelectedDay ? "slots" : hasSelectedBarber ? "days" : "barbers";
   const selectedDayLabel = hasSelectedDay
     ? `${longDayNames[new Date(`${app.selectedDate}T00:00:00`).getDay()]} · ${app.selectedDate}`
     : "";
-  const barberSummary = selected
-    ? `<div class="selected-card compact-selected">
-        ${avatar(selected, "md")}
+  const bookingStepper = `<div class="booking-stepper">
+      <span class="${currentStep === "barbers" ? "active" : hasSelectedBarber ? "done" : ""}">1</span>
+      <span class="${currentStep === "days" ? "active" : hasSelectedDay || hasSelectedSlot ? "done" : ""}">2</span>
+      <span class="${currentStep === "slots" ? "active" : hasSelectedSlot ? "done" : ""}">3</span>
+      <span class="${currentStep === "details" ? "active" : ""}">4</span>
+    </div>`;
+  let bookingCardTitle = "Elegir barbero";
+  let bookingCardMicrocopy = "Selecciona el profesional con quien quieres reservar.";
+  let bookingCardActions = "";
+  let bookingCardSummary = "";
+  let bookingCardBody = "";
+
+  if (currentStep === "barbers") {
+    bookingCardBody = `<div class="barber-list">
+      ${publicBarbers
+        .map(
+          (barber) => `
+          <div class="barber-option">
+            <button class="barber-card ${barber.id === app.selectedBarberId ? "active" : ""} ${!barber.active ? "inactive" : ""}" data-select-barber="${barber.id}" ${!barber.active ? "disabled" : ""}>
+              ${avatar(barber)}
+              <span><strong>${escapeHTML(barber.name)}</strong><small>${barber.active ? escapeHTML(barber.specialty) : "No disponible"}</small></span>
+            </button>
+            ${barber.whatsapp ? `<a class="mini-wa" href="https://wa.me/${moneylessPhone(barber.whatsapp)}" target="_blank" rel="noreferrer">WhatsApp</a>` : ""}
+          </div>`
+        )
+        .join("")}
+    </div>`;
+  }
+
+  if (currentStep === "days") {
+    bookingCardTitle = "Seleccionar dia";
+    bookingCardMicrocopy = "Elige el dia para consultar horarios disponibles.";
+    bookingCardSummary = `<div class="selected-card compact-selected">
+      ${selected ? avatar(selected, "md") : ""}
+      <div>
+        <strong>${escapeHTML(selected?.name || "")}</strong>
+        <small>${escapeHTML(selected?.specialty || "Servicio premium")}</small>
+      </div>
+    </div>`;
+    bookingCardActions = `<button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button>`;
+    bookingCardBody = `${dateStrip(app.selectedDate, "data-public-date")}`;
+  }
+
+  if (currentStep === "slots") {
+    bookingCardTitle = "Seleccionar horario";
+    bookingCardMicrocopy = selectedDayLabel;
+    bookingCardSummary = `<div class="booking-selection-stack">
+      <div class="selected-card compact-selected">
+        ${selected ? avatar(selected, "md") : ""}
         <div>
-          <strong>${escapeHTML(selected.name)}</strong>
-          <small>${escapeHTML(selected.specialty || "Servicio premium")}</small>
+          <strong>${escapeHTML(selected?.name || "")}</strong>
+          <small>${escapeHTML(selected?.specialty || "Servicio premium")}</small>
         </div>
-      </div>`
-    : `<p class="microcopy">Elige un barbero para continuar.</p>`;
-  const daySummary = hasSelectedDay
-    ? `<div class="selected-card compact-selected">
+      </div>
+      <div class="selected-card compact-selected">
         <div class="summary-badge">${dayNames[new Date(`${app.selectedDate}T00:00:00`).getDay()]}</div>
         <div>
           <strong>${escapeHTML(selectedDayLabel)}</strong>
-          <small>Dia activo para consultar disponibilidad</small>
+          <small>Dia seleccionado</small>
         </div>
-      </div>`
-    : `<p class="microcopy">Selecciona primero un barbero para abrir este paso.</p>`;
-  const slotSummary = hasSelectedSlot
-    ? `<div class="selected-card compact-selected">
+      </div>
+    </div>`;
+    bookingCardActions = `<button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action" type="button" data-reset-day>Cambiar dia</button>`;
+    bookingCardBody = `<div class="slot-grid public-slots">
+      ${availability
+        .map(({ time, status, appointment, dayBlocked }) => {
+          const expired = slotHasPassed(app.selectedDate, time);
+          const disabled = status !== "available" || expired;
+          return `<button class="slot ${STATUS[status].tone} ${time === app.selectedSlot ? "picked" : ""}" data-slot="${time}" ${disabled ? "disabled" : ""}>
+            <small class="slot-state">${publicSlotStateTag(status, dayBlocked, expired)}</small>
+            <strong>${slotRange(time)}</strong>
+            <span>${expired ? "No disponible" : publicSlotLabel(status, dayBlocked)}</span>
+          </button>`;
+        })
+        .join("")}
+    </div>`;
+  }
+
+  if (currentStep === "details") {
+    bookingCardTitle = "Datos del cliente";
+    bookingCardMicrocopy = "Completa tus datos para confirmar la reserva.";
+    bookingCardSummary = `<div class="booking-selection-stack">
+      <div class="selected-card compact-selected">
+        ${selected ? avatar(selected, "md") : ""}
+        <div>
+          <strong>${escapeHTML(selected?.name || "")}</strong>
+          <small>${escapeHTML(selectedDayLabel)}</small>
+        </div>
+      </div>
+      <div class="selected-card compact-selected">
         <div class="summary-badge">03</div>
         <div>
           <strong>${slotRange(app.selectedSlot)}</strong>
-          <small>${escapeHTML(selectedDayLabel)}</small>
+          <small>Horario seleccionado</small>
         </div>
-      </div>`
-    : `<p class="microcopy">Selecciona un dia para ver y escoger un horario.</p>`;
+      </div>
+    </div>`;
+    bookingCardActions = `<button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action" type="button" data-reset-day>Cambiar dia</button><button class="secondary-action" type="button" data-reset-slot>Cambiar horario</button>`;
+    bookingCardBody = `<form id="public-booking-form" class="form-stack">
+        <label>Nombre<input name="clientName" required placeholder="Tu nombre" /></label>
+        <label>WhatsApp<input name="whatsapp" required inputmode="tel" placeholder="300 123 4567" /></label>
+        <button class="primary-action">Confirmar cita</button>
+      </form>
+      <p class="microcopy">Confirmacion inmediata en esta version local. La integracion real se conecta despues con Supabase.</p>`;
+  }
 
   return appShell(`
     <section class="hero">
@@ -1023,100 +1102,25 @@ function renderPublic() {
     </section>
 
     <section class="workspace public-flow">
-      ${publicFlowCard({
-        step: "01",
-        title: "Elegir barbero",
-        state: hasSelectedBarber ? "compact" : "open",
-        summary: barberSummary,
-        actions: hasSelectedBarber
-          ? `<button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button>`
-          : "",
-        body: `<div class="barber-list">
-          ${publicBarbers
-            .map(
-              (barber) => `
-              <div class="barber-option">
-                <button class="barber-card ${barber.id === app.selectedBarberId ? "active" : ""} ${!barber.active ? "inactive" : ""}" data-select-barber="${barber.id}" ${!barber.active ? "disabled" : ""}>
-                  ${avatar(barber)}
-                  <span><strong>${escapeHTML(barber.name)}</strong><small>${barber.active ? escapeHTML(barber.specialty) : "No disponible"}</small></span>
-                </button>
-                ${barber.whatsapp ? `<a class="mini-wa" href="https://wa.me/${moneylessPhone(barber.whatsapp)}" target="_blank" rel="noreferrer">WhatsApp</a>` : ""}
-              </div>`
-            )
-            .join("")}
-        </div>`,
-      })}
-
-      ${publicFlowCard({
-        step: "02",
-        title: "Seleccionar dia",
-        state: hasSelectedBarber ? (hasSelectedDay ? "compact" : "open") : "locked",
-        summary: hasSelectedBarber ? daySummary : `<p class="microcopy">Elige un barbero para activar este paso.</p>`,
-        actions: hasSelectedBarber
-          ? `<button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button>${hasSelectedDay ? `<button class="secondary-action" type="button" data-reset-day>Cambiar dia</button>` : ""}`
-          : "",
-        body: `<div class="step-toolbar">
-            <p class="microcopy">Primero elige el dia para ver los horarios disponibles.</p>
-          </div>
-          ${dateStrip(app.selectedDate, "data-public-date")}`,
-      })}
-
-      ${publicFlowCard({
-        step: "03",
-        title: "Seleccionar horario",
-        state: hasSelectedDay ? (hasSelectedSlot ? "compact" : "open") : "locked",
-        summary: hasSelectedDay ? slotSummary : `<p class="microcopy">Selecciona un dia para mostrar horarios disponibles.</p>`,
-        actions: hasSelectedDay
-          ? `<button class="secondary-action" type="button" data-reset-day>Cambiar dia</button>${hasSelectedSlot ? `<button class="secondary-action" type="button" data-reset-slot>Cambiar horario</button>` : ""}`
-          : "",
-        body: `<div class="step-toolbar">
-            <p class="microcopy">${escapeHTML(selectedDayLabel)}</p>
-          </div>
-          <div class="slot-grid public-slots">
-            ${availability
-              .map(({ time, status, appointment, dayBlocked }) => {
-                const expired = slotHasPassed(app.selectedDate, time);
-                const disabled = status !== "available" || expired;
-                return `<button class="slot ${STATUS[status].tone} ${time === app.selectedSlot ? "picked" : ""}" data-slot="${time}" ${disabled ? "disabled" : ""}>
-                  <small class="slot-state">${publicSlotStateTag(status, dayBlocked, expired)}</small>
-                  <strong>${slotRange(time)}</strong>
-                  <span>${expired ? "No disponible" : publicSlotLabel(status, dayBlocked)}</span>
-                </button>`;
-              })
-              .join("")}
-          </div>`,
-      })}
-
-      ${publicFlowCard({
-        step: "04",
-        title: "Datos del cliente",
-        state: hasSelectedSlot ? "open" : "locked",
-        summary: hasSelectedSlot
-          ? `<div class="selected-card compact-selected">
-              ${selected ? avatar(selected, "md") : ""}
-              <div>
-                <strong>${escapeHTML(selected?.name || "")}</strong>
-                <small>${escapeHTML(app.selectedDate)} ${slotRange(app.selectedSlot || "08:00")}</small>
-              </div>
-            </div>`
-          : `<p class="microcopy">Selecciona un horario para abrir este ultimo paso.</p>`,
-        actions: hasSelectedSlot
-          ? `<button class="secondary-action" type="button" data-reset-slot>Cambiar horario</button>`
-          : "",
-        body: `<div class="selected-card">
-            ${selected ? avatar(selected, "md") : ""}
+      <section class="flow-card open single-booking-card">
+        <div class="flow-card-head">
+          <div class="booking-card-top">
             <div>
-              <strong>${escapeHTML(selected?.name || "")}</strong>
-              <small>${escapeHTML(app.selectedDate)} ${slotRange(app.selectedSlot || "08:00")}</small>
+              <div class="section-title">
+                <span>${currentStep === "barbers" ? "01" : currentStep === "days" ? "02" : currentStep === "slots" ? "03" : "04"}</span>
+                <h2>${bookingCardTitle}</h2>
+              </div>
+              <p class="microcopy">${escapeHTML(bookingCardMicrocopy)}</p>
             </div>
+            ${bookingStepper}
           </div>
-          <form id="public-booking-form" class="form-stack">
-            <label>Nombre<input name="clientName" required placeholder="Tu nombre" /></label>
-            <label>WhatsApp<input name="whatsapp" required inputmode="tel" placeholder="300 123 4567" /></label>
-            <button class="primary-action">Confirmar cita</button>
-          </form>
-          <p class="microcopy">Confirmacion inmediata en esta version local. La integracion real se conecta despues con Supabase.</p>`,
-      })}
+          ${bookingCardSummary ? `<div class="flow-summary">${bookingCardSummary}</div>` : ""}
+          ${bookingCardActions ? `<div class="step-toolbar flow-toolbar">${bookingCardActions}</div>` : ""}
+        </div>
+        <div class="flow-card-body booking-card-body">
+          ${bookingCardBody}
+        </div>
+      </section>
     </section>
     ${
       app.bookingConfirmation

@@ -297,6 +297,63 @@ p {
   align-items: stretch;
 }
 
+.single-booking-card {
+  max-width: 980px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.booking-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.booking-card-top .microcopy {
+  margin: -4px 0 0;
+}
+
+.booking-card-body {
+  min-height: 280px;
+}
+
+.booking-selection-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.booking-stepper {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 8px;
+  align-self: center;
+}
+
+.booking-stepper span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.booking-stepper span.active {
+  border-color: rgba(242, 207, 123, 0.72);
+  color: var(--black);
+  background: linear-gradient(180deg, rgba(242, 207, 123, 0.96), rgba(208, 166, 72, 0.92));
+}
+
+.booking-stepper span.done {
+  border-color: rgba(242, 207, 123, 0.28);
+  color: var(--petrol-bright);
+}
+
 .flow-card {
   border: 1px solid var(--line);
   background:
@@ -350,6 +407,10 @@ p {
   background: rgba(255, 255, 255, 0.05);
   color: var(--petrol-bright);
   font-weight: 800;
+}
+
+.flow-summary .microcopy {
+  margin: 0;
 }
 
 .checkout {
@@ -1444,6 +1505,25 @@ dialog::backdrop {
 }
 
 @media (max-width: 760px) {
+  .booking-card-top {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .booking-stepper {
+    align-self: flex-start;
+  }
+
+  .single-booking-card .flow-card-head,
+  .single-booking-card .flow-card-body {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .booking-card-body {
+    min-height: 0;
+  }
+
   .topbar {
     align-items: stretch;
     flex-direction: column;
