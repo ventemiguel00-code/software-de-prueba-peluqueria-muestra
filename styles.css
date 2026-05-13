@@ -1188,6 +1188,21 @@ input:focus {
   margin-top: 16px;
 }
 
+.service-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.service-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: var(--glass-soft);
+  box-shadow: var(--inner-light);
+}
+
 .admin-account-card {
   display: grid;
   gap: 14px;

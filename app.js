@@ -216,6 +216,7 @@ const defaultState = () => ({
     },
   ],
   blockedDays: [],
+  services: [],
 });
 
 function createSupabaseClient() {
@@ -263,6 +264,17 @@ function mapBlockedDayToRow(day) {
   };
 }
 
+function mapServiceToRow(service) {
+  return {
+    id: service.id,
+    service_name: service.name,
+    service_value: Number(service.value) || 0,
+    admin_percentage: Number(service.adminPercentage) || 0,
+    barber_percentage: Number(service.barberPercentage) || 0,
+    active: service.active ?? true,
+  };
+}
+
 function mapRowToBarber(row, index = 0) {
   return {
     id: row.id,
@@ -298,6 +310,17 @@ function mapRowToBlockedDay(row) {
     id: row.id,
     barberId: row.barber_id,
     date: row.date,
+  };
+}
+
+function mapRowToService(row) {
+  return {
+    id: row.id,
+    name: row.service_name || "",
+    value: Number(row.service_value) || 0,
+    adminPercentage: Number(row.admin_percentage) || 0,
+    barberPercentage: Number(row.barber_percentage) || 0,
+    active: row.active ?? true,
   };
 }
 
@@ -385,15 +408,17 @@ class StudioStore {
     this.syncInFlight = true;
 
     try {
-      const [barbersResult, appointmentsResult, blockedDaysResult] = await Promise.all([
+      const [barbersResult, appointmentsResult, blockedDaysResult, servicesResult] = await Promise.all([
         this.supabase.from("barbers").select("*").order("created_at", { ascending: true }),
         this.supabase.from("appointments").select("*").order("date", { ascending: true }).order("time", { ascending: true }),
         this.supabase.from("blocked_days").select("*").order("date", { ascending: true }),
+        this.supabase.from("services").select("*").order("created_at", { ascending: true }),
       ]);
 
       if (barbersResult.error) throw barbersResult.error;
       if (appointmentsResult.error) throw appointmentsResult.error;
       if (blockedDaysResult.error) throw blockedDaysResult.error;
+      const servicesData = servicesResult.error ? this.state.services : (servicesResult.data || []).map(mapRowToService);
 
       if (!barbersResult.data?.length) {
         await this.seedRemoteFromLocal();
@@ -414,6 +439,7 @@ class StudioStore {
           .map(mapRowToAppointment)
           .filter((item) => item.status !== "reserved" || item.weekKey === currentWeek),
         blockedDays: (blockedDaysResult.data || []).map(mapRowToBlockedDay),
+        services: servicesData,
       };
 
       this.applyingRemote = true;
@@ -434,15 +460,17 @@ class StudioStore {
     if (!this.supabase) return;
 
     const seedState = this.loadLocalState();
-    const [barbersInsert, appointmentsInsert, blockedDaysInsert] = await Promise.all([
+    const [barbersInsert, appointmentsInsert, blockedDaysInsert, servicesInsert] = await Promise.all([
       this.supabase.from("barbers").upsert(seedState.barbers.map(mapBarberToRow), { onConflict: "id" }),
       this.supabase.from("appointments").upsert(seedState.appointments.map(mapAppointmentToRow), { onConflict: "id" }),
       this.supabase.from("blocked_days").upsert(seedState.blockedDays.map(mapBlockedDayToRow), { onConflict: "id" }),
+      this.supabase.from("services").upsert(seedState.services.map(mapServiceToRow), { onConflict: "id" }),
     ]);
 
     if (barbersInsert.error) throw barbersInsert.error;
     if (appointmentsInsert.error) throw appointmentsInsert.error;
     if (blockedDaysInsert.error) throw blockedDaysInsert.error;
+    if (servicesInsert.error) console.warn("Supabase services seed skipped", servicesInsert.error);
 
     await this.syncFromRemote();
   }
@@ -458,6 +486,9 @@ class StudioStore {
         this.syncFromRemote().catch((error) => console.error(error));
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "blocked_days" }, () => {
+        this.syncFromRemote().catch((error) => console.error(error));
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "services" }, () => {
         this.syncFromRemote().catch((error) => console.error(error));
       })
       .subscribe();
@@ -540,6 +571,19 @@ class StudioStore {
       const { error } = await this.supabase
         .from("blocked_days")
         .upsert(mapBlockedDayToRow(existing), { onConflict: "id" });
+      if (error) throw error;
+    }
+
+    if (event.table === "services") {
+      if (event.type === "DELETE") {
+        const { error } = await this.supabase.from("services").delete().eq("id", event.id);
+        if (error) throw error;
+        return;
+      }
+      if (!event.record) return;
+      const { error } = await this.supabase
+        .from("services")
+        .upsert(mapServiceToRow(event.record), { onConflict: "id" });
       if (error) throw error;
     }
   }
@@ -678,6 +722,33 @@ class StudioStore {
     blocked.forEach((item) => this.deleteAppointment(item.id));
     this.unblockDay(barberId, date);
   }
+
+  saveService(payload) {
+    if (payload.id) {
+      this.state.services = this.state.services.map((service) =>
+        service.id === payload.id ? { ...service, ...payload } : service
+      );
+      this.persist({
+        type: "UPDATE",
+        table: "services",
+        record: this.state.services.find((service) => service.id === payload.id),
+      });
+      return;
+    }
+
+    const created = {
+      id: uid("service"),
+      active: true,
+      ...payload,
+    };
+    this.state.services.push(created);
+    this.persist({ type: "INSERT", table: "services", record: created });
+  }
+
+  deleteService(id) {
+    this.state.services = this.state.services.filter((service) => service.id !== id);
+    this.persist({ type: "DELETE", table: "services", id });
+  }
 }
 
 const store = new StudioStore();
@@ -769,6 +840,7 @@ const app = {
   adminLoginError: "",
   adminAccountMessage: "",
   adminActionMessage: "",
+  adminServiceMessage: "",
   backgroundMedia: loadBackgroundMedia(),
   backgroundMessage: "",
   pendingBackgroundVideo: null,
@@ -1411,6 +1483,74 @@ function validateAdminAccountPayload(payload, accounts, editingId = "") {
   return "";
 }
 
+function validateServicePayload(payload) {
+  if (!payload.name || !String(payload.value).trim()) {
+    return "Nombre y valor del servicio son obligatorios.";
+  }
+  const adminPercentage = Number(payload.adminPercentage);
+  const barberPercentage = Number(payload.barberPercentage);
+  const serviceValue = Number(payload.value);
+  if (!Number.isFinite(serviceValue) || serviceValue <= 0) {
+    return "El valor del servicio debe ser mayor a 0.";
+  }
+  if (!Number.isFinite(adminPercentage) || !Number.isFinite(barberPercentage)) {
+    return "Debes ingresar porcentajes validos.";
+  }
+  if (adminPercentage < 0 || barberPercentage < 0) {
+    return "Los porcentajes no pueden ser negativos.";
+  }
+  if (adminPercentage + barberPercentage !== 100) {
+    return "Los porcentajes deben sumar 100%.";
+  }
+  return "";
+}
+
+function serviceEditorCard(service) {
+  return `<article class="service-card">
+    <form class="service-edit-form form-stack" data-service-id="${escapeHTML(service.id)}">
+      <div class="form-grid">
+        <label>Nombre del servicio<input name="name" required value="${escapeHTML(service.name)}" /></label>
+        <label>Valor del servicio<input name="value" required inputmode="numeric" value="${escapeHTML(service.value)}" /></label>
+        <label>% administrador<input name="adminPercentage" required inputmode="numeric" value="${escapeHTML(service.adminPercentage)}" /></label>
+        <label>% barbero<input name="barberPercentage" required inputmode="numeric" value="${escapeHTML(service.barberPercentage)}" /></label>
+      </div>
+      <label class="toggle-line"><input name="active" type="checkbox" ${service.active ? "checked" : ""} /> Servicio activo</label>
+      <div class="button-row">
+        <button class="primary-action">Guardar servicio</button>
+        <button class="icon-action danger" type="button" data-delete-service="${escapeHTML(service.id)}">Eliminar</button>
+      </div>
+    </form>
+  </article>`;
+}
+
+function servicesSection() {
+  const services = [...store.state.services].sort((a, b) => a.name.localeCompare(b.name, "es"));
+  return `<section class="admin-main">
+    <div class="section-title"><span>S</span><h2>Servicios</h2></div>
+    <p class="microcopy">Crea y administra servicios sin tocar todavia el flujo actual de reservas.</p>
+    ${app.adminServiceMessage ? `<p class="form-note">${escapeHTML(app.adminServiceMessage)}</p>` : ""}
+    <form id="service-create-form" class="editor-card">
+      <div class="form-grid">
+        <label>Nombre del servicio<input name="name" required placeholder="Corte clasico" /></label>
+        <label>Valor del servicio<input name="value" required inputmode="numeric" placeholder="20000" /></label>
+        <label>% administrador<input name="adminPercentage" required inputmode="numeric" placeholder="50" /></label>
+        <label>% barbero<input name="barberPercentage" required inputmode="numeric" placeholder="50" /></label>
+      </div>
+      <label class="toggle-line"><input name="active" type="checkbox" checked /> Servicio activo</label>
+      <div class="button-row">
+        <button class="primary-action">Crear servicio</button>
+      </div>
+    </form>
+    <div class="service-list">
+      ${
+        services.length
+          ? services.map(serviceEditorCard).join("")
+          : `<p class="microcopy">Aun no hay servicios creados.</p>`
+      }
+    </div>
+  </section>`;
+}
+
 function backgroundSettingsSection() {
   return `<section class="admin-main">
     <div class="section-title"><span>V</span><h2>Fondo dinamico</h2></div>
@@ -1542,6 +1682,7 @@ function renderAdminV2() {
           </div>
         </section>
         ${renderAccordionPanel("new-barber", "+", "Nuevo barbero", barberEditorForm(null, "Crear barbero"), app.adminOpenPanel === "new-barber")}
+        ${renderAccordionPanel("services", "S", "Servicios", servicesSection(), app.adminOpenPanel === "services")}
         ${renderAccordionPanel("dynamic-bg", "U", "Fondo dinamico", backgroundSettingsSection(), app.adminOpenPanel === "dynamic-bg")}
         ${isPrincipalAdmin() ? renderAccordionPanel("admin-accounts", "U", "Gestionar administradores", adminAccountsSection(), app.adminOpenPanel === "admin-accounts") : ""}
       </section>`
@@ -1978,6 +2119,65 @@ function bindEvents() {
     saveAdminAccounts(accounts);
     app.adminAccountMessage = "Administrador creado correctamente.";
     render();
+  });
+
+  document.querySelector("#service-create-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const payload = {
+      name: String(form.get("name") || "").trim(),
+      value: String(form.get("value") || "").trim(),
+      adminPercentage: Number(form.get("adminPercentage")),
+      barberPercentage: Number(form.get("barberPercentage")),
+      active: form.get("active") === "on",
+    };
+    const error = validateServicePayload(payload);
+    if (error) {
+      app.adminServiceMessage = error;
+      render();
+      return;
+    }
+    store.saveService({
+      ...payload,
+      value: Number(payload.value),
+    });
+    app.adminServiceMessage = "Servicio creado correctamente.";
+    render();
+  });
+
+  document.querySelectorAll(".service-edit-form").forEach((formElement) => {
+    formElement.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      const payload = {
+        id: event.currentTarget.dataset.serviceId,
+        name: String(form.get("name") || "").trim(),
+        value: String(form.get("value") || "").trim(),
+        adminPercentage: Number(form.get("adminPercentage")),
+        barberPercentage: Number(form.get("barberPercentage")),
+        active: form.get("active") === "on",
+      };
+      const error = validateServicePayload(payload);
+      if (error) {
+        app.adminServiceMessage = error;
+        render();
+        return;
+      }
+      store.saveService({
+        ...payload,
+        value: Number(payload.value),
+      });
+      app.adminServiceMessage = "Servicio actualizado correctamente.";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-service]").forEach((button) => {
+    button.addEventListener("click", () => {
+      store.deleteService(button.dataset.deleteService);
+      app.adminServiceMessage = "Servicio eliminado correctamente.";
+      render();
+    });
   });
 
   document.querySelectorAll(".admin-account-edit").forEach((formElement) => {
