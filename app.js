@@ -223,6 +223,16 @@ const defaultState = () => ({
     { id: "service_cejas", name: "Cejas", value: 12000, adminPercentage: 50, barberPercentage: 50, active: true },
     { id: "service_diseno", name: "Diseno", value: 15000, adminPercentage: 50, barberPercentage: 50, active: true },
   ],
+  barberServices: [
+    { id: "barber_service_seed_1", barberId: "barber_mateo", serviceId: "service_corte_clasico", active: true },
+    { id: "barber_service_seed_2", barberId: "barber_mateo", serviceId: "service_corte_barba", active: true },
+    { id: "barber_service_seed_3", barberId: "barber_mateo", serviceId: "service_diseno", active: true },
+    { id: "barber_service_seed_4", barberId: "barber_dante", serviceId: "service_corte_barba", active: true },
+    { id: "barber_service_seed_5", barberId: "barber_dante", serviceId: "service_barba", active: true },
+    { id: "barber_service_seed_6", barberId: "barber_elias", serviceId: "service_corte_clasico", active: true },
+    { id: "barber_service_seed_7", barberId: "barber_elias", serviceId: "service_diseno", active: true },
+    { id: "barber_service_seed_8", barberId: "barber_simon", serviceId: "service_cejas", active: true },
+  ],
 });
 
 function createSupabaseClient() {
@@ -306,6 +316,15 @@ function mapServiceToRow(service) {
   };
 }
 
+function mapBarberServiceToRow(item) {
+  return {
+    id: item.id,
+    barber_id: item.barberId,
+    service_id: item.serviceId,
+    active: item.active ?? true,
+  };
+}
+
 function mapRowToBarber(row, index = 0) {
   return {
     id: row.id,
@@ -354,6 +373,15 @@ function mapRowToService(row) {
     value: Number(row.service_value) || 0,
     adminPercentage: Number(row.admin_percentage) || 0,
     barberPercentage: Number(row.barber_percentage) || 0,
+    active: row.active ?? true,
+  };
+}
+
+function mapRowToBarberService(row) {
+  return {
+    id: row.id,
+    barberId: row.barber_id,
+    serviceId: row.service_id,
     active: row.active ?? true,
   };
 }
@@ -442,20 +470,26 @@ class StudioStore {
     this.syncInFlight = true;
 
     try {
-      const [barbersResult, appointmentsResult, blockedDaysResult, servicesResult] = await Promise.all([
+      const [barbersResult, appointmentsResult, blockedDaysResult, servicesResult, barberServicesResult] = await Promise.all([
         this.supabase.from("barbers").select("*").order("created_at", { ascending: true }),
         this.supabase.from("appointments").select("*").order("date", { ascending: true }).order("time", { ascending: true }),
         this.supabase.from("blocked_days").select("*").order("date", { ascending: true }),
         this.supabase.from("services").select("*").order("created_at", { ascending: true }),
+        this.supabase.from("barber_services").select("*").order("created_at", { ascending: true }),
       ]);
 
       if (barbersResult.error) throw barbersResult.error;
       if (appointmentsResult.error) throw appointmentsResult.error;
       if (blockedDaysResult.error) throw blockedDaysResult.error;
+      if (barberServicesResult.error) throw barberServicesResult.error;
       const servicesData =
         servicesResult.error || !servicesResult.data?.length
-          ? this.state.services
+          ? defaultState().services
           : (servicesResult.data || []).map(mapRowToService);
+      const barberServicesData =
+        !barberServicesResult.data?.length
+          ? defaultState().barberServices
+          : (barberServicesResult.data || []).map(mapRowToBarberService);
 
       if (!barbersResult.data?.length) {
         await this.seedRemoteFromLocal();
@@ -477,6 +511,7 @@ class StudioStore {
           .filter((item) => item.status !== "reserved" || item.weekKey === currentWeek),
         blockedDays: (blockedDaysResult.data || []).map(mapRowToBlockedDay),
         services: servicesData,
+        barberServices: barberServicesData,
       };
 
       this.applyingRemote = true;
@@ -497,17 +532,19 @@ class StudioStore {
     if (!this.supabase) return;
 
     const seedState = this.loadLocalState();
-    const [barbersInsert, appointmentsInsert, blockedDaysInsert, servicesInsert] = await Promise.all([
+    const [barbersInsert, appointmentsInsert, blockedDaysInsert, servicesInsert, barberServicesInsert] = await Promise.all([
       this.supabase.from("barbers").upsert(seedState.barbers.map(mapBarberToRow), { onConflict: "id" }),
       this.supabase.from("appointments").upsert(seedState.appointments.map(mapAppointmentToRow), { onConflict: "id" }),
       this.supabase.from("blocked_days").upsert(seedState.blockedDays.map(mapBlockedDayToRow), { onConflict: "id" }),
       this.supabase.from("services").upsert(seedState.services.map(mapServiceToRow), { onConflict: "id" }),
+      this.supabase.from("barber_services").upsert(seedState.barberServices.map(mapBarberServiceToRow), { onConflict: "id" }),
     ]);
 
     if (barbersInsert.error) throw barbersInsert.error;
     if (appointmentsInsert.error) throw appointmentsInsert.error;
     if (blockedDaysInsert.error) throw blockedDaysInsert.error;
     if (servicesInsert.error) console.warn("Supabase services seed skipped", servicesInsert.error);
+    if (barberServicesInsert.error) console.warn("Supabase barber services seed skipped", barberServicesInsert.error);
 
     await this.syncFromRemote();
   }
@@ -526,6 +563,9 @@ class StudioStore {
         this.syncFromRemote().catch((error) => console.error(error));
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "services" }, () => {
+        this.syncFromRemote().catch((error) => console.error(error));
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "barber_services" }, () => {
         this.syncFromRemote().catch((error) => console.error(error));
       })
       .subscribe();
@@ -622,6 +662,20 @@ class StudioStore {
         .from("services")
         .upsert(mapServiceToRow(event.record), { onConflict: "id" });
       if (error) throw error;
+      return;
+    }
+
+    if (event.table === "barber_services") {
+      if (event.type === "REPLACE") {
+        if (!event.barberId) return;
+        const removeExisting = await this.supabase.from("barber_services").delete().eq("barber_id", event.barberId);
+        if (removeExisting.error) throw removeExisting.error;
+        if (!event.records?.length) return;
+        const insertRows = await this.supabase
+          .from("barber_services")
+          .upsert(event.records.map(mapBarberServiceToRow), { onConflict: "id" });
+        if (insertRows.error) throw insertRows.error;
+      }
     }
   }
 
@@ -693,6 +747,7 @@ class StudioStore {
     this.state.barbers = this.state.barbers.filter((barber) => barber.id !== id);
     this.state.appointments = this.state.appointments.filter((item) => item.barberId !== id);
     this.state.blockedDays = this.state.blockedDays.filter((item) => item.barberId !== id);
+    this.state.barberServices = this.state.barberServices.filter((item) => item.barberId !== id);
     this.persist({ type: "DELETE", table: "barbers", id });
   }
 
@@ -706,7 +761,7 @@ class StudioStore {
         table: "barbers",
         record: this.state.barbers.find((barber) => barber.id === payload.id),
       });
-      return;
+      return this.state.barbers.find((barber) => barber.id === payload.id);
     }
 
     const { id, ...barberPayload } = payload;
@@ -720,6 +775,7 @@ class StudioStore {
     };
     this.state.barbers.push(created);
     this.persist({ type: "INSERT", table: "barbers", record: created });
+    return created;
   }
 
   blockDay(barberId, date) {
@@ -784,7 +840,28 @@ class StudioStore {
 
   deleteService(id) {
     this.state.services = this.state.services.filter((service) => service.id !== id);
+    this.state.barberServices = this.state.barberServices.filter((item) => item.serviceId !== id);
     this.persist({ type: "DELETE", table: "services", id });
+  }
+
+  getBarberServiceIds(barberId) {
+    return this.state.barberServices
+      .filter((item) => item.barberId === barberId && item.active)
+      .map((item) => item.serviceId);
+  }
+
+  saveBarberServices(barberId, serviceIds) {
+    const uniqueIds = [...new Set((serviceIds || []).filter(Boolean))];
+    this.state.barberServices = this.state.barberServices.filter((item) => item.barberId !== barberId);
+    const records = uniqueIds.map((serviceId) => ({
+      id: uid("barber_service"),
+      barberId,
+      serviceId,
+      active: true,
+    }));
+    this.state.barberServices.push(...records);
+    this.persist({ type: "REPLACE", table: "barber_services", barberId, records });
+    return records;
   }
 }
 
@@ -1093,6 +1170,18 @@ function serviceById(id) {
   return store.state.services.find((service) => service.id === id);
 }
 
+function barberOffersService(barberId, serviceId) {
+  if (!serviceId) return true;
+  const allRelations = store.state.barberServices || [];
+  const barberRelations = allRelations.filter((item) => item.barberId === barberId && item.active);
+  if (!allRelations.length || !barberRelations.length) return true;
+  return barberRelations.some((item) => item.serviceId === serviceId);
+}
+
+function barbersForService(serviceId) {
+  return store.activeBarbers().filter((barber) => barberOffersService(barber.id, serviceId));
+}
+
 function isPublicDateAvailable(barberId, date) {
   if (!barberId || isPastDate(date)) return false;
   return baseSlots.some((time) => isPublicSlotBookable(barberId, date, time));
@@ -1107,9 +1196,8 @@ function renderPublic() {
   const publicServices = store.state.services.filter((service) => service.active);
   const selectedService = serviceById(app.selectedServiceId) || null;
   const hasSelectedService = Boolean(selectedService);
-  const active = store.activeBarbers();
-  const publicBarbers = store.state.barbers;
-  const selected = active.find((barber) => barber.id === app.selectedBarberId) || null;
+  const filteredBarbers = hasSelectedService ? barbersForService(app.selectedServiceId) : [];
+  const selected = filteredBarbers.find((barber) => barber.id === app.selectedBarberId) || null;
   const hasSelectedBarber = hasSelectedService && Boolean(selected);
   const hasSelectedDay = hasSelectedBarber && app.publicDaySelected;
   const hasSelectedSlot = hasSelectedDay && Boolean(app.selectedSlot);
@@ -1174,7 +1262,9 @@ function renderPublic() {
     </div>`;
     bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button>`;
     bookingCardBody = `<div class="barber-list">
-      ${publicBarbers
+      ${
+        filteredBarbers.length
+          ? filteredBarbers
         .map(
           (barber) => `
           <div class="barber-option">
@@ -1184,7 +1274,9 @@ function renderPublic() {
             </button>
           </div>`
         )
-        .join("")}
+        .join("")
+          : `<div class="empty-state-card"><p>No hay barberos disponibles para este servicio.</p><button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button></div>`
+      }
     </div>`;
   }
 
@@ -1515,6 +1607,11 @@ function renderBarber() {
 }
 
 function barberEditorForm(barber, submitLabel) {
+  const services = [...store.state.services].filter((service) => service.active);
+  const storedServiceIds = barber ? store.getBarberServiceIds(barber.id) : [];
+  const selectedServiceIds = new Set(
+    storedServiceIds.length ? storedServiceIds : services.map((service) => service.id)
+  );
   return `<form id="barber-form" class="editor-card">
     <input type="hidden" name="id" value="${escapeHTML(barber?.id || "")}" />
     <label>Nombre<input name="name" required value="${escapeHTML(barber?.name || "")}" /></label>
@@ -1523,6 +1620,23 @@ function barberEditorForm(barber, submitLabel) {
     <label>Clave<input name="password" required value="${escapeHTML(barber?.password || "studio2026")}" /></label>
     <label>Especialidad<input name="specialty" value="${escapeHTML(barber?.specialty || "Servicio premium")}" /></label>
     <label class="file-control">Fotografia<input name="photo" type="file" accept="image/*" /></label>
+    <div class="service-checklist-block">
+      <span class="field-label">Servicios disponibles</span>
+      ${
+        services.length
+          ? `<div class="checklist-grid">
+              ${services
+                .map(
+                  (service) => `<label class="check-item">
+                    <input type="checkbox" name="serviceIds" value="${escapeHTML(service.id)}" ${selectedServiceIds.has(service.id) ? "checked" : ""} />
+                    <span>${escapeHTML(service.name)}</span>
+                  </label>`
+                )
+                .join("")}
+            </div>`
+          : `<p class="microcopy">Primero crea servicios en el modulo Servicios para poder asignarlos.</p>`
+      }
+    </div>
     <label class="toggle-line"><input name="active" type="checkbox" ${barber?.active ?? true ? "checked" : ""} /> Barbero activo</label>
     <div class="button-row">
       <button class="primary-action">${submitLabel}</button>
@@ -2131,30 +2245,38 @@ function bindEvents() {
     });
   });
 
-  document.querySelector("[data-reset-barber]")?.addEventListener("click", () => {
-    app.selectedBarberId = "";
-    app.publicDaySelected = false;
-    app.selectedSlot = "";
-    render();
+  document.querySelectorAll("[data-reset-barber]").forEach((button) => {
+    button.addEventListener("click", () => {
+      app.selectedBarberId = "";
+      app.publicDaySelected = false;
+      app.selectedSlot = "";
+      render();
+    });
   });
 
-  document.querySelector("[data-reset-service]")?.addEventListener("click", () => {
-    app.selectedServiceId = "";
-    app.selectedBarberId = "";
-    app.publicDaySelected = false;
-    app.selectedSlot = "";
-    render();
+  document.querySelectorAll("[data-reset-service]").forEach((button) => {
+    button.addEventListener("click", () => {
+      app.selectedServiceId = "";
+      app.selectedBarberId = "";
+      app.publicDaySelected = false;
+      app.selectedSlot = "";
+      render();
+    });
   });
 
-  document.querySelector("[data-reset-day]")?.addEventListener("click", () => {
-    app.publicDaySelected = false;
-    app.selectedSlot = "";
-    render();
+  document.querySelectorAll("[data-reset-day]").forEach((button) => {
+    button.addEventListener("click", () => {
+      app.publicDaySelected = false;
+      app.selectedSlot = "";
+      render();
+    });
   });
 
-  document.querySelector("[data-reset-slot]")?.addEventListener("click", () => {
-    app.selectedSlot = "";
-    render();
+  document.querySelectorAll("[data-reset-slot]").forEach((button) => {
+    button.addEventListener("click", () => {
+      app.selectedSlot = "";
+      render();
+    });
   });
 
   document.querySelector("#public-booking-form")?.addEventListener("submit", (event) => {
@@ -2194,6 +2316,9 @@ function bindEvents() {
 
   document.querySelector("[data-close-booking-confirm]")?.addEventListener("click", () => {
     app.bookingConfirmation = null;
+    app.selectedServiceId = "";
+    app.selectedBarberId = "";
+    app.publicDaySelected = false;
     app.selectedSlot = "";
     render();
   });
@@ -2471,7 +2596,7 @@ function bindEvents() {
     const selected = barberById(data.get("id"));
     const file = data.get("photo");
     const photo = file?.size ? await fileToDataURL(file) : selected?.photo || "";
-    store.saveBarber({
+    const barberRecord = store.saveBarber({
       id: data.get("id") || undefined,
       name: data.get("name"),
       user: data.get("user"),
@@ -2481,7 +2606,11 @@ function bindEvents() {
       active: data.get("active") === "on",
       photo,
     });
-    if (!app.adminBarberId) app.adminBarberId = store.state.barbers.at(-1).id;
+    const selectedServiceIds = data.getAll("serviceIds").map(String);
+    if (barberRecord?.id) {
+      store.saveBarberServices(barberRecord.id, selectedServiceIds);
+    }
+    if (!app.adminBarberId && barberRecord?.id) app.adminBarberId = barberRecord.id;
     render();
   });
 

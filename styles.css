@@ -1221,6 +1221,47 @@ input:focus {
   border-color: rgba(242, 207, 123, 0.38);
 }
 
+.service-checklist-block {
+  display: grid;
+  gap: 10px;
+}
+
+.field-label {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.checklist-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.check-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.check-item input {
+  width: 18px;
+  height: 18px;
+}
+
+.empty-state-card {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .admin-account-card h3,
 .admin-account-card p {
   margin-bottom: 6px;
@@ -2171,6 +2212,10 @@ dialog::backdrop {
       linear-gradient(0deg, rgba(5, 5, 5, 0.97), rgba(5, 5, 5, 0.46)),
       radial-gradient(circle at 70% 22%, rgba(245, 215, 110, 0.22), transparent 18rem),
       url("./assets/atelier-luxury-hero.png") center/cover;
+  }
+
+  .checklist-grid {
+    grid-template-columns: 1fr;
   }
 }
 
