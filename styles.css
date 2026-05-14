@@ -614,6 +614,45 @@ p {
   transform: none;
 }
 
+.public-barber-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+}
+
+.public-barber-card {
+  grid-template-columns: 1fr;
+  justify-items: center;
+  align-content: center;
+  gap: 16px;
+  min-height: 210px;
+  padding: 20px 16px;
+  border-radius: 24px;
+  text-align: center;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
+    linear-gradient(145deg, rgba(14, 18, 24, 0.96), rgba(29, 34, 42, 0.92));
+  box-shadow:
+    0 22px 42px rgba(4, 6, 10, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.public-barber-card .avatar.lg {
+  width: 96px;
+  height: 96px;
+  font-size: 28px;
+}
+
+.public-barber-copy {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+}
+
+.public-barber-copy strong {
+  font-size: 20px;
+  line-height: 1.08;
+}
+
 .barber-card strong,
 .barber-card small,
 .selected-card strong,
@@ -1809,6 +1848,27 @@ dialog::backdrop {
     gap: 12px;
   }
 
+  .public-barber-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .public-barber-card {
+    min-height: 184px;
+    padding: 16px 12px;
+    gap: 12px;
+  }
+
+  .public-barber-card .avatar.lg {
+    width: 82px;
+    height: 82px;
+    font-size: 24px;
+  }
+
+  .public-barber-copy strong {
+    font-size: 17px;
+  }
+
   .public-slots .slot {
     min-height: 118px;
     padding: 14px;
@@ -1826,6 +1886,7 @@ dialog::backdrop {
 }
 
 @media (max-width: 520px) {
+  .public-barber-grid,
   .public-slots {
     grid-template-columns: 1fr;
   }

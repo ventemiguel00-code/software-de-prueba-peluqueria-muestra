@@ -1313,17 +1313,16 @@ function renderPublic() {
   let bookingCardBody = "";
 
   if (currentStep === "barbers") {
-    bookingCardBody = `<div class="barber-list">
+    bookingCardBody = `<div class="barber-list public-barber-grid">
       ${
         activeBarbers.length
           ? activeBarbers
               .map(
                 (barber) => `
-          <button class="barber-card ${barber.id === app.selectedBarberId ? "active" : ""}" data-select-barber="${barber.id}">
-            ${avatar(barber)}
-            <span>
+          <button class="barber-card public-barber-card ${barber.id === app.selectedBarberId ? "active" : ""}" data-select-barber="${barber.id}">
+            ${avatar(barber, "lg")}
+            <span class="public-barber-copy">
               <strong>${escapeHTML(barber.name)}</strong>
-              <small>${escapeHTML(barber.specialty || "Servicio premium")}</small>
             </span>
           </button>`
               )
