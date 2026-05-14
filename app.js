@@ -1258,6 +1258,12 @@ function barbersForService(serviceId) {
   return store.activeBarbers().filter((barber) => barberOffersService(barber.id, serviceId));
 }
 
+function servicesForBarber(barberId) {
+  return store.state.services.filter(
+    (service) => service.active && barberOffersService(barberId, service.id)
+  );
+}
+
 function isPublicDateAvailable(barberId, date) {
   if (!barberId || isPastDate(date)) return false;
   return baseSlots.some((time) => isPublicSlotBookable(barberId, date, time));
@@ -1270,11 +1276,12 @@ function renderPublic() {
     app.selectedSlot = "";
   }
   const publicServices = store.state.services.filter((service) => service.active);
-  const selectedService = serviceById(app.selectedServiceId) || null;
-  const hasSelectedService = Boolean(selectedService);
-  const filteredBarbers = hasSelectedService ? barbersForService(app.selectedServiceId) : [];
-  const selected = filteredBarbers.find((barber) => barber.id === app.selectedBarberId) || null;
-  const hasSelectedBarber = hasSelectedService && Boolean(selected);
+  const activeBarbers = store.activeBarbers();
+  const selected = activeBarbers.find((barber) => barber.id === app.selectedBarberId) || null;
+  const hasSelectedBarber = Boolean(selected);
+  const filteredServices = selected ? servicesForBarber(selected.id) : [];
+  const selectedService = filteredServices.find((service) => service.id === app.selectedServiceId) || null;
+  const hasSelectedService = hasSelectedBarber && Boolean(selectedService);
   const hasSelectedDay = hasSelectedBarber && app.publicDaySelected;
   const hasSelectedSlot = hasSelectedDay && Boolean(app.selectedSlot);
   const availability = hasSelectedDay
@@ -1284,74 +1291,74 @@ function renderPublic() {
     ? "details"
     : hasSelectedDay
       ? "slots"
-      : hasSelectedBarber
+      : hasSelectedService
         ? "days"
-        : hasSelectedService
-          ? "barbers"
-          : "services";
+        : hasSelectedBarber
+          ? "services"
+          : "barbers";
   const selectedDayLabel = hasSelectedDay
     ? `${longDayNames[new Date(`${app.selectedDate}T00:00:00`).getDay()]} · ${app.selectedDate}`
     : "";
   const bookingStepper = `<div class="booking-stepper">
-      <span class="${currentStep === "services" ? "active" : hasSelectedService ? "done" : ""}">1</span>
-      <span class="${currentStep === "barbers" ? "active" : hasSelectedBarber ? "done" : ""}">2</span>
+      <span class="${currentStep === "barbers" ? "active" : hasSelectedBarber ? "done" : ""}">1</span>
+      <span class="${currentStep === "services" ? "active" : hasSelectedService ? "done" : ""}">2</span>
       <span class="${currentStep === "days" ? "active" : hasSelectedDay || hasSelectedSlot ? "done" : ""}">3</span>
       <span class="${currentStep === "slots" ? "active" : hasSelectedSlot ? "done" : ""}">4</span>
       <span class="${currentStep === "details" ? "active" : ""}">5</span>
     </div>`;
-  let bookingCardTitle = "Seleccionar servicio";
-  let bookingCardMicrocopy = "Elige el servicio que deseas reservar.";
+  let bookingCardTitle = "Elegir barbero";
+  let bookingCardMicrocopy = "Selecciona el profesional con quien quieres reservar.";
   let bookingCardActions = "";
   let bookingCardSummary = "";
   let bookingCardBody = "";
 
-  if (currentStep === "services") {
+  if (currentStep === "barbers") {
     bookingCardBody = `<div class="barber-list">
       ${
-        publicServices.length
-          ? publicServices
+        activeBarbers.length
+          ? activeBarbers
               .map(
-                (service) => `
-          <button class="barber-card ${service.id === app.selectedServiceId ? "active" : ""}" data-select-service="${service.id}">
-            <div class="summary-badge service-badge">$</div>
+                (barber) => `
+          <button class="barber-card ${barber.id === app.selectedBarberId ? "active" : ""}" data-select-barber="${barber.id}">
+            ${avatar(barber)}
             <span>
-              <strong>${escapeHTML(service.name)}</strong>
-              <small>${formatCOP(service.value)}</small>
+              <strong>${escapeHTML(barber.name)}</strong>
+              <small>${escapeHTML(barber.specialty || "Servicio premium")}</small>
             </span>
           </button>`
               )
               .join("")
-          : `<p class="microcopy">Aun no hay servicios disponibles.</p>`
+          : `<p class="microcopy">Aun no hay barberos disponibles.</p>`
       }
     </div>`;
   }
 
-  if (currentStep === "barbers") {
-    bookingCardTitle = "Elegir barbero";
-    bookingCardMicrocopy = "Selecciona el profesional con quien quieres reservar.";
+  if (currentStep === "services") {
+    bookingCardTitle = "Seleccionar servicio";
+    bookingCardMicrocopy = "Elige el servicio disponible para este barbero.";
     bookingCardSummary = `<div class="selected-card compact-selected">
-      <div class="summary-badge service-badge">$</div>
+      ${selected ? avatar(selected, "md") : ""}
       <div>
-        <strong>${escapeHTML(selectedService?.name || "")}</strong>
-        <small>${selectedService ? new Intl.NumberFormat("es-CO").format(selectedService.value) : ""}</small>
+        <strong>${escapeHTML(selected?.name || "")}</strong>
+        <small>${escapeHTML(selected?.specialty || "Servicio premium")}</small>
       </div>
     </div>`;
-    bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button>`;
+    bookingCardActions = `<button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button>`;
     bookingCardBody = `<div class="barber-list">
       ${
-        filteredBarbers.length
-          ? filteredBarbers
+        filteredServices.length
+          ? filteredServices
         .map(
-          (barber) => `
+          (service) => `
           <div class="barber-option">
-            <button class="barber-card ${barber.id === app.selectedBarberId ? "active" : ""} ${!barber.active ? "inactive" : ""}" data-select-barber="${barber.id}" ${!barber.active ? "disabled" : ""}>
-              ${avatar(barber)}
-              <span><strong>${escapeHTML(barber.name)}</strong><small>${barber.active ? escapeHTML(barber.specialty) : "No disponible"}</small></span>
+            <button class="barber-card ${service.id === app.selectedServiceId ? "active" : ""}" data-select-service="${service.id}">
+              <div class="summary-badge service-badge">$</div>
+              <span><strong>${escapeHTML(service.name)}</strong><small>${formatCOP(service.value)}</small></span>
             </button>
           </div>`
         )
         .join("")
-          : `<div class="empty-state-card"><p>No hay barberos disponibles para este servicio.</p><button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button></div>`
+          : `<div class="empty-state-card"><p>No hay servicios disponibles para este barbero.</p><button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button></div>`
       }
     </div>`;
   }
@@ -1375,7 +1382,7 @@ function renderPublic() {
         </div>
       </div>
     </div>`;
-    bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button>`;
+    bookingCardActions = `<button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button>`;
     bookingCardBody = `<div class="date-strip">${getWeekDates()
       .map((date) => {
         const d = new Date(`${date}T00:00:00`);
@@ -1414,7 +1421,7 @@ function renderPublic() {
         </div>
       </div>
     </div>`;
-    bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action" type="button" data-reset-day>Cambiar fecha</button>`;
+    bookingCardActions = `<button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action" type="button" data-reset-day>Cambiar fecha</button>`;
     bookingCardBody = `<div class="slot-grid public-slots">
       ${availability
         .map(({ time, status, appointment, dayBlocked }) => {
@@ -1456,7 +1463,7 @@ function renderPublic() {
         </div>
       </div>
     </div>`;
-    bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action" type="button" data-reset-day>Cambiar fecha</button><button class="secondary-action" type="button" data-reset-slot>Cambiar hora</button>`;
+    bookingCardActions = `<button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action" type="button" data-reset-day>Cambiar fecha</button><button class="secondary-action" type="button" data-reset-slot>Cambiar hora</button>`;
     bookingCardBody = `<form id="public-booking-form" class="form-stack">
         <div class="confirmation-summary">
           <span>Servicio</span><strong>${escapeHTML(selectedService?.name || "")}</strong>
@@ -1487,7 +1494,7 @@ function renderPublic() {
           <div class="booking-card-top">
             <div>
               <div class="section-title">
-                <span>${currentStep === "barbers" ? "01" : currentStep === "days" ? "02" : currentStep === "slots" ? "03" : "04"}</span>
+                <span>${currentStep === "barbers" ? "01" : currentStep === "services" ? "02" : currentStep === "days" ? "03" : currentStep === "slots" ? "04" : "05"}</span>
                 <h2>${bookingCardTitle}</h2>
               </div>
               <p class="microcopy">${escapeHTML(bookingCardMicrocopy)}</p>
@@ -2351,7 +2358,6 @@ function bindEvents() {
   document.querySelectorAll("[data-select-service]").forEach((button) => {
     button.addEventListener("click", () => {
       app.selectedServiceId = button.dataset.selectService;
-      app.selectedBarberId = "";
       app.publicDaySelected = false;
       app.selectedSlot = "";
       render();
@@ -2361,6 +2367,7 @@ function bindEvents() {
   document.querySelectorAll("[data-select-barber]").forEach((button) => {
     button.addEventListener("click", () => {
       app.selectedBarberId = button.dataset.selectBarber;
+      app.selectedServiceId = "";
       app.publicDaySelected = false;
       app.selectedSlot = "";
       render();
@@ -2420,6 +2427,7 @@ function bindEvents() {
   document.querySelectorAll("[data-reset-barber]").forEach((button) => {
     button.addEventListener("click", () => {
       app.selectedBarberId = "";
+      app.selectedServiceId = "";
       app.publicDaySelected = false;
       app.selectedSlot = "";
       render();
@@ -2429,7 +2437,6 @@ function bindEvents() {
   document.querySelectorAll("[data-reset-service]").forEach((button) => {
     button.addEventListener("click", () => {
       app.selectedServiceId = "";
-      app.selectedBarberId = "";
       app.publicDaySelected = false;
       app.selectedSlot = "";
       render();
@@ -2488,8 +2495,8 @@ function bindEvents() {
 
   document.querySelector("[data-close-booking-confirm]")?.addEventListener("click", () => {
     app.bookingConfirmation = null;
-    app.selectedServiceId = "";
     app.selectedBarberId = "";
+    app.selectedServiceId = "";
     app.publicDaySelected = false;
     app.selectedSlot = "";
     render();
