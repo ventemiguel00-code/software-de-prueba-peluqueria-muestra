@@ -1226,7 +1226,6 @@ function buildBarberSummary(barberId, anchorDate) {
   const weekAppointments = store.state.appointments.filter(
     (item) => item.barberId === barberId && weekDates.has(item.date) && COUNTABLE_STATUSES.has(item.status)
   );
-  const fixedToday = todayReservations.filter((item) => item.status === "fixed").length;
   const totals = realizedToday.reduce(
     (acc, appointment) => {
       const income = calculateAppointmentIncome(appointment);
@@ -1236,12 +1235,14 @@ function buildBarberSummary(barberId, anchorDate) {
     },
     { income: 0, barber: 0 }
   );
+  const weeklyBarberGain = weekAppointments
+    .filter(isRealizedAppointment)
+    .reduce((sum, appointment) => sum + calculateAppointmentIncome(appointment).barber, 0);
   return {
     reservationsToday: todayReservations.length,
-    fixedToday,
     incomeToday: totals.income,
     barberGainToday: totals.barber,
-    weekTotal: weekAppointments.length,
+    barberGainWeek: weeklyBarberGain,
   };
 }
 
@@ -1744,10 +1745,8 @@ function barberSummaryCards(barber, anchorDate, viewer = "barber") {
     <div class="section-title"><span>R</span><h2>${title}</h2></div>
     <div class="dashboard-cards">
       <div><span>Reservas de hoy</span><strong>${summary.reservationsToday}</strong></div>
-      <div><span>Ingresos de hoy</span><strong>${formatCOP(summary.incomeToday)}</strong></div>
-      <div><span>Ganancia del barbero</span><strong>${formatCOP(summary.barberGainToday)}</strong></div>
-      <div><span>Citas fijadas de hoy</span><strong>${summary.fixedToday}</strong></div>
-      <div><span>Total semana del barbero</span><strong>${summary.weekTotal}</strong></div>
+      <div><span>Ganancias de hoy</span><strong>${formatCOP(summary.barberGainToday)}</strong></div>
+      <div><span>Ganancias semanales</span><strong>${formatCOP(summary.barberGainWeek)}</strong></div>
     </div>
   </section>`;
 }
