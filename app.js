@@ -1110,7 +1110,7 @@ function renderLayoutShell() {
     <header class="topbar">
       <button class="brand" data-view="public" aria-label="Ir a agenda publica">
         <span class="brand-mark"></span>
-        <span><strong>Barber</strong><small>Delux</small></span>
+        <span><strong>Vision</strong><small>Barber</small></span>
       </button>
       <nav class="nav-tabs" aria-label="Navegacion principal">
         ${tabs.map(([id, label]) => `<button class="${app.view === id ? "active" : ""}" data-view="${id}">${label}</button>`).join("")}
@@ -1483,7 +1483,7 @@ function renderPublic() {
       <div class="hero-bg ${app.backgroundMedia?.type === "video" ? "video-backed" : ""}"></div>
       <div class="hero-copy">
         <p class="eyebrow">Reservas premium para barberias modernas</p>
-        <h1>Barber Delux</h1>
+        <h1>Vision Barber</h1>
         <p>Agenda publica, control operativo y sincronizacion en tiempo real con una experiencia rapida para clientes, administradores y barberos.</p>
       </div>
     </section>
