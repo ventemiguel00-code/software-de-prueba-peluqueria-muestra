@@ -137,7 +137,7 @@ button:disabled {
   width: 56px;
   height: 56px;
   border-radius: 16px;
-  background: url("./assets/vision-barber-logo.svg") center/cover no-repeat;
+  background: url("./assets/vision-barber-logo.avif") center/cover no-repeat;
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.24);
   flex-shrink: 0;
 }
@@ -1879,7 +1879,7 @@ body {
 }
 
 .brand-mark {
-  background: url("./assets/vision-barber-logo.svg") center/cover no-repeat;
+  background: url("./assets/vision-barber-logo.avif") center/cover no-repeat;
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.24);
 }
 
