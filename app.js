@@ -1184,6 +1184,16 @@ function serviceValueForAppointment(appointment) {
   return Number(byName?.value) || 0;
 }
 
+function serviceShareForAppointment(appointment) {
+  const service =
+    serviceById(appointment?.serviceId) ||
+    store.state.services.find((item) => item.name === appointment?.serviceName);
+  return {
+    adminPercentage: Number(service?.adminPercentage) || 0,
+    barberPercentage: Number(service?.barberPercentage) || 0,
+  };
+}
+
 function formatCOP(value) {
   return new Intl.NumberFormat("es-CO", {
     style: "currency",
@@ -1195,6 +1205,44 @@ function formatCOP(value) {
 
 function isRealizedAppointment(appointment) {
   return appointment?.visitState === "done";
+}
+
+function calculateAppointmentIncome(appointment) {
+  const value = serviceValueForAppointment(appointment);
+  const share = serviceShareForAppointment(appointment);
+  return {
+    total: value,
+    admin: Math.round((value * share.adminPercentage) / 100),
+    barber: Math.round((value * share.barberPercentage) / 100),
+  };
+}
+
+function buildBarberSummary(barberId, anchorDate) {
+  const todayReservations = store.state.appointments.filter(
+    (item) => item.barberId === barberId && item.date === anchorDate && COUNTABLE_STATUSES.has(item.status)
+  );
+  const realizedToday = todayReservations.filter(isRealizedAppointment);
+  const weekDates = new Set(getWeekDates(new Date(`${anchorDate}T00:00:00`)).filter((date) => date <= anchorDate));
+  const weekAppointments = store.state.appointments.filter(
+    (item) => item.barberId === barberId && weekDates.has(item.date) && COUNTABLE_STATUSES.has(item.status)
+  );
+  const fixedToday = todayReservations.filter((item) => item.status === "fixed").length;
+  const totals = realizedToday.reduce(
+    (acc, appointment) => {
+      const income = calculateAppointmentIncome(appointment);
+      acc.income += income.total;
+      acc.barber += income.barber;
+      return acc;
+    },
+    { income: 0, barber: 0 }
+  );
+  return {
+    reservationsToday: todayReservations.length,
+    fixedToday,
+    incomeToday: totals.income,
+    barberGainToday: totals.barber,
+    weekTotal: weekAppointments.length,
+  };
 }
 
 function barberOffersService(barberId, serviceId) {
@@ -1267,7 +1315,7 @@ function renderPublic() {
             <div class="summary-badge service-badge">$</div>
             <span>
               <strong>${escapeHTML(service.name)}</strong>
-              <small>${new Intl.NumberFormat("es-CO").format(service.value)} · Admin ${service.adminPercentage}% · Barbero ${service.barberPercentage}%</small>
+              <small>${formatCOP(service.value)}</small>
             </span>
           </button>`
               )
@@ -1683,7 +1731,23 @@ function adminSelectedHeader(barber) {
     <div class="button-row selected-admin-actions">
       <button class="secondary-action" data-admin-home>Inicio</button>
       <button class="secondary-action" data-admin-profile>Perfil</button>
+      <button class="secondary-action" data-admin-summary>Resumen</button>
       <button class="primary-action" data-admin-agenda>Agenda</button>
+    </div>
+  </section>`;
+}
+
+function barberSummaryCards(barber, anchorDate, viewer = "barber") {
+  const summary = buildBarberSummary(barber.id, anchorDate);
+  const title = viewer === "admin" ? "Resumen del barbero" : "Resumen de hoy";
+  return `<section class="admin-main dashboard-lite">
+    <div class="section-title"><span>R</span><h2>${title}</h2></div>
+    <div class="dashboard-cards">
+      <div><span>Reservas de hoy</span><strong>${summary.reservationsToday}</strong></div>
+      <div><span>Ingresos de hoy</span><strong>${formatCOP(summary.incomeToday)}</strong></div>
+      <div><span>Ganancia del barbero</span><strong>${formatCOP(summary.barberGainToday)}</strong></div>
+      <div><span>Citas fijadas de hoy</span><strong>${summary.fixedToday}</strong></div>
+      <div><span>Total semana del barbero</span><strong>${summary.weekTotal}</strong></div>
     </div>
   </section>`;
 }
@@ -1855,6 +1919,15 @@ function adminDashboardSection() {
   );
   const incomeToday = realizedToday.reduce((sum, appointment) => sum + serviceValueForAppointment(appointment), 0);
   const incomeWeek = realizedWeek.reduce((sum, appointment) => sum + serviceValueForAppointment(appointment), 0);
+  const gainsToday = realizedToday.reduce(
+    (acc, appointment) => {
+      const income = calculateAppointmentIncome(appointment);
+      acc.admin += income.admin;
+      acc.barber += income.barber;
+      return acc;
+    },
+    { admin: 0, barber: 0 }
+  );
 
   return `<section class="admin-main dashboard-lite">
     <div class="section-title"><span>D</span><h2>Resumen de hoy</h2></div>
@@ -1862,6 +1935,8 @@ function adminDashboardSection() {
       <div><span>Reservas de hoy</span><strong>${reservedToday}</strong></div>
       <div><span>Ingresos de hoy</span><strong>${formatCOP(incomeToday)}</strong></div>
       <div><span>Ingresos de la semana actual</span><strong>${formatCOP(incomeWeek)}</strong></div>
+      <div><span>Ganancias del administrador</span><strong>${formatCOP(gainsToday.admin)}</strong></div>
+      <div><span>Ganancias de los barberos</span><strong>${formatCOP(gainsToday.barber)}</strong></div>
     </div>
     <label class="toggle-line sound-toggle"><input type="checkbox" data-sound-toggle ${app.soundEnabled ? "checked" : ""} /> Sonido sutil para nueva reserva</label>
   </section>`;
@@ -1974,6 +2049,15 @@ function renderAdminV2() {
               <button class="icon-action danger" data-delete-barber="${selected.id}">Eliminar barbero</button>
             </div>
           </section>
+        </section>`
+        : ""
+    }
+
+    ${
+      selected && app.adminView === "summary"
+        ? `<section class="admin-stack">
+          ${adminSelectedHeader(selected)}
+          ${barberSummaryCards(selected, todayISO(), "admin")}
         </section>`
         : ""
     }
@@ -2151,11 +2235,17 @@ function renderBarberV2() {
         </div>
         ${renderCounter(counterValue(counterSummary.weeklyByBarber, barber.id), "header-counter")}
       </div>
-      <button class="secondary-action" data-logout>Salir</button>
+      <div class="button-row selected-admin-actions">
+        <button class="secondary-action ${app.barberScheduleView === "summary" ? "active-action" : ""}" data-barber-summary>Resumen</button>
+        <button class="secondary-action ${app.barberScheduleView !== "summary" ? "active-action" : ""}" data-barber-agenda>Agenda</button>
+        <button class="secondary-action" data-logout>Salir</button>
+      </div>
     </section>
     <section class="barber-board">
       ${
-        app.barberScheduleView === "days"
+        app.barberScheduleView === "summary"
+          ? `${barberSummaryCards(barber, todayISO(), "barber")}`
+          : app.barberScheduleView === "days"
           ? `<div class="section-title"><span>D</span><h2>Dias de la semana</h2></div>${weekButtons(app.barberDate, "data-barber-date")}`
           : `<div class="agenda-toolbar">
             <div>
@@ -2785,6 +2875,12 @@ function bindEvents() {
     render();
   });
 
+  document.querySelector("[data-admin-summary]")?.addEventListener("click", () => {
+    app.adminView = "summary";
+    app.adminSelectedSlots = [];
+    render();
+  });
+
   document.querySelector("[data-admin-agenda]")?.addEventListener("click", () => {
     app.adminView = "agenda";
     app.adminScheduleView = "hours";
@@ -2795,6 +2891,16 @@ function bindEvents() {
   document.querySelector("[data-admin-days]")?.addEventListener("click", () => {
     app.adminScheduleView = "days";
     app.adminSelectedSlots = [];
+    render();
+  });
+
+  document.querySelector("[data-barber-summary]")?.addEventListener("click", () => {
+    app.barberScheduleView = "summary";
+    render();
+  });
+
+  document.querySelector("[data-barber-agenda]")?.addEventListener("click", () => {
+    app.barberScheduleView = "hours";
     render();
   });
 
