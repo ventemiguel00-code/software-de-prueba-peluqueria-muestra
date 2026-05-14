@@ -1879,12 +1879,8 @@ body {
 }
 
 .brand-mark {
-  border-color: rgba(245, 215, 110, 0.78);
-  background:
-    linear-gradient(135deg, #6d5117 0%, #f5d76e 46%, #8a6a1f 48%, #2b210c 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    0 14px 34px rgba(212, 175, 55, 0.22);
+  background: url("./assets/vision-barber-logo.svg") center/cover no-repeat;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.24);
 }
 
 .brand strong {
