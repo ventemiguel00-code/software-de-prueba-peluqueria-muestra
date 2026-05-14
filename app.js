@@ -951,6 +951,7 @@ const app = {
   adminScheduleView: "hours",
   adminSelectedSlots: [],
   adminModalMode: "reserved",
+  adminServiceEditAppointmentId: "",
   adminSession: JSON.parse(sessionStorage.getItem(ADMIN_SESSION_KEY) || "null"),
   adminLoginError: "",
   adminAccountMessage: "",
@@ -1168,6 +1169,32 @@ function publicFlowCard({ step, title, state = "locked", summary = "", actions =
 
 function serviceById(id) {
   return store.state.services.find((service) => service.id === id);
+}
+
+function serviceNameForAppointment(appointment) {
+  if (!appointment) return "Sin servicio";
+  return appointment.serviceName || serviceById(appointment.serviceId)?.name || "Sin servicio";
+}
+
+function serviceValueForAppointment(appointment) {
+  if (!appointment) return 0;
+  const byId = serviceById(appointment.serviceId);
+  if (byId) return Number(byId.value) || 0;
+  const byName = store.state.services.find((service) => service.name === appointment.serviceName);
+  return Number(byName?.value) || 0;
+}
+
+function formatCOP(value) {
+  return new Intl.NumberFormat("es-CO", {
+    style: "currency",
+    currency: "COP",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(Number(value) || 0).replace(/\s+/g, "");
+}
+
+function isRealizedAppointment(appointment) {
+  return appointment?.visitState === "done";
 }
 
 function barberOffersService(barberId, serviceId) {
@@ -1818,28 +1845,23 @@ function backgroundSettingsSection() {
 
 function adminDashboardSection() {
   const today = todayISO();
-  const activeBarbers = store.activeBarbers();
   const todayAppointments = store.state.appointments.filter((item) => item.date === today);
-  const fixedToday = todayAppointments.filter((item) => item.status === "fixed").length;
-  const reservedToday = todayAppointments.filter((item) => item.status === "reserved").length;
-  const totalSlots = activeBarbers.length * baseSlots.length;
-  const busySlots = todayAppointments.filter((item) => ["reserved", "fixed", "blocked"].includes(item.status)).length;
-  const available = Math.max(totalSlots - busySlots, 0);
-  const busiest = activeBarbers
-    .map((barber) => ({
-      barber,
-      total: todayAppointments.filter((item) => item.barberId === barber.id && ["reserved", "fixed"].includes(item.status)).length,
-    }))
-    .sort((a, b) => b.total - a.total)[0];
+  const currentWeekDates = getWeekDates(new Date(`${today}T00:00:00`)).filter((date) => date <= today);
+  const currentWeekSet = new Set(currentWeekDates);
+  const reservedToday = todayAppointments.filter((item) => COUNTABLE_STATUSES.has(item.status)).length;
+  const realizedToday = todayAppointments.filter(isRealizedAppointment);
+  const realizedWeek = store.state.appointments.filter(
+    (item) => isRealizedAppointment(item) && currentWeekSet.has(item.date)
+  );
+  const incomeToday = realizedToday.reduce((sum, appointment) => sum + serviceValueForAppointment(appointment), 0);
+  const incomeWeek = realizedWeek.reduce((sum, appointment) => sum + serviceValueForAppointment(appointment), 0);
 
   return `<section class="admin-main dashboard-lite">
     <div class="section-title"><span>D</span><h2>Resumen de hoy</h2></div>
     <div class="dashboard-cards">
       <div><span>Reservas de hoy</span><strong>${reservedToday}</strong></div>
-      <div><span>Citas fijadas</span><strong>${fixedToday}</strong></div>
-      <div><span>Horarios disponibles</span><strong>${available}</strong></div>
-      <div><span>Barbero mas ocupado</span><strong>${busiest?.total ? escapeHTML(busiest.barber.name) : "Sin actividad"}</strong></div>
-      <div><span>Total turnos del dia</span><strong>${todayAppointments.length}</strong></div>
+      <div><span>Ingresos de hoy</span><strong>${formatCOP(incomeToday)}</strong></div>
+      <div><span>Ingresos de la semana actual</span><strong>${formatCOP(incomeWeek)}</strong></div>
     </div>
     <label class="toggle-line sound-toggle"><input type="checkbox" data-sound-toggle ${app.soundEnabled ? "checked" : ""} /> Sonido sutil para nueva reserva</label>
   </section>`;
@@ -1990,6 +2012,7 @@ function renderAdminV2() {
               <option value="">Sin estado</option>
               <option value="arrived" ${singleSelectedRecord?.visitState === "arrived" ? "selected" : ""}>Cliente llego</option>
               <option value="service" ${singleSelectedRecord?.visitState === "service" ? "selected" : ""}>En servicio</option>
+              <option value="done" ${singleSelectedRecord?.visitState === "done" ? "selected" : ""}>Realizada</option>
               <option value="no_show" ${singleSelectedRecord?.visitState === "no_show" ? "selected" : ""}>No asistio</option>
             </select>
           </label>
@@ -2024,6 +2047,7 @@ function renderAdminV2() {
 function adminHoursView(barber) {
   const counterSummary = buildCounterSummary(app.selectedDate);
   const rows = baseSlots.map((time) => ({ time, ...statusFor(barber.id, app.selectedDate, time) }));
+  const services = store.state.services.filter((service) => service.active);
   return `<div class="agenda-toolbar">
     <div>
       <div class="section-title"><span>H</span><h2>Horarios del dia</h2></div>
@@ -2044,17 +2068,33 @@ function adminHoursView(barber) {
       .map(({ time, status, appointment, dayBlocked }) => {
         const unavailable = isUnavailableSlot(app.selectedDate, time, status);
         const chatPhone = appointment?.whatsapp ? moneylessPhone(appointment.whatsapp) : "";
+        const serviceName = serviceNameForAppointment(appointment);
+        const serviceValue = formatCOP(serviceValueForAppointment(appointment));
+        const realized = isRealizedAppointment(appointment);
+        const actionEnabled = appointment && COUNTABLE_STATUSES.has(appointment.status);
+        const statusLabel = realized
+          ? "Realizada"
+          : dayBlocked
+            ? "Dia completo bloqueado"
+            : unavailable && status === "available"
+              ? "No disponible"
+              : STATUS[status].label;
         return `
-      <button class="slot-row ${STATUS[status].tone} ${unavailable ? "unavailable" : ""} ${app.adminSelectedSlots.includes(time) ? "picked" : ""}" data-admin-slot="${time}" ${status === "blocked" || (status === "available" && unavailable) ? "disabled" : ""}>
-        <div><strong>${slotRange(time)}</strong><span>${dayBlocked ? "Dia completo bloqueado" : unavailable && status === "available" ? "No disponible" : STATUS[status].label}</span></div>
+      <button class="slot-row ${realized ? "completed" : STATUS[status].tone} ${unavailable ? "unavailable" : ""} ${app.adminSelectedSlots.includes(time) ? "picked" : ""}" data-admin-slot="${time}" ${status === "blocked" || (status === "available" && unavailable) ? "disabled" : ""}>
+        <div><strong>${slotRange(time)}</strong><span>${statusLabel}</span></div>
         <div class="slot-client">
           <strong>${escapeHTML(appointment?.clientName || "Sin cliente")}</strong>
           <small>${appointment?.whatsapp ? displayPhone(appointment.whatsapp) : "Sin WhatsApp"}</small>
+          ${appointment ? `<small>Servicio: ${escapeHTML(serviceName)}</small>` : ""}
+          ${appointment ? `<small>Valor: ${serviceValue}</small>` : ""}
+          ${appointment ? `<small>Barbero: ${escapeHTML(barber.name)}</small>` : ""}
         </div>
         ${
-          chatPhone
+          chatPhone || actionEnabled
             ? `<div class="row-actions">
-                <span class="icon-action client-chat-action" data-client-chat="${chatPhone}" role="link" tabindex="-1">Chatear con cliente</span>
+                ${chatPhone ? `<span class="icon-action client-chat-action" data-client-chat="${chatPhone}" role="link" tabindex="-1">Chatear con cliente</span>` : ""}
+                ${actionEnabled ? `<span class="icon-action neutral-action" data-change-appointment-service="${appointment.id}" role="button" tabindex="-1">Modificar servicio</span>` : ""}
+                ${actionEnabled && !realized ? `<span class="icon-action success-action" data-mark-done="${appointment.id}" role="button" tabindex="-1">Marcar como realizada</span>` : ""}
               </div>`
             : ""
         }
@@ -2064,7 +2104,26 @@ function adminHoursView(barber) {
   </div>
   <div class="day-counter-row">
     ${renderCounter(counterValue(counterSummary.dailyByBarber, barber.id), "day-counter")}
-  </div>`;
+  </div>
+  <dialog id="service-dialog">
+    <form method="dialog" id="service-change-form" class="form-stack modal-card">
+      <h3>Modificar servicio</h3>
+      <label>Servicio
+        <select name="serviceId">
+          ${services
+            .map((service) => {
+              const selectedOption = service.id === (store.state.appointments.find((item) => item.id === app.adminServiceEditAppointmentId)?.serviceId || "") ? "selected" : "";
+              return `<option value="${escapeHTML(service.id)}" ${selectedOption}>${escapeHTML(service.name)} - ${formatCOP(service.value)}</option>`;
+            })
+            .join("")}
+        </select>
+      </label>
+      <div class="button-row">
+        <button class="secondary-action" type="button" data-close-service-dialog>Cancelar</button>
+        <button class="primary-action" value="confirm">Guardar servicio</button>
+      </div>
+    </form>
+  </dialog>`;
 }
 
 function renderBarberV2() {
@@ -2242,6 +2301,30 @@ function bindEvents() {
       const phone = event.currentTarget.dataset.clientChat;
       if (!phone) return;
       window.open(`https://wa.me/${phone}`, "_blank", "noopener,noreferrer");
+    });
+  });
+
+  document.querySelectorAll("[data-change-appointment-service]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      app.adminServiceEditAppointmentId = button.dataset.changeAppointmentService;
+      render();
+      document.querySelector("#service-dialog")?.showModal();
+    });
+  });
+
+  document.querySelectorAll("[data-mark-done]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const appointment = store.state.appointments.find((item) => item.id === button.dataset.markDone);
+      if (!appointment) return;
+      store.upsertAppointment({
+        ...appointment,
+        visitState: "done",
+      });
+      render();
     });
   });
 
@@ -2656,6 +2739,27 @@ function bindEvents() {
     document.querySelector("#manual-dialog")?.close();
     document.querySelector("#action-dialog")?.close();
     document.querySelector("#release-confirm-dialog")?.close();
+  });
+
+  document.querySelector("[data-close-service-dialog]")?.addEventListener("click", () => {
+    app.adminServiceEditAppointmentId = "";
+    document.querySelector("#service-dialog")?.close();
+  });
+
+  document.querySelector("#service-change-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const appointment = store.state.appointments.find((item) => item.id === app.adminServiceEditAppointmentId);
+    if (!appointment) return;
+    const form = new FormData(event.currentTarget);
+    const service = serviceById(String(form.get("serviceId") || ""));
+    if (!service) return;
+    store.upsertAppointment({
+      ...appointment,
+      serviceId: service.id,
+      serviceName: service.name,
+    });
+    app.adminServiceEditAppointmentId = "";
+    render();
   });
 
   document.querySelectorAll("[data-admin-panel]").forEach((button) => {

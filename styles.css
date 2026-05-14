@@ -938,6 +938,11 @@ p {
   background: rgba(174, 184, 187, 0.09);
 }
 
+.slot-row.completed {
+  border-color: rgba(121, 224, 178, 0.5);
+  background: rgba(121, 224, 178, 0.12);
+}
+
 .selected-card {
   display: flex;
   align-items: center;
@@ -1467,6 +1472,22 @@ button.slot-row {
   padding: 0 12px;
   text-align: center;
   white-space: nowrap;
+}
+
+.neutral-action,
+.success-action {
+  min-width: max-content;
+  padding: 0 12px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.neutral-action {
+  color: #f5d76e;
+}
+
+.success-action {
+  color: #9be6bb;
 }
 
 dialog {
