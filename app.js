@@ -978,7 +978,7 @@ function statusFor(barberId, date, time) {
 }
 
 function isUnavailableSlot(date, time, status) {
-  return isPastDate(date) || slotHasPassed(date, time) || status === "blocked";
+  return isPastDate(date) || slotHasPassed(date, time);
 }
 
 function publicSlotLabel(status, dayBlocked) {
@@ -2170,7 +2170,7 @@ function adminHoursView(barber) {
               ? "No disponible"
               : STATUS[status].label;
         return `
-      <button class="slot-row ${realized ? "completed" : STATUS[status].tone} ${unavailable ? "unavailable" : ""} ${app.adminSelectedSlots.includes(time) ? "picked" : ""}" data-admin-slot="${time}" ${status === "blocked" || (status === "available" && unavailable) ? "disabled" : ""}>
+      <button class="slot-row ${realized ? "completed" : STATUS[status].tone} ${unavailable ? "unavailable" : ""} ${app.adminSelectedSlots.includes(time) ? "picked" : ""}" data-admin-slot="${time}" ${status === "available" && unavailable ? "disabled" : ""}>
         <div><strong>${slotRange(time)}</strong><span>${statusLabel}</span></div>
         <div class="slot-client">
           <strong>${escapeHTML(appointment?.clientName || "Sin cliente")}</strong>
