@@ -1133,8 +1133,8 @@ function weekButtons(selected, attr = "data-admin-date") {
   return `<div class="week-cards">${getWeekDates()
     .map((date) => {
       const d = new Date(`${date}T00:00:00`);
-      const disabled = isPastDate(date);
-      return `<button class="${date === selected ? "active" : ""} ${disabled ? "past-date" : ""}" ${attr}="${date}" ${disabled ? "disabled" : ""}>
+      const past = isPastDate(date);
+      return `<button class="${date === selected ? "active" : ""} ${past ? "past-date" : ""}" ${attr}="${date}">
         <span>${longDayNames[d.getDay()]}</span>
         <strong>${String(d.getDate()).padStart(2, "0")}</strong>
       </button>`;
