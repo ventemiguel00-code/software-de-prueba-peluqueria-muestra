@@ -2170,7 +2170,7 @@ function adminHoursView(barber) {
               ? "No disponible"
               : STATUS[status].label;
         return `
-      <button class="slot-row ${realized ? "completed" : STATUS[status].tone} ${unavailable ? "unavailable" : ""} ${app.adminSelectedSlots.includes(time) ? "picked" : ""}" data-admin-slot="${time}" ${status === "available" && unavailable ? "disabled" : ""}>
+      <button class="slot-row ${realized ? "completed" : STATUS[status].tone} ${unavailable ? "unavailable" : ""} ${app.adminSelectedSlots.includes(time) ? "picked" : ""}" data-admin-slot="${time}">
         <div><strong>${slotRange(time)}</strong><span>${statusLabel}</span></div>
         <div class="slot-client">
           <strong>${escapeHTML(appointment?.clientName || "Sin cliente")}</strong>
