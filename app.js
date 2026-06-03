@@ -20,6 +20,10 @@ const longDayNames = ["Domingo", "Lunes", "Martes", "Miercoles", "Jueves", "Vier
 const OPEN_HOUR = 8;
 const CLOSE_HOUR = 20;
 const SLOT_MINUTES = 60;
+const DEFAULT_BUSINESS_ID = "business_principal";
+const DEFAULT_BUSINESS_SLUG = "barberia-principal";
+const SUPER_ADMIN_USER = "SDMcompany";
+const SUPER_ADMIN_PASSWORD_HASH = "9c92c00e241ec0c78798834456113f123762afcb4ef84e337eafbcf7d372f2fc";
 const baseSlots = Array.from({ length: CLOSE_HOUR - OPEN_HOUR }, (_, index) =>
   `${String(OPEN_HOUR + index).padStart(2, "0")}:00`
 );
@@ -81,6 +85,15 @@ function displayPhone(raw) {
   return `+${digits.slice(0, 2)} ${digits.slice(2, 5)} ${digits.slice(5, 8)} ${digits.slice(8)}`;
 }
 
+function slugify(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function parseSlotTime(time) {
   const [hour, minute] = String(time).split(":").map(Number);
   return { hour: hour || 0, minute: minute || 0 };
@@ -132,11 +145,62 @@ function escapeHTML(value) {
     .replaceAll("'", "&#039;");
 }
 
+function defaultBusiness() {
+  return {
+    id: DEFAULT_BUSINESS_ID,
+    name: "Vision Barber",
+    slug: DEFAULT_BUSINESS_SLUG,
+    logoUrl: "./assets/vision-barber-logo.avif",
+    primaryColor: "#d4af37",
+    secondaryColor: "#111111",
+    backgroundUrl: "",
+    active: true,
+    createdAt: todayISO(),
+    updatedAt: todayISO(),
+  };
+}
+
+function normalizeBusiness(record = {}) {
+  const base = defaultBusiness();
+  return {
+    ...base,
+    ...record,
+    id: record.id || base.id,
+    slug: String(record.slug || base.slug).trim().toLowerCase(),
+    updatedAt: record.updatedAt || todayISO(),
+  };
+}
+
+function normalizeTenantState(state = {}) {
+  const business = normalizeBusiness((state.businesses || [defaultBusiness()])[0] || defaultBusiness());
+  const businesses = (state.businesses?.length ? state.businesses : [business]).map(normalizeBusiness);
+  const currentBusinessId = state.meta?.currentBusinessId || businesses[0]?.id || DEFAULT_BUSINESS_ID;
+  const attachBusiness = (item) => ({ ...item, negocioId: item.negocioId || currentBusinessId });
+  return {
+    ...state,
+    meta: {
+      dayKey: todayISO(),
+      weekKey: getWeekKey(),
+      selectedDate: todayISO(),
+      ...state.meta,
+      currentBusinessId,
+    },
+    businesses,
+    barbers: (state.barbers || []).map(attachBusiness),
+    appointments: (state.appointments || []).map(attachBusiness),
+    blockedDays: (state.blockedDays || []).map(attachBusiness),
+    services: (state.services || []).map(attachBusiness),
+    barberServices: (state.barberServices || []).map(attachBusiness),
+  };
+}
+
 const defaultState = () => ({
-  meta: { dayKey: todayISO(), weekKey: getWeekKey(), selectedDate: todayISO() },
+  meta: { dayKey: todayISO(), weekKey: getWeekKey(), selectedDate: todayISO(), currentBusinessId: DEFAULT_BUSINESS_ID },
+  businesses: [defaultBusiness()],
   barbers: [
     {
       id: "barber_mateo",
+      negocioId: DEFAULT_BUSINESS_ID,
       name: "Mateo Rivas",
       user: "mateo",
       password: "studio2026",
@@ -148,6 +212,7 @@ const defaultState = () => ({
     },
     {
       id: "barber_dante",
+      negocioId: DEFAULT_BUSINESS_ID,
       name: "Dante Molina",
       user: "dante",
       password: "studio2026",
@@ -159,6 +224,7 @@ const defaultState = () => ({
     },
     {
       id: "barber_elias",
+      negocioId: DEFAULT_BUSINESS_ID,
       name: "Elias Torres",
       user: "elias",
       password: "studio2026",
@@ -170,6 +236,7 @@ const defaultState = () => ({
     },
     {
       id: "barber_simon",
+      negocioId: DEFAULT_BUSINESS_ID,
       name: "Simon Vera",
       user: "simon",
       password: "studio2026",
@@ -183,6 +250,7 @@ const defaultState = () => ({
   appointments: [
     {
       id: "apt_seed_1",
+      negocioId: DEFAULT_BUSINESS_ID,
       barberId: "barber_mateo",
       date: todayISO(),
       time: "10:00",
@@ -194,6 +262,7 @@ const defaultState = () => ({
     },
     {
       id: "apt_seed_2",
+      negocioId: DEFAULT_BUSINESS_ID,
       barberId: "barber_dante",
       date: todayISO(),
       time: "15:20",
@@ -205,6 +274,7 @@ const defaultState = () => ({
     },
     {
       id: "apt_seed_3",
+      negocioId: DEFAULT_BUSINESS_ID,
       barberId: "barber_elias",
       date: todayISO(),
       time: "12:00",
@@ -217,21 +287,21 @@ const defaultState = () => ({
   ],
   blockedDays: [],
   services: [
-    { id: "service_corte_clasico", name: "Corte clasico", value: 20000, adminPercentage: 50, barberPercentage: 50, active: true },
-    { id: "service_corte_barba", name: "Corte + barba", value: 30000, adminPercentage: 50, barberPercentage: 50, active: true },
-    { id: "service_barba", name: "Barba", value: 18000, adminPercentage: 50, barberPercentage: 50, active: true },
-    { id: "service_cejas", name: "Cejas", value: 12000, adminPercentage: 50, barberPercentage: 50, active: true },
-    { id: "service_diseno", name: "Diseno", value: 15000, adminPercentage: 50, barberPercentage: 50, active: true },
+    { id: "service_corte_clasico", negocioId: DEFAULT_BUSINESS_ID, name: "Corte clasico", value: 20000, adminPercentage: 50, barberPercentage: 50, active: true },
+    { id: "service_corte_barba", negocioId: DEFAULT_BUSINESS_ID, name: "Corte + barba", value: 30000, adminPercentage: 50, barberPercentage: 50, active: true },
+    { id: "service_barba", negocioId: DEFAULT_BUSINESS_ID, name: "Barba", value: 18000, adminPercentage: 50, barberPercentage: 50, active: true },
+    { id: "service_cejas", negocioId: DEFAULT_BUSINESS_ID, name: "Cejas", value: 12000, adminPercentage: 50, barberPercentage: 50, active: true },
+    { id: "service_diseno", negocioId: DEFAULT_BUSINESS_ID, name: "Diseno", value: 15000, adminPercentage: 50, barberPercentage: 50, active: true },
   ],
   barberServices: [
-    { id: "barber_service_seed_1", barberId: "barber_mateo", serviceId: "service_corte_clasico", active: true },
-    { id: "barber_service_seed_2", barberId: "barber_mateo", serviceId: "service_corte_barba", active: true },
-    { id: "barber_service_seed_3", barberId: "barber_mateo", serviceId: "service_diseno", active: true },
-    { id: "barber_service_seed_4", barberId: "barber_dante", serviceId: "service_corte_barba", active: true },
-    { id: "barber_service_seed_5", barberId: "barber_dante", serviceId: "service_barba", active: true },
-    { id: "barber_service_seed_6", barberId: "barber_elias", serviceId: "service_corte_clasico", active: true },
-    { id: "barber_service_seed_7", barberId: "barber_elias", serviceId: "service_diseno", active: true },
-    { id: "barber_service_seed_8", barberId: "barber_simon", serviceId: "service_cejas", active: true },
+    { id: "barber_service_seed_1", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_mateo", serviceId: "service_corte_clasico", active: true },
+    { id: "barber_service_seed_2", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_mateo", serviceId: "service_corte_barba", active: true },
+    { id: "barber_service_seed_3", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_mateo", serviceId: "service_diseno", active: true },
+    { id: "barber_service_seed_4", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_dante", serviceId: "service_corte_barba", active: true },
+    { id: "barber_service_seed_5", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_dante", serviceId: "service_barba", active: true },
+    { id: "barber_service_seed_6", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_elias", serviceId: "service_corte_clasico", active: true },
+    { id: "barber_service_seed_7", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_elias", serviceId: "service_diseno", active: true },
+    { id: "barber_service_seed_8", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_simon", serviceId: "service_cejas", active: true },
   ],
 });
 
@@ -328,6 +398,7 @@ function mapBarberServiceToRow(item) {
 function mapRowToBarber(row, index = 0) {
   return {
     id: row.id,
+    negocioId: row.business_id || row.negocio_id || DEFAULT_BUSINESS_ID,
     name: row.name || "",
     user: row.user || "",
     password: row.password || "",
@@ -343,6 +414,7 @@ function mapRowToAppointment(row) {
   const parsedMeta = parseAppointmentNotes(row.notes || "");
   return {
     id: row.id,
+    negocioId: row.business_id || row.negocio_id || DEFAULT_BUSINESS_ID,
     barberId: row.barber_id,
     date: row.date,
     time: row.time,
@@ -361,6 +433,7 @@ function mapRowToAppointment(row) {
 function mapRowToBlockedDay(row) {
   return {
     id: row.id,
+    negocioId: row.business_id || row.negocio_id || DEFAULT_BUSINESS_ID,
     barberId: row.barber_id,
     date: row.date,
   };
@@ -369,6 +442,7 @@ function mapRowToBlockedDay(row) {
 function mapRowToService(row) {
   return {
     id: row.id,
+    negocioId: row.business_id || row.negocio_id || DEFAULT_BUSINESS_ID,
     name: row.service_name || "",
     value: Number(row.service_value) || 0,
     adminPercentage: Number(row.admin_percentage) || 0,
@@ -380,6 +454,7 @@ function mapRowToService(row) {
 function mapRowToBarberService(row) {
   return {
     id: row.id,
+    negocioId: row.business_id || row.negocio_id || DEFAULT_BUSINESS_ID,
     barberId: row.barber_id,
     serviceId: row.service_id,
     active: row.active ?? true,
@@ -427,11 +502,11 @@ class StudioStore {
 
   loadLocalState() {
     const raw = localStorage.getItem(APP_KEY);
-    if (!raw) return defaultState();
+    if (!raw) return normalizeTenantState(defaultState());
     try {
-      return { ...defaultState(), ...JSON.parse(raw) };
+      return normalizeTenantState({ ...defaultState(), ...JSON.parse(raw) });
     } catch {
-      return defaultState();
+      return normalizeTenantState(defaultState());
     }
   }
 
@@ -704,6 +779,35 @@ class StudioStore {
     return this.state.barbers.filter((barber) => barber.active);
   }
 
+  businessById(id) {
+    return this.state.businesses.find((business) => business.id === id) || null;
+  }
+
+  businessBySlug(slug) {
+    return this.state.businesses.find((business) => business.slug === slug) || null;
+  }
+
+  saveBusiness(payload) {
+    if (payload.id) {
+      this.state.businesses = this.state.businesses.map((business) =>
+        business.id === payload.id ? normalizeBusiness({ ...business, ...payload, updatedAt: todayISO() }) : business
+      );
+      this.persist({ type: "UPDATE", table: "businesses", record: this.businessById(payload.id) });
+      return this.businessById(payload.id);
+    }
+
+    const created = normalizeBusiness({
+      id: uid("business"),
+      active: true,
+      ...payload,
+      createdAt: todayISO(),
+      updatedAt: todayISO(),
+    });
+    this.state.businesses.push(created);
+    this.persist({ type: "INSERT", table: "businesses", record: created });
+    return created;
+  }
+
   getAppointment(barberId, date, time) {
     return this.state.appointments.find(
       (item) => item.barberId === barberId && item.date === date && item.time === time
@@ -718,6 +822,7 @@ class StudioStore {
     const existing = this.getAppointment(payload.barberId, payload.date, payload.time);
     const appointment = {
       id: existing?.id || uid("apt"),
+      negocioId: payload.negocioId || DEFAULT_BUSINESS_ID,
       source: payload.source || "admin",
       weekKey: payload.status === "reserved" ? getWeekKey(new Date(`${payload.date}T00:00:00`)) : "permanent",
       clientName: payload.clientName || "",
@@ -767,6 +872,7 @@ class StudioStore {
     const { id, ...barberPayload } = payload;
     const created = {
       id: uid("barber"),
+      negocioId: payload.negocioId || DEFAULT_BUSINESS_ID,
       gradient: avatarGradients[this.state.barbers.length % avatarGradients.length],
       photo: "",
       active: true,
@@ -780,8 +886,9 @@ class StudioStore {
 
   blockDay(barberId, date) {
     if (!this.isDayBlocked(barberId, date)) {
-      this.state.blockedDays.push({ id: uid("day"), barberId, date });
-      this.persist({ type: "INSERT", table: "blocked_days", record: { barberId, date } });
+      const record = { id: uid("day"), negocioId: DEFAULT_BUSINESS_ID, barberId, date };
+      this.state.blockedDays.push(record);
+      this.persist({ type: "INSERT", table: "blocked_days", record });
     }
   }
 
@@ -831,6 +938,7 @@ class StudioStore {
 
     const created = {
       id: uid("service"),
+      negocioId: payload.negocioId || DEFAULT_BUSINESS_ID,
       active: true,
       ...payload,
     };
@@ -855,6 +963,7 @@ class StudioStore {
     this.state.barberServices = this.state.barberServices.filter((item) => item.barberId !== barberId);
     const records = uniqueIds.map((serviceId) => ({
       id: uid("barber_service"),
+      negocioId: DEFAULT_BUSINESS_ID,
       barberId,
       serviceId,
       active: true,
@@ -868,6 +977,7 @@ class StudioStore {
 const store = new StudioStore();
 const ADMIN_SESSION_KEY = "barber-delux-admin-session";
 const ADMIN_ACCOUNTS_KEY = "barber-delux-admin-accounts-v1";
+const SUPER_ADMIN_SESSION_KEY = "vision-barber-super-admin-session";
 const BACKGROUND_MEDIA_KEY = "barber-delux-background-media-v1";
 const SOUND_PREF_KEY = "barber-delux-sound-enabled";
 const MAX_BACKGROUND_VIDEO_BYTES = 10 * 1024 * 1024;
@@ -881,8 +991,28 @@ const PRINCIPAL_ADMIN = {
   user: "admin",
   password: "admin123",
   role: "administrador_principal",
+  businessId: DEFAULT_BUSINESS_ID,
   active: true,
 };
+
+function resolveRoute(pathname = location.pathname) {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] === "super-admin" || parts[0] === "admin-global") {
+    return { view: "super-admin", businessSlug: DEFAULT_BUSINESS_SLUG };
+  }
+  if (parts[0] === "admin" && parts[1]) {
+    return { view: "admin", businessSlug: parts[1] };
+  }
+  if (parts[0] === "barbero" && parts[1]) {
+    return { view: "barber", businessSlug: parts[1] };
+  }
+  if ((parts[0] === "barberia" || parts[0] === "negocio") && parts[1]) {
+    return { view: "public", businessSlug: parts[1] };
+  }
+  if (pathname === "/admin-vip") return { view: "admin", businessSlug: DEFAULT_BUSINESS_SLUG };
+  if (pathname === "/gestion-equipo") return { view: "barber", businessSlug: DEFAULT_BUSINESS_SLUG };
+  return { view: "public", businessSlug: DEFAULT_BUSINESS_SLUG };
+}
 
 function loadAdminAccounts() {
   const raw = localStorage.getItem(ADMIN_ACCOUNTS_KEY);
@@ -905,10 +1035,26 @@ function saveAdminAccounts(accounts) {
   localStorage.setItem(ADMIN_ACCOUNTS_KEY, JSON.stringify(normalized));
 }
 
-function findAdminAccount(user, password) {
+function findAdminAccount(user, password, businessId = null) {
   return loadAdminAccounts().find(
-    (account) => account.active && account.user === user && account.password === password
+    (account) =>
+      account.active &&
+      account.user === user &&
+      account.password === password &&
+      (!businessId || account.role === PRINCIPAL_ADMIN.role || account.businessId === businessId)
   );
+}
+
+function currentBusiness() {
+  return store.businessBySlug(app.currentBusinessSlug) || store.businessById(DEFAULT_BUSINESS_ID) || defaultBusiness();
+}
+
+async function sha256(value) {
+  const encoded = new TextEncoder().encode(String(value || ""));
+  const hashBuffer = await crypto.subtle.digest("SHA-256", encoded);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function isPrincipalAdmin() {
@@ -938,7 +1084,9 @@ function loadSoundPreference() {
 }
 
 const app = {
-  view: location.pathname === "/admin-vip" ? "admin" : location.pathname === "/gestion-equipo" ? "barber" : "public",
+  route: resolveRoute(location.pathname),
+  view: resolveRoute(location.pathname).view,
+  currentBusinessSlug: resolveRoute(location.pathname).businessSlug,
   selectedServiceId: "",
   selectedBarberId: "",
   selectedDate: store.state.meta.selectedDate,
@@ -953,6 +1101,9 @@ const app = {
   adminModalMode: "reserved",
   adminServiceEditAppointmentId: "",
   adminSession: JSON.parse(sessionStorage.getItem(ADMIN_SESSION_KEY) || "null"),
+  superAdminSession: JSON.parse(sessionStorage.getItem(SUPER_ADMIN_SESSION_KEY) || "null"),
+  superAdminLoginError: "",
+  superAdminMessage: "",
   adminLoginError: "",
   adminAccountMessage: "",
   adminActionMessage: "",
@@ -1041,9 +1192,11 @@ function renderAccordionPanel(id, label, title, content, open = false) {
 }
 
 function viewPath(view) {
-  if (view === "admin") return "/admin-vip";
-  if (view === "barber") return "/gestion-equipo";
-  return "/";
+  const slug = app.currentBusinessSlug || DEFAULT_BUSINESS_SLUG;
+  if (view === "super-admin") return "/super-admin";
+  if (view === "admin") return slug === DEFAULT_BUSINESS_SLUG ? "/admin-vip" : `/admin/${slug}`;
+  if (view === "barber") return slug === DEFAULT_BUSINESS_SLUG ? "/gestion-equipo" : `/barbero/${slug}`;
+  return slug === DEFAULT_BUSINESS_SLUG ? "/" : `/barberia/${slug}`;
 }
 
 function avatar(barber, size = "lg") {
@@ -1101,6 +1254,7 @@ function appShell(content) {
 }
 
 function renderLayoutShell() {
+  const business = currentBusiness();
   const tabs = [
     ["public", "Agenda"],
     ["admin", "Admin"],
@@ -1110,7 +1264,7 @@ function renderLayoutShell() {
     <header class="topbar">
       <button class="brand" data-view="public" aria-label="Ir a agenda publica">
         <span class="brand-mark"></span>
-        <span><strong>Vision</strong><small>Barber</small></span>
+        <span><strong>${escapeHTML(business?.name || "Vision")}</strong><small>${escapeHTML(business?.slug || "Barber")}</small></span>
       </button>
       <nav class="nav-tabs" aria-label="Navegacion principal">
         ${tabs.map(([id, label]) => `<button class="${app.view === id ? "active" : ""}" data-view="${id}">${label}</button>`).join("")}
@@ -1270,6 +1424,7 @@ function isPublicDateAvailable(barberId, date) {
 }
 
 function renderPublic() {
+  const business = currentBusiness();
   if (isPastDate(app.selectedDate)) {
     app.selectedDate = todayISO();
     app.publicDaySelected = false;
@@ -1483,7 +1638,7 @@ function renderPublic() {
       <div class="hero-bg ${app.backgroundMedia?.type === "video" ? "video-backed" : ""}"></div>
       <div class="hero-copy">
         <p class="eyebrow">Reservas premium para barberias modernas</p>
-        <h1>Vision Barber</h1>
+        <h1>${escapeHTML(business?.name || "Vision Barber")}</h1>
         <p>Agenda publica, control operativo y sincronizacion en tiempo real con una experiencia rapida para clientes, administradores y barberos.</p>
       </div>
     </section>
@@ -1891,6 +2046,105 @@ function servicesSection() {
   </section>`;
 }
 
+function renderSuperAdmin() {
+  const businesses = [...store.state.businesses].sort((a, b) => a.name.localeCompare(b.name, "es"));
+  const businessCards = businesses
+    .map((business) => {
+      const admins = loadAdminAccounts().filter(
+        (account) => account.businessId === business.id && account.role !== PRINCIPAL_ADMIN.role
+      );
+      const admin = admins[0] || null;
+      return `<article class="admin-account-card">
+        <div>
+          <p class="eyebrow">${business.active ? "Negocio activo" : "Negocio inactivo"}</p>
+          <h3>${escapeHTML(business.name)}</h3>
+          <p>Slug: ${escapeHTML(business.slug)}</p>
+          <p>Admin principal: ${escapeHTML(admin?.name || "Pendiente")} · Usuario: ${escapeHTML(admin?.user || "Sin usuario")}</p>
+          <p>URL publica: <a class="inline-link" href="/barberia/${escapeHTML(business.slug)}" target="_blank" rel="noreferrer">/barberia/${escapeHTML(business.slug)}</a></p>
+        </div>
+        <form class="super-business-edit form-stack" data-business-id="${escapeHTML(business.id)}">
+          <div class="form-grid">
+            <label>Nombre<input name="name" required value="${escapeHTML(business.name)}" /></label>
+            <label>Slug<input name="slug" required value="${escapeHTML(business.slug)}" /></label>
+            <label>Color principal<input name="primaryColor" value="${escapeHTML(business.primaryColor || "")}" /></label>
+            <label>Color secundario<input name="secondaryColor" value="${escapeHTML(business.secondaryColor || "")}" /></label>
+          </div>
+          <label class="toggle-line"><input name="active" type="checkbox" ${business.active ? "checked" : ""} /> Negocio activo</label>
+          <div class="button-row">
+            <button class="primary-action">Guardar negocio</button>
+            <a class="secondary-action inline-action" href="/admin/${escapeHTML(business.slug)}" target="_blank" rel="noreferrer">Abrir admin</a>
+            <a class="secondary-action inline-action" href="/barbero/${escapeHTML(business.slug)}" target="_blank" rel="noreferrer">Abrir barbero</a>
+          </div>
+        </form>
+      </article>`;
+    })
+    .join("");
+
+  if (!app.superAdminSession) {
+    return appShell(`
+      <section class="login-view">
+        <div class="login-panel">
+          <p class="eyebrow">Control global</p>
+          <h1>SUPER ADMIN</h1>
+          <form id="super-admin-login" class="form-stack">
+            <label>Usuario<input name="user" required autocomplete="username" placeholder="SDMcompany" /></label>
+            <label>Clave<input name="password" type="password" required autocomplete="current-password" placeholder="••••••••" /></label>
+            ${app.superAdminLoginError ? `<p class="form-error">${escapeHTML(app.superAdminLoginError)}</p>` : ""}
+            <button class="primary-action">Entrar</button>
+          </form>
+        </div>
+      </section>
+    `);
+  }
+
+  return appShell(`
+    <section class="dashboard-head">
+      <div>
+        <p class="eyebrow">Control SaaS</p>
+        <h1>SUPER ADMINISTRADOR</h1>
+      </div>
+      <button class="secondary-action" data-super-logout>Cerrar sesion</button>
+    </section>
+    <section class="admin-stack">
+      <section class="admin-main dashboard-lite">
+        <div class="section-title"><span>N</span><h2>Negocios registrados</h2></div>
+        <div class="dashboard-cards">
+          <div><span>Total negocios</span><strong>${businesses.length}</strong></div>
+          <div><span>Negocios activos</span><strong>${businesses.filter((item) => item.active).length}</strong></div>
+          <div><span>URL base</span><strong>/barberia/:slug</strong></div>
+        </div>
+      </section>
+      <section class="admin-main">
+        <div class="section-title"><span>+</span><h2>Crear barberia</h2></div>
+        ${app.superAdminMessage ? `<p class="form-note">${escapeHTML(app.superAdminMessage)}</p>` : ""}
+        <form id="super-business-create" class="editor-card">
+          <div class="form-grid">
+            <label>Nombre del negocio<input name="name" required placeholder="Barberia Elite" /></label>
+            <label>Slug URL<input name="slug" required placeholder="barberia-elite" /></label>
+            <label>Logo URL<input name="logoUrl" placeholder="/assets/logo.png" /></label>
+            <label>Color principal<input name="primaryColor" placeholder="#d4af37" /></label>
+            <label>Color secundario<input name="secondaryColor" placeholder="#111111" /></label>
+            <label>Fondo URL<input name="backgroundUrl" placeholder="/assets/fondo.mp4" /></label>
+            <label>Administrador principal<input name="adminName" required placeholder="Nombre administrador" /></label>
+            <label>Usuario administrador<input name="adminUser" required placeholder="admin.negocio" /></label>
+            <label>Clave administrador<input name="adminPassword" type="password" required placeholder="Clave temporal" /></label>
+          </div>
+          <label class="toggle-line"><input name="active" type="checkbox" checked /> Negocio activo</label>
+          <div class="button-row">
+            <button class="primary-action">Crear barberia</button>
+          </div>
+        </form>
+      </section>
+      <section class="admin-main">
+        <div class="section-title"><span>L</span><h2>Listado de negocios</h2></div>
+        <div class="admin-account-list">
+          ${businessCards || `<p class="microcopy">Aun no hay negocios registrados.</p>`}
+        </div>
+      </section>
+    </section>
+  `);
+}
+
 function backgroundSettingsSection() {
   return `<section class="admin-main">
     <div class="section-title"><span>V</span><h2>Fondo dinamico</h2></div>
@@ -2286,7 +2540,7 @@ function renderBarberV2() {
 
 function render() {
   const root = document.querySelector("#app");
-  const views = { public: renderPublic, admin: renderAdminV2, barber: renderBarberV2 };
+  const views = { public: renderPublic, admin: renderAdminV2, barber: renderBarberV2, "super-admin": renderSuperAdmin };
   ensurePersistentBackground();
   if (root.dataset.shellReady !== "true") {
     root.innerHTML = renderLayoutShell();
@@ -2353,6 +2607,116 @@ function fitPanelTitles() {
 }
 
 function bindEvents() {
+  document.querySelector("#super-admin-login")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const user = String(form.get("user") || "").trim();
+    const password = String(form.get("password") || "");
+    const hash = await sha256(password);
+
+    if (user === SUPER_ADMIN_USER && hash === SUPER_ADMIN_PASSWORD_HASH) {
+      app.superAdminSession = {
+        user: SUPER_ADMIN_USER,
+        role: "super_admin",
+        startedAt: new Date().toISOString(),
+      };
+      app.superAdminLoginError = "";
+      sessionStorage.setItem(SUPER_ADMIN_SESSION_KEY, JSON.stringify(app.superAdminSession));
+      render();
+      return;
+    }
+
+    app.superAdminSession = null;
+    app.superAdminLoginError = "Credenciales invalidas";
+    sessionStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
+    render();
+  });
+
+  document.querySelector("[data-super-logout]")?.addEventListener("click", () => {
+    app.superAdminSession = null;
+    app.superAdminLoginError = "";
+    sessionStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
+    render();
+  });
+
+  document.querySelector("#super-business-create")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("name") || "").trim();
+    const slug = slugify(form.get("slug") || name);
+    const adminName = String(form.get("adminName") || "").trim();
+    const adminUser = String(form.get("adminUser") || "").trim();
+    const adminPassword = String(form.get("adminPassword") || "");
+
+    if (!name || !slug || !adminName || !adminUser || !adminPassword) {
+      app.superAdminMessage = "Completa todos los campos obligatorios.";
+      render();
+      return;
+    }
+    if (store.businessBySlug(slug)) {
+      app.superAdminMessage = "Ese slug ya existe. Usa otro identificador.";
+      render();
+      return;
+    }
+
+    const business = store.saveBusiness({
+      name,
+      slug,
+      logoUrl: String(form.get("logoUrl") || "").trim(),
+      primaryColor: String(form.get("primaryColor") || "").trim(),
+      secondaryColor: String(form.get("secondaryColor") || "").trim(),
+      backgroundUrl: String(form.get("backgroundUrl") || "").trim(),
+      active: form.get("active") === "on",
+    });
+
+    const accounts = loadAdminAccounts();
+    accounts.push({
+      id: uid("admin"),
+      businessId: business.id,
+      businessSlug: business.slug,
+      name: adminName,
+      user: adminUser,
+      password: adminPassword,
+      role: "admin_negocio",
+      active: true,
+    });
+    saveAdminAccounts(accounts);
+    app.superAdminMessage = `Barberia creada: ${business.name}`;
+    render();
+  });
+
+  document.querySelectorAll(".super-business-edit").forEach((formEl) => {
+    formEl.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      const businessId = event.currentTarget.dataset.businessId;
+      const current = store.businessById(businessId);
+      if (!current) return;
+      const slug = slugify(form.get("slug") || current.slug);
+      const duplicate = store.state.businesses.find((item) => item.slug === slug && item.id !== current.id);
+      if (duplicate) {
+        app.superAdminMessage = "Ese slug ya esta en uso por otro negocio.";
+        render();
+        return;
+      }
+      const updated = store.saveBusiness({
+        id: current.id,
+        name: String(form.get("name") || "").trim(),
+        slug,
+        primaryColor: String(form.get("primaryColor") || "").trim(),
+        secondaryColor: String(form.get("secondaryColor") || "").trim(),
+        active: form.get("active") === "on",
+      });
+      saveAdminAccounts(
+        loadAdminAccounts().map((account) =>
+          account.businessId === updated.id ? { ...account, businessSlug: updated.slug } : account
+        )
+      );
+      app.superAdminMessage = `Negocio actualizado: ${updated.name}`;
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-select-service]").forEach((button) => {
     button.addEventListener("click", () => {
       app.selectedServiceId = button.dataset.selectService;
@@ -2505,7 +2869,7 @@ function bindEvents() {
     const form = new FormData(event.currentTarget);
     const user = String(form.get("user") || "").trim();
     const password = String(form.get("password") || "");
-    const account = findAdminAccount(user, password);
+    const account = findAdminAccount(user, password, currentBusiness()?.id);
 
     if (account) {
       app.adminSession = {
@@ -2563,6 +2927,8 @@ function bindEvents() {
 
     accounts.push({
       id: uid("admin"),
+      businessId: currentBusiness().id,
+      businessSlug: currentBusiness().slug,
       name: payload.name,
       user: payload.user,
       password: payload.password,
