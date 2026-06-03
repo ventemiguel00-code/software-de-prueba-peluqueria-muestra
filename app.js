@@ -22,6 +22,7 @@ const CLOSE_HOUR = 20;
 const SLOT_MINUTES = 60;
 const DEFAULT_BUSINESS_ID = "business_principal";
 const DEFAULT_BUSINESS_SLUG = "barberia-principal";
+const PRODUCTION_BASE_URL = "https://software-de-prueba-peluqueria-muest.vercel.app";
 const SUPER_ADMIN_USER = "SDMcompany";
 const SUPER_ADMIN_PASSWORD_HASH = "9c92c00e241ec0c78798834456113f123762afcb4ef84e337eafbcf7d372f2fc";
 const baseSlots = Array.from({ length: CLOSE_HOUR - OPEN_HOUR }, (_, index) =>
@@ -1083,10 +1084,12 @@ function generateSecurePassword(length = 10) {
 
 function businessUrlSet(business) {
   const slug = business?.slug || DEFAULT_BUSINESS_SLUG;
+  const businessName = String(business?.name || "").trim().toLowerCase();
+  const isVisionBarber = businessName === "vision barber" || slug === "vision-barber" || slug === DEFAULT_BUSINESS_SLUG;
   return {
-    public: `/barberia/${slug}`,
-    admin: `/admin/${slug}`,
-    barber: `/barbero/${slug}`,
+    public: isVisionBarber ? `${PRODUCTION_BASE_URL}/` : `${PRODUCTION_BASE_URL}/barberia/${slug}`,
+    admin: `${PRODUCTION_BASE_URL}/admin/${slug}`,
+    barber: `${PRODUCTION_BASE_URL}/barbero/${slug}`,
   };
 }
 
