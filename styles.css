@@ -92,6 +92,10 @@ body {
   min-width: 0;
 }
 
+.super-admin-shell {
+  padding-top: 18px;
+}
+
 @keyframes viewFadeIn {
   from {
     opacity: 0;
@@ -2230,6 +2234,41 @@ dialog::backdrop {
   margin-top: 12px;
   font-size: clamp(24px, 4vw, 34px);
   line-height: 1.05;
+}
+
+.credential-reveal-card {
+  margin-bottom: 18px;
+}
+
+.super-admin-logo-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  padding: 14px;
+  border: 1px dashed rgba(212, 175, 55, 0.26);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.super-admin-logo-preview img {
+  max-width: 100%;
+  max-height: 140px;
+  object-fit: contain;
+  border-radius: 14px;
+}
+
+.super-admin-admins {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(212, 175, 55, 0.16);
+}
+
+.inline-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
 }
 
 .client-history {
