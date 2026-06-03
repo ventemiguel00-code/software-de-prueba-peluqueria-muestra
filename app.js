@@ -796,6 +796,10 @@ class StudioStore {
     return this.state.barbers.filter((barber) => barber.active);
   }
 
+  activeBarbersByBusiness(businessId) {
+    return this.state.barbers.filter((barber) => barber.active && barber.negocioId === businessId);
+  }
+
   businessById(id) {
     return this.state.businesses.find((business) => business.id === id) || null;
   }
@@ -839,7 +843,7 @@ class StudioStore {
     const existing = this.getAppointment(payload.barberId, payload.date, payload.time);
     const appointment = {
       id: existing?.id || uid("apt"),
-      negocioId: payload.negocioId || DEFAULT_BUSINESS_ID,
+      negocioId: payload.negocioId || currentBusinessId(),
       source: payload.source || "admin",
       weekKey: payload.status === "reserved" ? getWeekKey(new Date(`${payload.date}T00:00:00`)) : "permanent",
       clientName: payload.clientName || "",
@@ -889,7 +893,7 @@ class StudioStore {
     const { id, ...barberPayload } = payload;
     const created = {
       id: uid("barber"),
-      negocioId: payload.negocioId || DEFAULT_BUSINESS_ID,
+      negocioId: payload.negocioId || currentBusinessId(),
       gradient: avatarGradients[this.state.barbers.length % avatarGradients.length],
       photo: "",
       active: true,
@@ -903,7 +907,7 @@ class StudioStore {
 
   blockDay(barberId, date) {
     if (!this.isDayBlocked(barberId, date)) {
-      const record = { id: uid("day"), negocioId: DEFAULT_BUSINESS_ID, barberId, date };
+      const record = { id: uid("day"), negocioId: currentBusinessId(), barberId, date };
       this.state.blockedDays.push(record);
       this.persist({ type: "INSERT", table: "blocked_days", record });
     }
@@ -955,7 +959,7 @@ class StudioStore {
 
     const created = {
       id: uid("service"),
-      negocioId: payload.negocioId || DEFAULT_BUSINESS_ID,
+      negocioId: payload.negocioId || currentBusinessId(),
       active: true,
       ...payload,
     };
@@ -975,12 +979,12 @@ class StudioStore {
       .map((item) => item.serviceId);
   }
 
-  saveBarberServices(barberId, serviceIds) {
+  saveBarberServices(barberId, serviceIds, negocioId = currentBusinessId()) {
     const uniqueIds = [...new Set((serviceIds || []).filter(Boolean))];
     this.state.barberServices = this.state.barberServices.filter((item) => item.barberId !== barberId);
     const records = uniqueIds.map((serviceId) => ({
       id: uid("barber_service"),
-      negocioId: DEFAULT_BUSINESS_ID,
+      negocioId,
       barberId,
       serviceId,
       active: true,
@@ -1056,6 +1060,22 @@ function currentBusiness() {
   return store.businessBySlug(app.currentBusinessSlug) || store.businessById(DEFAULT_BUSINESS_ID) || defaultBusiness();
 }
 
+function currentBusinessId() {
+  return currentBusiness()?.id || DEFAULT_BUSINESS_ID;
+}
+
+function servicesForBusiness(businessId = currentBusinessId()) {
+  return store.state.services.filter((service) => service.negocioId === businessId);
+}
+
+function activeServicesForBusiness(businessId = currentBusinessId()) {
+  return servicesForBusiness(businessId).filter((service) => service.active);
+}
+
+function barbersForBusiness(businessId = currentBusinessId()) {
+  return store.state.barbers.filter((barber) => barber.negocioId === businessId);
+}
+
 async function sha256(value) {
   const encoded = new TextEncoder().encode(String(value || ""));
   const hashBuffer = await crypto.subtle.digest("SHA-256", encoded);
@@ -1106,6 +1126,59 @@ function uniqueBusinessSlug(baseValue, excludeId = "") {
     index += 1;
   }
   return `${base}-${index}`;
+}
+
+function seedBusinessFromTemplate(business) {
+  if (!business?.id || business.id === DEFAULT_BUSINESS_ID) return;
+  if (barbersForBusiness(business.id).length || servicesForBusiness(business.id).length) return;
+
+  const templateBusinessId = DEFAULT_BUSINESS_ID;
+  const templateBarbers = store.state.barbers.filter((barber) => barber.negocioId === templateBusinessId);
+  const templateServices = store.state.services.filter((service) => service.negocioId === templateBusinessId);
+  const templateRelations = (store.state.barberServices || []).filter((relation) => relation.negocioId === templateBusinessId);
+
+  const serviceIdMap = new Map();
+  const barberIdMap = new Map();
+
+  templateServices.forEach((service) => {
+    const createdId = uid("service");
+    serviceIdMap.set(service.id, createdId);
+    store.state.services.push({
+      ...service,
+      id: createdId,
+      negocioId: business.id,
+    });
+    store.persist({
+      type: "INSERT",
+      table: "services",
+      record: store.state.services[store.state.services.length - 1],
+    });
+  });
+
+  templateBarbers.forEach((barber) => {
+    const createdId = uid("barber");
+    barberIdMap.set(barber.id, createdId);
+    store.state.barbers.push({
+      ...barber,
+      id: createdId,
+      negocioId: business.id,
+    });
+    store.persist({
+      type: "INSERT",
+      table: "barbers",
+      record: store.state.barbers[store.state.barbers.length - 1],
+    });
+  });
+
+  templateBarbers.forEach((barber) => {
+    const barberId = barberIdMap.get(barber.id);
+    if (!barberId) return;
+    const serviceIds = templateRelations
+      .filter((relation) => relation.barberId === barber.id)
+      .map((relation) => serviceIdMap.get(relation.serviceId))
+      .filter(Boolean);
+    store.saveBarberServices(barberId, serviceIds, business.id);
+  });
 }
 
 async function findAdminAccount(user, password, businessId = null) {
@@ -1414,8 +1487,12 @@ function publicFlowCard({ step, title, state = "locked", summary = "", actions =
   </section>`;
 }
 
-function serviceById(id) {
-  return store.state.services.find((service) => service.id === id);
+function serviceById(id, businessId = currentBusinessId()) {
+  return (
+    store.state.services.find((service) => service.id === id && service.negocioId === businessId) ||
+    store.state.services.find((service) => service.id === id) ||
+    null
+  );
 }
 
 function serviceNameForAppointment(appointment) {
@@ -1496,18 +1573,20 @@ function buildBarberSummary(barberId, anchorDate) {
 function barberOffersService(barberId, serviceId) {
   if (!serviceId) return true;
   const allRelations = store.state.barberServices || [];
-  const barberRelations = allRelations.filter((item) => item.barberId === barberId && item.active);
+  const barberRelations = allRelations.filter(
+    (item) => item.barberId === barberId && item.active && item.negocioId === currentBusinessId()
+  );
   if (!allRelations.length || !barberRelations.length) return true;
   return barberRelations.some((item) => item.serviceId === serviceId);
 }
 
 function barbersForService(serviceId) {
-  return store.activeBarbers().filter((barber) => barberOffersService(barber.id, serviceId));
+  return store.activeBarbersByBusiness(currentBusinessId()).filter((barber) => barberOffersService(barber.id, serviceId));
 }
 
 function servicesForBarber(barberId) {
-  return store.state.services.filter(
-    (service) => service.active && barberOffersService(barberId, service.id)
+  return activeServicesForBusiness(currentBusinessId()).filter(
+    (service) => barberOffersService(barberId, service.id)
   );
 }
 
@@ -1518,13 +1597,17 @@ function isPublicDateAvailable(barberId, date) {
 
 function renderPublic() {
   const business = currentBusiness();
+  if (business?.id && business.id !== DEFAULT_BUSINESS_ID && (!barbersForBusiness(business.id).length || !servicesForBusiness(business.id).length)) {
+    seedBusinessFromTemplate(business);
+  }
   if (isPastDate(app.selectedDate)) {
     app.selectedDate = todayISO();
     app.publicDaySelected = false;
     app.selectedSlot = "";
   }
-  const publicServices = store.state.services.filter((service) => service.active);
-  const activeBarbers = app.selectedServiceId ? barbersForService(app.selectedServiceId) : store.activeBarbers();
+  const businessId = business.id;
+  const publicServices = activeServicesForBusiness(businessId);
+  const activeBarbers = app.selectedServiceId ? barbersForService(app.selectedServiceId) : store.activeBarbersByBusiness(businessId);
   const selected = activeBarbers.find((barber) => barber.id === app.selectedBarberId) || null;
   const hasSelectedBarber = Boolean(selected);
   const selectedService = publicServices.find((service) => service.id === app.selectedServiceId) || null;
@@ -3035,6 +3118,7 @@ function bindEvents() {
       secondaryColor: palette.secondary,
       active: form.get("active") === "on",
     });
+    seedBusinessFromTemplate(business);
 
     const generatedPassword = generateSecurePassword(10);
     const accounts = loadAdminAccounts();
@@ -3882,7 +3966,11 @@ function bindEvents() {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const barber = store.state.barbers.find(
-      (item) => item.user === form.get("user") && item.password === form.get("password") && item.active
+      (item) =>
+        item.user === form.get("user") &&
+        item.password === form.get("password") &&
+        item.active &&
+        item.negocioId === currentBusinessId()
     );
     if (!barber) {
       event.currentTarget.classList.add("shake");
