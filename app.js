@@ -1171,6 +1171,7 @@ const app = {
   superAdminMessage: "",
   superAdminCredentialReveal: null,
   superAdminPendingLogos: {},
+  superAdminOpenBusinessId: "",
   adminLoginError: "",
   adminAccountMessage: "",
   adminActionMessage: "",
@@ -1187,6 +1188,18 @@ const app = {
 
 function barberById(id) {
   return store.state.barbers.find((barber) => barber.id === id);
+}
+
+function businessBarberCount(businessId) {
+  return store.state.barbers.filter((barber) => barber.negocioId === businessId).length;
+}
+
+function businessTodayReservationCount(businessId) {
+  const today = todayISO();
+  return store.state.appointments.filter(
+    (appointment) =>
+      appointment.negocioId === businessId && appointment.date === today && COUNTABLE_STATUSES.has(appointment.status)
+  ).length;
 }
 
 function statusFor(barberId, date, time) {
@@ -2129,9 +2142,7 @@ function renderSuperAdmin() {
     ? `<div class="editor-card credential-reveal-card">
         <p class="eyebrow">Credenciales temporales</p>
         <h3>${escapeHTML(app.superAdminCredentialReveal.businessName)}</h3>
-        <p>Barberia: <a class="inline-link" href="${escapeHTML(app.superAdminCredentialReveal.publicUrl)}" target="_blank" rel="noreferrer">${escapeHTML(app.superAdminCredentialReveal.publicUrl)}</a></p>
-        <p>Admin: <a class="inline-link" href="${escapeHTML(app.superAdminCredentialReveal.adminUrl)}" target="_blank" rel="noreferrer">${escapeHTML(app.superAdminCredentialReveal.adminUrl)}</a></p>
-        <p>Barbero: <a class="inline-link" href="${escapeHTML(app.superAdminCredentialReveal.barberUrl)}" target="_blank" rel="noreferrer">${escapeHTML(app.superAdminCredentialReveal.barberUrl)}</a></p>
+        <p>Entorno: <a class="inline-link" href="${escapeHTML(app.superAdminCredentialReveal.publicUrl)}" target="_blank" rel="noreferrer">${escapeHTML(app.superAdminCredentialReveal.publicUrl)}</a></p>
         <p>Usuario: <strong>${escapeHTML(app.superAdminCredentialReveal.user)}</strong></p>
         <p>Clave temporal: <strong>${escapeHTML(app.superAdminCredentialReveal.password)}</strong></p>
         <div class="button-row">
@@ -2254,14 +2265,193 @@ function renderSuperAdmin() {
         <form id="super-business-create" class="editor-card">
           <div class="form-grid">
             <label>Nombre del negocio<input name="name" required placeholder="Barberia Elite" /></label>
-            <label>Slug URL<input name="slug" placeholder="barberia-elite" /></label>
+            <label>Slug URL<input name="slug" placeholder="Se genera automaticamente desde el nombre" /></label>
             <label>Tema
               <select name="theme">
                 ${Object.entries(BUSINESS_THEMES).map(([key, theme]) => `<option value="${key}">${escapeHTML(theme.label)}</option>`).join("")}
               </select>
             </label>
             <label class="file-control">Subir logo<input name="logo" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" data-business-logo-input="create" /></label>
-            <label>Fondo URL<input name="backgroundUrl" placeholder="/assets/fondo.mp4" /></label>
+            <label>Administrador principal<input name="adminName" required placeholder="Nombre administrador" /></label>
+          </div>
+          <div class="super-admin-logo-preview">${app.superAdminPendingLogos.create ? `<img src="${escapeHTML(app.superAdminPendingLogos.create)}" alt="Vista previa logo" />` : `<span>Vista previa del logo</span>`}</div>
+          <p class="microcopy">El usuario administrador inicial se crea automaticamente como <strong>Desarrollo</strong> y el sistema genera una clave temporal segura.</p>
+          <label class="toggle-line"><input name="active" type="checkbox" checked /> Negocio activo</label>
+          <div class="button-row">
+            <button class="primary-action">Crear barberia</button>
+          </div>
+        </form>
+      </section>
+      <section class="admin-main">
+        <div class="section-title"><span>L</span><h2>Listado de negocios</h2></div>
+        <div class="admin-account-list">
+          ${businessCards || `<p class="microcopy">Aun no hay negocios registrados.</p>`}
+        </div>
+      </section>
+    </section>
+  `);
+}
+
+function renderSuperAdminV2() {
+  const businesses = [...store.state.businesses].sort((a, b) => a.name.localeCompare(b.name, "es"));
+  const credentialReveal = app.superAdminCredentialReveal
+    ? `<div class="editor-card credential-reveal-card">
+        <p class="eyebrow">Credenciales temporales</p>
+        <h3>${escapeHTML(app.superAdminCredentialReveal.businessName)}</h3>
+        <p>Entorno: <a class="inline-link" href="${escapeHTML(app.superAdminCredentialReveal.publicUrl)}" target="_blank" rel="noreferrer">${escapeHTML(app.superAdminCredentialReveal.publicUrl)}</a></p>
+        <p>Usuario: <strong>${escapeHTML(app.superAdminCredentialReveal.user)}</strong></p>
+        <p>Clave temporal: <strong>${escapeHTML(app.superAdminCredentialReveal.password)}</strong></p>
+        <div class="button-row">
+          <button class="secondary-action" type="button" data-clear-super-credentials>Ocultar</button>
+        </div>
+      </div>`
+    : "";
+
+  const businessCards = businesses
+    .map((business) => {
+      const urls = businessUrlSet(business);
+      const isOpen = app.superAdminOpenBusinessId === business.id;
+      const barberCount = businessBarberCount(business.id);
+      const reservationCount = businessTodayReservationCount(business.id);
+      const admins = loadAdminAccounts().filter(
+        (account) => account.businessId === business.id && account.role !== PRINCIPAL_ADMIN.role
+      );
+      const admin = admins[0] || null;
+      const adminList = admins.length
+        ? admins
+            .map(
+              (account) => `<form class="super-admin-account-edit form-stack" data-admin-account-id="${escapeHTML(account.id)}">
+                <div class="form-grid">
+                  <label>Nombre<input name="name" required value="${escapeHTML(account.name || "")}" /></label>
+                  <label>Usuario<input name="user" required value="${escapeHTML(account.user || "")}" /></label>
+                  <label>Creado<input value="${escapeHTML(account.createdAt || todayISO())}" disabled /></label>
+                </div>
+                <label class="toggle-line"><input name="active" type="checkbox" ${account.active ? "checked" : ""} /> Activo</label>
+                <div class="button-row">
+                  <button class="primary-action">Guardar admin</button>
+                  <button class="secondary-action" type="button" data-regenerate-admin-password="${escapeHTML(account.id)}">Regenerar contrasena</button>
+                </div>
+              </form>`
+            )
+            .join("")
+        : `<p class="microcopy">Aun no hay administradores registrados para esta barberia.</p>`;
+
+      return `<article class="admin-account-card super-business-card ${isOpen ? "is-open" : ""}">
+        <div class="super-business-summary">
+          <button class="super-business-summary__trigger" type="button" data-toggle-super-business="${escapeHTML(business.id)}" aria-expanded="${isOpen ? "true" : "false"}">
+          <div class="super-business-summary__brand">
+            <div class="super-business-summary__logo">
+              ${business.logoUrl || app.superAdminPendingLogos[business.id] ? `<img src="${escapeHTML(app.superAdminPendingLogos[business.id] || business.logoUrl)}" alt="Logo ${escapeHTML(business.name)}" />` : `<span>${escapeHTML((business.name || "B").slice(0, 1).toUpperCase())}</span>`}
+            </div>
+            <div class="super-business-summary__copy">
+              <h3>${escapeHTML(business.name)}</h3>
+              <p>${business.active ? "Activa" : "Inactiva"} · /barberia/${escapeHTML(business.slug)}</p>
+            </div>
+          </div>
+          <div class="super-business-summary__stats">
+            <span><strong>${barberCount}</strong> barberos</span>
+            <span><strong>${reservationCount}</strong> reservas hoy</span>
+          </div>
+          </button>
+          <div class="super-business-summary__actions">
+            <a class="secondary-action inline-action" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">Entorno</a>
+            <span class="super-business-summary__toggle">${isOpen ? "-" : "+"}</span>
+          </div>
+        </div>
+        <div class="super-business-panel" ${isOpen ? "" : "hidden"}>
+          <div class="super-business-panel__meta">
+            <p class="eyebrow">${business.active ? "Negocio activo" : "Negocio inactivo"}</p>
+            <p>Slug: ${escapeHTML(business.slug)}</p>
+            <p>Admin principal: ${escapeHTML(admin?.name || "Pendiente")} · Usuario: ${escapeHTML(admin?.user || "Desarrollo")}</p>
+            <p>Entorno publico: <a class="inline-link" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">${escapeHTML(urls.public)}</a></p>
+          </div>
+          <form class="super-business-edit form-stack" data-business-id="${escapeHTML(business.id)}">
+            <div class="form-grid">
+              <label>Nombre<input name="name" required value="${escapeHTML(business.name)}" /></label>
+              <label>Slug<input name="slug" required value="${escapeHTML(business.slug)}" /></label>
+              <label>Tema
+                <select name="theme">
+                  ${Object.entries(BUSINESS_THEMES).map(([key, theme]) => `<option value="${key}" ${business.theme === key ? "selected" : ""}>${escapeHTML(theme.label)}</option>`).join("")}
+                </select>
+              </label>
+              <label class="file-control">Subir logo
+                <input name="logo" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" data-business-logo-input="${escapeHTML(business.id)}" />
+              </label>
+            </div>
+            <div class="super-admin-logo-preview">${business.logoUrl || app.superAdminPendingLogos[business.id] ? `<img src="${escapeHTML(app.superAdminPendingLogos[business.id] || business.logoUrl)}" alt="Logo ${escapeHTML(business.name)}" />` : `<span>Sin logo cargado</span>`}</div>
+            <label class="toggle-line"><input name="active" type="checkbox" ${business.active ? "checked" : ""} /> Negocio activo</label>
+            <div class="button-row">
+              <button class="primary-action">Guardar negocio</button>
+              <a class="secondary-action inline-action" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">Entorno</a>
+            </div>
+          </form>
+          <section class="super-admin-admins">
+            <div class="section-title"><span>A</span><h2>Administradores</h2></div>
+            ${adminList}
+            <form class="super-admin-account-create form-stack" data-business-id="${escapeHTML(business.id)}">
+              <div class="form-grid">
+                <label>Nombre<input name="name" required placeholder="Nuevo administrador" /></label>
+                <label>Usuario<input name="user" required placeholder="usuario.admin" /></label>
+              </div>
+              <label class="toggle-line"><input name="active" type="checkbox" checked /> Activo</label>
+              <div class="button-row">
+                <button class="primary-action">Crear administrador</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </article>`;
+    })
+    .join("");
+
+  if (!app.superAdminSession) {
+    return appShell(`
+      <section class="login-view">
+        <div class="login-panel">
+          <p class="eyebrow">Control global</p>
+          <h1>SUPER ADMIN</h1>
+          <form id="super-admin-login" class="form-stack">
+            <label>Usuario<input name="user" required autocomplete="username" placeholder="SDMcompany" /></label>
+            <label>Clave<input name="password" type="password" required autocomplete="current-password" placeholder="••••••••" /></label>
+            ${app.superAdminLoginError ? `<p class="form-error">${escapeHTML(app.superAdminLoginError)}</p>` : ""}
+            <button class="primary-action">Entrar</button>
+          </form>
+        </div>
+      </section>
+    `);
+  }
+
+  return appShell(`
+    <section class="dashboard-head">
+      <div>
+        <p class="eyebrow">Control SaaS</p>
+        <h1>SUPER ADMINISTRADOR</h1>
+      </div>
+      <button class="secondary-action" data-super-logout>Cerrar sesion</button>
+    </section>
+    <section class="admin-stack">
+      <section class="admin-main dashboard-lite">
+        <div class="section-title"><span>N</span><h2>Negocios registrados</h2></div>
+        <div class="dashboard-cards">
+          <div><span>Total negocios</span><strong>${businesses.length}</strong></div>
+          <div><span>Negocios activos</span><strong>${businesses.filter((item) => item.active).length}</strong></div>
+          <div><span>URL base</span><strong>/barberia/:slug</strong></div>
+        </div>
+      </section>
+      <section class="admin-main">
+        <div class="section-title"><span>+</span><h2>Crear barberia</h2></div>
+        ${app.superAdminMessage ? `<p class="form-note">${escapeHTML(app.superAdminMessage)}</p>` : ""}
+        ${credentialReveal}
+        <form id="super-business-create" class="editor-card">
+          <div class="form-grid">
+            <label>Nombre del negocio<input name="name" required placeholder="Barberia Elite" /></label>
+            <label>Slug URL<input name="slug" placeholder="Se genera automaticamente desde el nombre" /></label>
+            <label>Tema
+              <select name="theme">
+                ${Object.entries(BUSINESS_THEMES).map(([key, theme]) => `<option value="${key}">${escapeHTML(theme.label)}</option>`).join("")}
+              </select>
+            </label>
+            <label class="file-control">Subir logo<input name="logo" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" data-business-logo-input="create" /></label>
             <label>Administrador principal<input name="adminName" required placeholder="Nombre administrador" /></label>
           </div>
           <div class="super-admin-logo-preview">${app.superAdminPendingLogos.create ? `<img src="${escapeHTML(app.superAdminPendingLogos.create)}" alt="Vista previa logo" />` : `<span>Vista previa del logo</span>`}</div>
@@ -2677,7 +2867,7 @@ function renderBarberV2() {
 
 function render() {
   const root = document.querySelector("#app");
-  const views = { public: renderPublic, admin: renderAdminV2, barber: renderBarberV2, "super-admin": renderSuperAdmin };
+  const views = { public: renderPublic, admin: renderAdminV2, barber: renderBarberV2, "super-admin": renderSuperAdminV2 };
   ensurePersistentBackground();
   if (root.dataset.shellReady !== "true") {
     root.innerHTML = renderLayoutShell();
@@ -2781,6 +2971,14 @@ function bindEvents() {
     render();
   });
 
+  document.querySelectorAll("[data-toggle-super-business]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const businessId = button.dataset.toggleSuperBusiness || "";
+      app.superAdminOpenBusinessId = app.superAdminOpenBusinessId === businessId ? "" : businessId;
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-business-logo-input]").forEach((input) => {
     input.addEventListener("change", async (event) => {
       const file = event.currentTarget.files?.[0];
@@ -2832,7 +3030,6 @@ function bindEvents() {
       theme,
       primaryColor: palette.primary,
       secondaryColor: palette.secondary,
-      backgroundUrl: String(form.get("backgroundUrl") || "").trim(),
       active: form.get("active") === "on",
     });
 
@@ -2862,6 +3059,7 @@ function bindEvents() {
         password: generatedPassword,
       };
       app.superAdminPendingLogos = { ...app.superAdminPendingLogos, create: "" };
+      app.superAdminOpenBusinessId = business.id;
       app.superAdminMessage = `Barberia creada: ${business.name}`;
       render();
     });
@@ -2895,37 +3093,6 @@ function bindEvents() {
       app.superAdminPendingLogos = { ...app.superAdminPendingLogos, [current.id]: "" };
       app.superAdminMessage = `Negocio actualizado: ${updated.name}`;
       render();
-    });
-  });
-
-  document.querySelectorAll("[data-regenerate-business-password]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const businessId = button.dataset.regenerateBusinessPassword;
-      const accounts = loadAdminAccounts();
-      const account = accounts.find((item) => item.businessId === businessId && item.role === "admin_negocio");
-      if (!account) {
-        app.superAdminMessage = "No se encontro administrador inicial para esta barberia.";
-        render();
-        return;
-      }
-      const generatedPassword = generateSecurePassword(10);
-      Promise.resolve(sha256(generatedPassword)).then((hash) => {
-        account.user = "Desarrollo";
-        account.password = "";
-        account.passwordHash = hash;
-        saveAdminAccounts(accounts);
-        const business = store.businessById(businessId);
-        app.superAdminCredentialReveal = {
-          businessName: business?.name || "Barberia",
-          publicUrl: businessUrlSet(business).public,
-          adminUrl: businessUrlSet(business).admin,
-          barberUrl: businessUrlSet(business).barber,
-          user: "Desarrollo",
-          password: generatedPassword,
-        };
-        app.superAdminMessage = `Nueva clave temporal generada para ${business?.name || "la barberia"}`;
-        render();
-      });
     });
   });
 
