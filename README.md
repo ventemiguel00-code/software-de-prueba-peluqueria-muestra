@@ -1,5 +1,7 @@
 # Barber Delux
 
+Sincronizacion online verificada para el centro de mando SaaS.
+
 Plataforma web premium para barberias modernas. Esta version local esta completa para validar experiencia, flujos y logica de negocio antes de conectar Supabase.
 
 ## Ejecutar local
