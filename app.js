@@ -322,6 +322,38 @@ const defaultState = () => ({
   ],
 });
 
+function mapBusinessToRow(record) {
+  return {
+    id: record.id,
+    name: record.name,
+    slug: record.slug,
+    logo_url: record.logoUrl || "",
+    theme: record.theme || "gold_black",
+    primary_color: record.primaryColor || "#d4af37",
+    secondary_color: record.secondaryColor || "#111111",
+    background_url: record.backgroundUrl || "",
+    active: record.active !== false,
+    created_at: record.createdAt || todayISO(),
+    updated_at: record.updatedAt || todayISO(),
+  };
+}
+
+function mapRowToBusiness(row) {
+  return normalizeBusiness({
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    logoUrl: row.logo_url || "",
+    theme: row.theme || "gold_black",
+    primaryColor: row.primary_color || "#d4af37",
+    secondaryColor: row.secondary_color || "#111111",
+    backgroundUrl: row.background_url || "",
+    active: row.active !== false,
+    createdAt: row.created_at || todayISO(),
+    updatedAt: row.updated_at || todayISO(),
+  });
+}
+
 function createSupabaseClient() {
   if (!hasSupabaseBrowserClient) return null;
   return window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -562,7 +594,8 @@ class StudioStore {
     this.syncInFlight = true;
 
     try {
-      const [barbersResult, appointmentsResult, blockedDaysResult, servicesResult, barberServicesResult] = await Promise.all([
+      const [businessesResult, barbersResult, appointmentsResult, blockedDaysResult, servicesResult, barberServicesResult] = await Promise.all([
+        this.supabase.from("businesses").select("*").order("created_at", { ascending: true }),
         this.supabase.from("barbers").select("*").order("created_at", { ascending: true }),
         this.supabase.from("appointments").select("*").order("date", { ascending: true }).order("time", { ascending: true }),
         this.supabase.from("blocked_days").select("*").order("date", { ascending: true }),
@@ -570,6 +603,7 @@ class StudioStore {
         this.supabase.from("barber_services").select("*").order("created_at", { ascending: true }),
       ]);
 
+      if (businessesResult.error) throw businessesResult.error;
       if (barbersResult.error) throw barbersResult.error;
       if (appointmentsResult.error) throw appointmentsResult.error;
       if (blockedDaysResult.error) throw blockedDaysResult.error;
@@ -597,6 +631,10 @@ class StudioStore {
           weekKey: currentWeek,
           selectedDate: this.state.meta.selectedDate || todayISO(),
         },
+        businesses:
+          businessesResult.data?.length
+            ? (businessesResult.data || []).map(mapRowToBusiness)
+            : defaultState().businesses,
         barbers: (barbersResult.data || []).map((row, index) => mapRowToBarber(row, index)),
         appointments: (appointmentsResult.data || [])
           .map(mapRowToAppointment)
@@ -624,7 +662,8 @@ class StudioStore {
     if (!this.supabase) return;
 
     const seedState = this.loadLocalState();
-    const [barbersInsert, appointmentsInsert, blockedDaysInsert, servicesInsert, barberServicesInsert] = await Promise.all([
+    const [businessesInsert, barbersInsert, appointmentsInsert, blockedDaysInsert, servicesInsert, barberServicesInsert] = await Promise.all([
+      this.supabase.from("businesses").upsert(seedState.businesses.map(mapBusinessToRow), { onConflict: "id" }),
       this.supabase.from("barbers").upsert(seedState.barbers.map(mapBarberToRow), { onConflict: "id" }),
       this.supabase.from("appointments").upsert(seedState.appointments.map(mapAppointmentToRow), { onConflict: "id" }),
       this.supabase.from("blocked_days").upsert(seedState.blockedDays.map(mapBlockedDayToRow), { onConflict: "id" }),
@@ -632,6 +671,7 @@ class StudioStore {
       this.supabase.from("barber_services").upsert(seedState.barberServices.map(mapBarberServiceToRow), { onConflict: "id" }),
     ]);
 
+    if (businessesInsert.error) console.warn("Supabase businesses seed skipped", businessesInsert.error);
     if (barbersInsert.error) throw barbersInsert.error;
     if (appointmentsInsert.error) throw appointmentsInsert.error;
     if (blockedDaysInsert.error) throw blockedDaysInsert.error;
@@ -646,6 +686,9 @@ class StudioStore {
     this.remoteChannel = this.supabase
       .channel("barber-delux-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "barbers" }, () => {
+        this.syncFromRemote().catch((error) => console.error(error));
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "businesses" }, () => {
         this.syncFromRemote().catch((error) => console.error(error));
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => {
@@ -716,6 +759,20 @@ class StudioStore {
       if (!event.record) return;
       const record = this.state.barbers.find((barber) => barber.id === event.record.id) || event.record;
       const { error } = await this.supabase.from("barbers").upsert(mapBarberToRow(record), { onConflict: "id" });
+      if (error) throw error;
+      return;
+    }
+
+    if (event.table === "businesses") {
+      if (event.type === "DELETE") {
+        const { error } = await this.supabase.from("businesses").delete().eq("id", event.id);
+        if (error) throw error;
+        return;
+      }
+      if (!event.record) return;
+      const { error } = await this.supabase
+        .from("businesses")
+        .upsert(mapBusinessToRow(event.record), { onConflict: "id" });
       if (error) throw error;
       return;
     }
