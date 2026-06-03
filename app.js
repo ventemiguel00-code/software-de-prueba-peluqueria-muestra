@@ -1035,16 +1035,6 @@ function saveAdminAccounts(accounts) {
   localStorage.setItem(ADMIN_ACCOUNTS_KEY, JSON.stringify(normalized));
 }
 
-function findAdminAccount(user, password, businessId = null) {
-  return loadAdminAccounts().find(
-    (account) =>
-      account.active &&
-      account.user === user &&
-      account.password === password &&
-      (!businessId || account.role === PRINCIPAL_ADMIN.role || account.businessId === businessId)
-  );
-}
-
 function currentBusiness() {
   return store.businessBySlug(app.currentBusinessSlug) || store.businessById(DEFAULT_BUSINESS_ID) || defaultBusiness();
 }
@@ -1055,6 +1045,41 @@ async function sha256(value) {
   return Array.from(new Uint8Array(hashBuffer))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+function generateSecurePassword(length = 10) {
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lower = "abcdefghijkmnopqrstuvwxyz";
+  const numbers = "23456789";
+  const symbols = "@#$%&*!?";
+  const all = `${upper}${lower}${numbers}${symbols}`;
+  const picks = [
+    upper[Math.floor(Math.random() * upper.length)],
+    lower[Math.floor(Math.random() * lower.length)],
+    numbers[Math.floor(Math.random() * numbers.length)],
+    symbols[Math.floor(Math.random() * symbols.length)],
+  ];
+  while (picks.length < length) {
+    picks.push(all[Math.floor(Math.random() * all.length)]);
+  }
+  return picks.sort(() => Math.random() - 0.5).join("");
+}
+
+async function findAdminAccount(user, password, businessId = null) {
+  const candidates = loadAdminAccounts().filter(
+    (account) =>
+      account.active &&
+      account.user === user &&
+      (!businessId || account.role === PRINCIPAL_ADMIN.role || account.businessId === businessId)
+  );
+  if (!candidates.length) return null;
+
+  const passwordHash = await sha256(password);
+  return (
+    candidates.find((account) => account.passwordHash && account.passwordHash === passwordHash) ||
+    candidates.find((account) => account.password && account.password === password) ||
+    null
+  );
 }
 
 function isPrincipalAdmin() {
@@ -1213,12 +1238,13 @@ function avatar(barber, size = "lg") {
 }
 
 function renderGlobalBackground() {
+  const useStaticSuperAdminBg = app.view === "super-admin";
   const isVideo = app.backgroundMedia?.type === "video";
-  const videoMarkup = isVideo
+  const videoMarkup = !useStaticSuperAdminBg && isVideo
     ? `<video class="global-bg-video" src="${app.backgroundMedia.src}" autoplay muted loop playsinline preload="auto" poster="./assets/atelier-luxury-hero.png"></video>`
     : "";
   return `
-    <div class="global-bg" aria-hidden="true" data-bg-kind="${isVideo ? "video" : "image"}">
+    <div class="global-bg ${useStaticSuperAdminBg ? "super-admin-bg" : ""}" aria-hidden="true" data-bg-kind="${useStaticSuperAdminBg ? "static" : isVideo ? "video" : "image"}">
       <div class="global-bg-image"></div>
       ${videoMarkup}
       <div class="global-bg-overlay"></div>
@@ -1228,7 +1254,7 @@ function renderGlobalBackground() {
 
 function ensurePersistentBackground() {
   const existing = document.querySelector(".global-bg");
-  const signature = `${app.backgroundMedia?.type || "image"}|${app.backgroundMedia?.src || ""}`;
+  const signature = `${app.view}|${app.backgroundMedia?.type || "image"}|${app.backgroundMedia?.src || ""}`;
   if (!existing) {
     document.body.insertAdjacentHTML("afterbegin", renderGlobalBackground());
     document.body.dataset.backgroundSignature = signature;
@@ -2059,7 +2085,7 @@ function renderSuperAdmin() {
           <p class="eyebrow">${business.active ? "Negocio activo" : "Negocio inactivo"}</p>
           <h3>${escapeHTML(business.name)}</h3>
           <p>Slug: ${escapeHTML(business.slug)}</p>
-          <p>Admin principal: ${escapeHTML(admin?.name || "Pendiente")} · Usuario: ${escapeHTML(admin?.user || "Sin usuario")}</p>
+          <p>Admin principal: ${escapeHTML(admin?.name || "Pendiente")} · Usuario: ${escapeHTML(admin?.user || "Desarrollo")}</p>
           <p>URL publica: <a class="inline-link" href="/barberia/${escapeHTML(business.slug)}" target="_blank" rel="noreferrer">/barberia/${escapeHTML(business.slug)}</a></p>
         </div>
         <form class="super-business-edit form-stack" data-business-id="${escapeHTML(business.id)}">
@@ -2072,6 +2098,7 @@ function renderSuperAdmin() {
           <label class="toggle-line"><input name="active" type="checkbox" ${business.active ? "checked" : ""} /> Negocio activo</label>
           <div class="button-row">
             <button class="primary-action">Guardar negocio</button>
+            <button class="secondary-action" type="button" data-regenerate-business-password="${escapeHTML(business.id)}">Regenerar clave admin</button>
             <a class="secondary-action inline-action" href="/admin/${escapeHTML(business.slug)}" target="_blank" rel="noreferrer">Abrir admin</a>
             <a class="secondary-action inline-action" href="/barbero/${escapeHTML(business.slug)}" target="_blank" rel="noreferrer">Abrir barbero</a>
           </div>
@@ -2126,9 +2153,8 @@ function renderSuperAdmin() {
             <label>Color secundario<input name="secondaryColor" placeholder="#111111" /></label>
             <label>Fondo URL<input name="backgroundUrl" placeholder="/assets/fondo.mp4" /></label>
             <label>Administrador principal<input name="adminName" required placeholder="Nombre administrador" /></label>
-            <label>Usuario administrador<input name="adminUser" required placeholder="admin.negocio" /></label>
-            <label>Clave administrador<input name="adminPassword" type="password" required placeholder="Clave temporal" /></label>
           </div>
+          <p class="microcopy">El usuario administrador inicial se crea automaticamente como <strong>Desarrollo</strong> y el sistema genera una clave temporal segura.</p>
           <label class="toggle-line"><input name="active" type="checkbox" checked /> Negocio activo</label>
           <div class="button-row">
             <button class="primary-action">Crear barberia</button>
@@ -2645,10 +2671,8 @@ function bindEvents() {
     const name = String(form.get("name") || "").trim();
     const slug = slugify(form.get("slug") || name);
     const adminName = String(form.get("adminName") || "").trim();
-    const adminUser = String(form.get("adminUser") || "").trim();
-    const adminPassword = String(form.get("adminPassword") || "");
 
-    if (!name || !slug || !adminName || !adminUser || !adminPassword) {
+    if (!name || !slug || !adminName) {
       app.superAdminMessage = "Completa todos los campos obligatorios.";
       render();
       return;
@@ -2669,20 +2693,24 @@ function bindEvents() {
       active: form.get("active") === "on",
     });
 
+    const generatedPassword = generateSecurePassword(10);
     const accounts = loadAdminAccounts();
     accounts.push({
       id: uid("admin"),
       businessId: business.id,
       businessSlug: business.slug,
       name: adminName,
-      user: adminUser,
-      password: adminPassword,
+      user: "Desarrollo",
+      passwordHash: "",
       role: "admin_negocio",
       active: true,
     });
-    saveAdminAccounts(accounts);
-    app.superAdminMessage = `Barberia creada: ${business.name}`;
-    render();
+    Promise.resolve(sha256(generatedPassword)).then((hash) => {
+      accounts[accounts.length - 1].passwordHash = hash;
+      saveAdminAccounts(accounts);
+      app.superAdminMessage = `Barberia creada: ${business.name}. Usuario: Desarrollo. Clave temporal: ${generatedPassword}`;
+      render();
+    });
   });
 
   document.querySelectorAll(".super-business-edit").forEach((formEl) => {
@@ -2714,6 +2742,29 @@ function bindEvents() {
       );
       app.superAdminMessage = `Negocio actualizado: ${updated.name}`;
       render();
+    });
+  });
+
+  document.querySelectorAll("[data-regenerate-business-password]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const businessId = button.dataset.regenerateBusinessPassword;
+      const accounts = loadAdminAccounts();
+      const account = accounts.find((item) => item.businessId === businessId && item.role === "admin_negocio");
+      if (!account) {
+        app.superAdminMessage = "No se encontro administrador inicial para esta barberia.";
+        render();
+        return;
+      }
+      const generatedPassword = generateSecurePassword(10);
+      Promise.resolve(sha256(generatedPassword)).then((hash) => {
+        account.user = "Desarrollo";
+        account.password = "";
+        account.passwordHash = hash;
+        saveAdminAccounts(accounts);
+        const business = store.businessById(businessId);
+        app.superAdminMessage = `Nueva clave temporal para ${business?.name || "la barberia"}: ${generatedPassword}`;
+        render();
+      });
     });
   });
 
@@ -2864,12 +2915,12 @@ function bindEvents() {
     render();
   });
 
-  document.querySelector("#admin-login")?.addEventListener("submit", (event) => {
+  document.querySelector("#admin-login")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const user = String(form.get("user") || "").trim();
     const password = String(form.get("password") || "");
-    const account = findAdminAccount(user, password, currentBusiness()?.id);
+    const account = await findAdminAccount(user, password, currentBusiness()?.id);
 
     if (account) {
       app.adminSession = {

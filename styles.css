@@ -76,6 +76,18 @@ body {
     linear-gradient(180deg, rgba(5, 5, 5, 0.54), rgba(5, 5, 5, 0.78));
 }
 
+.global-bg.super-admin-bg .global-bg-image {
+  background:
+    radial-gradient(circle at 18% 12%, rgba(245, 215, 110, 0.09), transparent 22rem),
+    radial-gradient(circle at 82% 0%, rgba(255, 255, 255, 0.05), transparent 26rem),
+    linear-gradient(135deg, #060708 0%, #13161a 46%, #090a0c 100%);
+}
+
+.global-bg.super-admin-bg .global-bg-overlay {
+  background:
+    linear-gradient(180deg, rgba(7, 8, 10, 0.24), rgba(7, 8, 10, 0.42));
+}
+
 .app-view {
   min-width: 0;
 }
