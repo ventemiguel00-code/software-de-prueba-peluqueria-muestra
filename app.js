@@ -325,7 +325,7 @@ const defaultState = () => ({
 function mapBusinessToRow(record) {
   return {
     id: record.id,
-    name: record.name,
+    business_name: record.name,
     slug: record.slug,
     logo_url: record.logoUrl || "",
     theme: record.theme || "gold_black",
@@ -341,7 +341,7 @@ function mapBusinessToRow(record) {
 function mapRowToBusiness(row) {
   return normalizeBusiness({
     id: row.id,
-    name: row.name,
+    name: row.business_name || row.name,
     slug: row.slug,
     logoUrl: row.logo_url || "",
     theme: row.theme || "gold_black",
@@ -364,6 +364,7 @@ function createSupabaseClient() {
 function mapBarberToRow(barber) {
   return {
     id: barber.id,
+    business_id: barber.negocioId || DEFAULT_BUSINESS_ID,
     name: barber.name,
     user: barber.user,
     password: barber.password,
@@ -378,6 +379,7 @@ function mapBarberToRow(barber) {
 function mapAppointmentToRow(appointment) {
   return {
     id: appointment.id,
+    business_id: appointment.negocioId || DEFAULT_BUSINESS_ID,
     barber_id: appointment.barberId,
     date: appointment.date,
     time: appointment.time,
@@ -394,6 +396,7 @@ function mapAppointmentToRow(appointment) {
 function mapBlockedDayToRow(day) {
   return {
     id: day.id,
+    business_id: day.negocioId || DEFAULT_BUSINESS_ID,
     barber_id: day.barberId,
     date: day.date,
   };
@@ -427,6 +430,7 @@ function composeAppointmentNotes(appointment) {
 function mapServiceToRow(service) {
   return {
     id: service.id,
+    business_id: service.negocioId || DEFAULT_BUSINESS_ID,
     service_name: service.name,
     service_value: Number(service.value) || 0,
     admin_percentage: Number(service.adminPercentage) || 0,
@@ -438,6 +442,7 @@ function mapServiceToRow(service) {
 function mapBarberServiceToRow(item) {
   return {
     id: item.id,
+    business_id: item.negocioId || DEFAULT_BUSINESS_ID,
     barber_id: item.barberId,
     service_id: item.serviceId,
     active: item.active ?? true,
@@ -3371,7 +3376,19 @@ function render() {
   toast?.classList.toggle("is-empty", !app.lastEvent);
   const viewRoot = document.querySelector("#view-root");
   if (!viewRoot) return;
-  viewRoot.innerHTML = views[app.view]();
+  try {
+    viewRoot.innerHTML = views[app.view]();
+  } catch (error) {
+    console.error("Render fallback activated", error);
+    viewRoot.innerHTML = appShell(`
+      <section class="booking-surface">
+        <div class="section-title"><span>!</span><h2>Entorno no disponible</h2></div>
+        <p class="microcopy">La barberia no pudo cargarse correctamente, pero el sistema evito una pantalla en blanco.</p>
+        <p class="microcopy">Verifica que el negocio exista, este activo y tenga configuracion base valida.</p>
+        ${app.currentBusinessSlug ? `<p class="microcopy">Slug solicitado: <strong>${escapeHTML(app.currentBusinessSlug)}</strong></p>` : ""}
+      </section>
+    `);
+  }
   bindEvents();
   document.querySelector("#booking-confirm-dialog")?.showModal();
   requestAnimationFrame(fitPanelTitles);
