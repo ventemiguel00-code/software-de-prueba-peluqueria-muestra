@@ -1210,10 +1210,8 @@ function generateSecurePassword(length = 10) {
 
 function businessUrlSet(business) {
   const slug = business?.slug || DEFAULT_BUSINESS_SLUG;
-  const businessName = String(business?.name || "").trim().toLowerCase();
-  const isVisionBarber = businessName === "vision barber" || slug === "vision-barber" || slug === DEFAULT_BUSINESS_SLUG;
   return {
-    public: isVisionBarber ? `${PRODUCTION_BASE_URL}/` : `${PRODUCTION_BASE_URL}/barberia/${slug}`,
+    public: `${PRODUCTION_BASE_URL}/barberia/${slug}`,
     admin: `${PRODUCTION_BASE_URL}/admin/${slug}`,
     barber: `${PRODUCTION_BASE_URL}/barbero/${slug}`,
   };
@@ -1409,7 +1407,7 @@ function viewPath(view) {
   if (view === "super-admin") return "/super-admin";
   if (view === "admin") return slug === DEFAULT_BUSINESS_SLUG ? "/admin-vip" : `/admin/${slug}`;
   if (view === "barber") return slug === DEFAULT_BUSINESS_SLUG ? "/gestion-equipo" : `/barbero/${slug}`;
-  return slug === DEFAULT_BUSINESS_SLUG ? "/" : `/barberia/${slug}`;
+  return `/barberia/${slug}`;
 }
 
 function avatar(barber, size = "lg") {
