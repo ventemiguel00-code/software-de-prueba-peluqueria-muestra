@@ -1621,11 +1621,27 @@ function isPublicDateAvailable(barberId, date) {
 function renderPublic() {
   const business = currentBusiness();
   const requested = requestedBusiness();
+  if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && !store.remoteReady) {
+    return appShell(`
+      <section class="booking-surface">
+        <div class="section-title"><span>...</span><h2>Cargando entorno</h2></div>
+        <p class="microcopy">Estamos cargando la barberia solicitada.</p>
+      </section>
+    `);
+  }
   if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested) {
     return appShell(`
       <section class="booking-surface">
         <div class="section-title"><span>!</span><h2>Entorno no disponible</h2></div>
-        <p class="microcopy">La barberia solicitada aun no esta disponible o no termino de configurarse.</p>
+        <p class="microcopy">Negocio no encontrado.</p>
+      </section>
+    `);
+  }
+  if (requested && requested.active === false) {
+    return appShell(`
+      <section class="booking-surface">
+        <div class="section-title"><span>!</span><h2>Negocio inactivo</h2></div>
+        <p class="microcopy">Este negocio no esta disponible actualmente.</p>
       </section>
     `);
   }
@@ -1637,6 +1653,8 @@ function renderPublic() {
   const businessId = business.id;
   const publicServices = activeServicesForBusiness(businessId);
   const activeBarbers = app.selectedServiceId ? barbersForService(app.selectedServiceId) : store.activeBarbersByBusiness(businessId);
+  const businessHasNoServices = publicServices.length === 0;
+  const businessHasNoBarbers = store.activeBarbersByBusiness(businessId).length === 0;
   const selected = activeBarbers.find((barber) => barber.id === app.selectedBarberId) || null;
   const hasSelectedBarber = Boolean(selected);
   const selectedService = publicServices.find((service) => service.id === app.selectedServiceId) || null;
@@ -1866,6 +1884,15 @@ function renderPublic() {
         </div>
         <div class="flow-card-body booking-card-body">
           ${bookingCardBody}
+          ${
+            currentStep === "services" && (businessHasNoServices || businessHasNoBarbers)
+              ? `<div class="empty-state-card">
+                  ${businessHasNoServices ? `<p>Aun no hay servicios disponibles.</p>` : ""}
+                  ${businessHasNoBarbers ? `<p>Aun no hay barberos disponibles.</p>` : ""}
+                  <p>Este negocio todavia no tiene horarios configurados.</p>
+                </div>`
+              : ""
+          }
         </div>
       </section>
     </section>
