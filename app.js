@@ -2927,9 +2927,11 @@ function renderSuperAdminV2() {
               </select>
             </label>
             <label class="file-control">Subir logo<input name="logo" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" data-business-logo-input="create" /></label>
+            <label class="file-control">Adjuntar Entorno<input name="environmentArchive" type="file" accept=".zip,.rar,application/zip,application/vnd.rar,application/x-rar-compressed" data-business-environment-input="create" /></label>
             <label>Administrador principal<input name="adminName" required placeholder="Nombre administrador" /></label>
           </div>
           <div class="super-admin-logo-preview">${app.superAdminPendingLogos.create ? `<img src="${escapeHTML(app.superAdminPendingLogos.create)}" alt="Vista previa logo" />` : `<span>Vista previa del logo</span>`}</div>
+          <div class="super-admin-environment-preview">${app.superAdminPendingEnvironmentArchives.create ? `<strong>${escapeHTML(app.superAdminPendingEnvironmentArchives.create.fileName)}</strong><span>${escapeHTML(summarizeEnvironmentAttachment(app.superAdminPendingEnvironmentArchives.create))}</span>` : `<span>Si no adjuntas entorno, la barberia usara la plantilla base dinamica.</span>`}</div>
           <p class="microcopy">El usuario administrador inicial se crea automaticamente como <strong>Desarrollo</strong> y el sistema genera una clave temporal segura.</p>
           <label class="toggle-line"><input name="active" type="checkbox" checked /> Negocio activo</label>
           <div class="button-row">
