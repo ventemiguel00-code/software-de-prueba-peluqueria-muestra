@@ -161,7 +161,7 @@ function defaultBusiness() {
     id: DEFAULT_BUSINESS_ID,
     name: "Vision Barber",
     slug: DEFAULT_BUSINESS_SLUG,
-    logoUrl: "./assets/vision-barber-logo.avif",
+    logoUrl: "/assets/vision-barber-logo.avif",
     theme: "gold_black",
     primaryColor: "#d4af37",
     secondaryColor: "#111111",
@@ -1142,7 +1142,7 @@ const MAX_BACKGROUND_VIDEO_BYTES = 10 * 1024 * 1024;
 const MAX_ENV_ARCHIVE_BYTES = 25 * 1024 * 1024;
 const DEFAULT_BACKGROUND_VIDEO = {
   type: "video",
-  src: "./assets/v2_watermarked-a5df2acc-b2b0-45a5-9132-e0006456c345.mp4",
+  src: "/assets/v2_watermarked-a5df2acc-b2b0-45a5-9132-e0006456c345.mp4",
 };
 const PRINCIPAL_ADMIN = {
   id: "admin_principal",
@@ -1597,7 +1597,7 @@ function renderGlobalBackground() {
   const useStaticSuperAdminBg = app.view === "super-admin";
   const isVideo = app.backgroundMedia?.type === "video";
   const videoMarkup = !useStaticSuperAdminBg && isVideo
-    ? `<video class="global-bg-video" src="${app.backgroundMedia.src}" autoplay muted loop playsinline preload="auto" poster="./assets/atelier-luxury-hero.png"></video>`
+    ? `<video class="global-bg-video" src="${app.backgroundMedia.src}" autoplay muted loop playsinline preload="auto" poster="/assets/atelier-luxury-hero.png"></video>`
     : "";
   return `
     <div class="global-bg ${useStaticSuperAdminBg ? "super-admin-bg" : ""}" aria-hidden="true" data-bg-kind="${useStaticSuperAdminBg ? "static" : isVideo ? "video" : "image"}">
