@@ -322,6 +322,70 @@ const defaultState = () => ({
   ],
 });
 
+function normalizeSignaturePart(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function barberCloneSignature(barber) {
+  return [
+    normalizeSignaturePart(barber.name),
+    normalizeSignaturePart(barber.user),
+    normalizeSignaturePart(barber.whatsapp),
+    normalizeSignaturePart(barber.specialty),
+  ].join("|");
+}
+
+function serviceCloneSignature(service) {
+  return [
+    normalizeSignaturePart(service.name),
+    Number(service.value) || 0,
+    Number(service.adminPercentage) || 0,
+    Number(service.barberPercentage) || 0,
+  ].join("|");
+}
+
+function visionSeedSnapshot() {
+  const seed = defaultState();
+  return {
+    barberIds: new Set(seed.barbers.map((barber) => barber.id)),
+    serviceIds: new Set(seed.services.map((service) => service.id)),
+    barberServiceIds: new Set(seed.barberServices.map((relation) => relation.id)),
+    appointmentIds: new Set(seed.appointments.map((appointment) => appointment.id)),
+    barberSignatures: new Set(seed.barbers.map(barberCloneSignature)),
+    serviceSignatures: new Set(seed.services.map(serviceCloneSignature)),
+  };
+}
+
+function detectReplicatedBusinessIds(state) {
+  const seed = visionSeedSnapshot();
+  return (state.businesses || [])
+    .filter((business) => business.id !== DEFAULT_BUSINESS_ID)
+    .filter((business) => {
+      const businessBarbers = (state.barbers || []).filter((barber) => barber.negocioId === business.id);
+      const businessServices = (state.services || []).filter((service) => service.negocioId === business.id);
+      const businessRelations = (state.barberServices || []).filter((relation) => relation.negocioId === business.id);
+      const businessAppointments = (state.appointments || []).filter((appointment) => appointment.negocioId === business.id);
+      const businessBlockedDays = (state.blockedDays || []).filter((blockedDay) => blockedDay.negocioId === business.id);
+
+      const hasSeedIds =
+        businessBarbers.some((barber) => seed.barberIds.has(barber.id)) ||
+        businessServices.some((service) => seed.serviceIds.has(service.id)) ||
+        businessRelations.some((relation) => seed.barberServiceIds.has(relation.id)) ||
+        businessAppointments.some((appointment) => seed.appointmentIds.has(appointment.id));
+
+      const cloneBarbers =
+        businessBarbers.length > 0 &&
+        businessBarbers.every((barber) => seed.barberSignatures.has(barberCloneSignature(barber)));
+
+      const cloneServices =
+        businessServices.length > 0 &&
+        businessServices.every((service) => seed.serviceSignatures.has(serviceCloneSignature(service)));
+
+      return hasSeedIds || ((cloneBarbers || cloneServices) && (businessRelations.length > 0 || businessAppointments.length > 0 || businessBlockedDays.length > 0));
+    })
+    .map((business) => business.id);
+}
+
 function mapBusinessToRow(record) {
   return {
     id: record.id,
@@ -660,10 +724,23 @@ class StudioStore {
         barberServices: barberServicesData,
       };
 
+      const replicatedBusinessIds = detectReplicatedBusinessIds(nextState);
+
       this.applyingRemote = true;
       this.state = nextState;
       localStorage.setItem(APP_KEY, JSON.stringify(this.state));
       this.remoteReady = true;
+
+      if (replicatedBusinessIds.length) {
+        for (const businessId of replicatedBusinessIds) {
+          await this.ensureBusinessStartsEmpty(businessId);
+        }
+        this.applyingRemote = false;
+        this.syncInFlight = false;
+        await this.syncFromRemote({ quiet });
+        return;
+      }
+
       if (!quiet) {
         this.emit({ type: "SYNC", table: "remote" });
         this.channel?.postMessage({ type: "SYNC", table: "remote" });
