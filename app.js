@@ -725,13 +725,21 @@ class StudioStore {
   async persistRemote(event) {
     if (!this.supabase) return;
     if (event.reason === "daily_reset") {
-      const appointmentsReset = await this.supabase.from("appointments").delete().not("id", "is", null);
+      const appointmentsReset = await this.supabase
+        .from("appointments")
+        .delete()
+        .eq("business_id", DEFAULT_BUSINESS_ID);
       if (appointmentsReset.error) throw appointmentsReset.error;
 
-      const blockedDaysReset = await this.supabase.from("blocked_days").delete().not("id", "is", null);
+      const blockedDaysReset = await this.supabase
+        .from("blocked_days")
+        .delete()
+        .eq("business_id", DEFAULT_BUSINESS_ID);
       if (blockedDaysReset.error) throw blockedDaysReset.error;
 
-      const seedAppointments = this.state.appointments.map(mapAppointmentToRow);
+      const seedAppointments = this.state.appointments
+        .filter((appointment) => appointment.negocioId === DEFAULT_BUSINESS_ID)
+        .map(mapAppointmentToRow);
       if (seedAppointments.length) {
         const appointmentsSeed = await this.supabase
           .from("appointments")
@@ -746,6 +754,7 @@ class StudioStore {
       const { error } = await this.supabase
         .from("appointments")
         .delete()
+        .eq("business_id", DEFAULT_BUSINESS_ID)
         .eq("status", "reserved")
         .neq("week_key", currentWeek);
       if (error) throw error;
@@ -754,7 +763,11 @@ class StudioStore {
 
     if (event.table === "appointments") {
       if (event.type === "DELETE") {
-        const { error } = await this.supabase.from("appointments").delete().eq("id", event.id);
+        const { error } = await this.supabase
+          .from("appointments")
+          .delete()
+          .eq("id", event.id)
+          .eq("business_id", event.businessId || currentBusinessId());
         if (error) throw error;
         return;
       }
@@ -768,7 +781,11 @@ class StudioStore {
 
     if (event.table === "barbers") {
       if (event.type === "DELETE") {
-        const { error } = await this.supabase.from("barbers").delete().eq("id", event.id);
+        const { error } = await this.supabase
+          .from("barbers")
+          .delete()
+          .eq("id", event.id)
+          .eq("business_id", event.businessId || currentBusinessId());
         if (error) throw error;
         return;
       }
@@ -820,7 +837,8 @@ class StudioStore {
           .from("blocked_days")
           .delete()
           .eq("barber_id", record.barberId)
-          .eq("date", record.date);
+          .eq("date", record.date)
+          .eq("business_id", record.negocioId || currentBusinessId());
         if (error) throw error;
         return;
       }
@@ -837,7 +855,11 @@ class StudioStore {
 
     if (event.table === "services") {
       if (event.type === "DELETE") {
-        const { error } = await this.supabase.from("services").delete().eq("id", event.id);
+        const { error } = await this.supabase
+          .from("services")
+          .delete()
+          .eq("id", event.id)
+          .eq("business_id", event.businessId || currentBusinessId());
         if (error) throw error;
         return;
       }
@@ -852,7 +874,11 @@ class StudioStore {
     if (event.table === "barber_services") {
       if (event.type === "REPLACE") {
         if (!event.barberId) return;
-        const removeExisting = await this.supabase.from("barber_services").delete().eq("barber_id", event.barberId);
+        const removeExisting = await this.supabase
+          .from("barber_services")
+          .delete()
+          .eq("barber_id", event.barberId)
+          .eq("business_id", event.businessId || currentBusinessId());
         if (removeExisting.error) throw removeExisting.error;
         if (!event.records?.length) return;
         const insertRows = await this.supabase
@@ -875,8 +901,14 @@ class StudioStore {
     }
 
     const seededState = defaultState();
-    this.state.appointments = seededState.appointments;
-    this.state.blockedDays = seededState.blockedDays;
+    this.state.appointments = [
+      ...this.state.appointments.filter((appointment) => appointment.negocioId !== DEFAULT_BUSINESS_ID),
+      ...seededState.appointments,
+    ];
+    this.state.blockedDays = [
+      ...this.state.blockedDays.filter((blockedDay) => blockedDay.negocioId !== DEFAULT_BUSINESS_ID),
+      ...seededState.blockedDays,
+    ];
     this.state.meta.dayKey = currentDay;
     this.state.meta.weekKey = currentWeek;
     this.state.meta.selectedDate = currentDay;
@@ -1001,14 +1033,20 @@ class StudioStore {
     return true;
   }
 
-  getAppointment(barberId, date, time) {
+  getAppointment(barberId, date, time, negocioId = currentBusinessId()) {
     return this.state.appointments.find(
-      (item) => item.barberId === barberId && item.date === date && item.time === time
+      (item) =>
+        item.barberId === barberId &&
+        item.date === date &&
+        item.time === time &&
+        item.negocioId === negocioId
     );
   }
 
-  isDayBlocked(barberId, date) {
-    return this.state.blockedDays.some((item) => item.barberId === barberId && item.date === date);
+  isDayBlocked(barberId, date, negocioId = currentBusinessId()) {
+    return this.state.blockedDays.some(
+      (item) => item.barberId === barberId && item.date === date && item.negocioId === negocioId
+    );
   }
 
   upsertAppointment(payload) {
@@ -1036,30 +1074,46 @@ class StudioStore {
     return appointment;
   }
 
-  deleteAppointment(id) {
-    this.state.appointments = this.state.appointments.filter((item) => item.id !== id);
-    this.persist({ type: "DELETE", table: "appointments", id });
+  deleteAppointment(id, negocioId = currentBusinessId()) {
+    this.state.appointments = this.state.appointments.filter(
+      (item) => !(item.id === id && item.negocioId === negocioId)
+    );
+    this.persist({ type: "DELETE", table: "appointments", id, businessId: negocioId });
   }
 
-  deleteBarber(id) {
-    this.state.barbers = this.state.barbers.filter((barber) => barber.id !== id);
-    this.state.appointments = this.state.appointments.filter((item) => item.barberId !== id);
-    this.state.blockedDays = this.state.blockedDays.filter((item) => item.barberId !== id);
-    this.state.barberServices = this.state.barberServices.filter((item) => item.barberId !== id);
-    this.persist({ type: "DELETE", table: "barbers", id });
+  deleteBarber(id, negocioId = currentBusinessId()) {
+    this.state.barbers = this.state.barbers.filter(
+      (barber) => !(barber.id === id && barber.negocioId === negocioId)
+    );
+    this.state.appointments = this.state.appointments.filter(
+      (item) => !(item.barberId === id && item.negocioId === negocioId)
+    );
+    this.state.blockedDays = this.state.blockedDays.filter(
+      (item) => !(item.barberId === id && item.negocioId === negocioId)
+    );
+    this.state.barberServices = this.state.barberServices.filter(
+      (item) => !(item.barberId === id && item.negocioId === negocioId)
+    );
+    this.persist({ type: "DELETE", table: "barbers", id, businessId: negocioId });
   }
 
   saveBarber(payload) {
     if (payload.id) {
       this.state.barbers = this.state.barbers.map((barber) =>
-        barber.id === payload.id ? { ...barber, ...payload } : barber
+        barber.id === payload.id && barber.negocioId === (payload.negocioId || currentBusinessId())
+          ? { ...barber, ...payload }
+          : barber
       );
       this.persist({
         type: "UPDATE",
         table: "barbers",
-        record: this.state.barbers.find((barber) => barber.id === payload.id),
+        record: this.state.barbers.find(
+          (barber) => barber.id === payload.id && barber.negocioId === (payload.negocioId || currentBusinessId())
+        ),
       });
-      return this.state.barbers.find((barber) => barber.id === payload.id);
+      return this.state.barbers.find(
+        (barber) => barber.id === payload.id && barber.negocioId === (payload.negocioId || currentBusinessId())
+      );
     }
 
     const { id, ...barberPayload } = payload;
@@ -1087,9 +1141,9 @@ class StudioStore {
 
   unblockDay(barberId, date) {
     this.state.blockedDays = this.state.blockedDays.filter(
-      (item) => !(item.barberId === barberId && item.date === date)
+      (item) => !(item.barberId === barberId && item.date === date && item.negocioId === currentBusinessId())
     );
-    this.persist({ type: "DELETE", table: "blocked_days", record: { barberId, date } });
+    this.persist({ type: "DELETE", table: "blocked_days", record: { barberId, date, negocioId: currentBusinessId() } });
   }
 
   blockAvailableSlots(barberId, date) {
@@ -1110,21 +1164,29 @@ class StudioStore {
 
   unblockBlockedSlots(barberId, date) {
     const blocked = this.state.appointments.filter(
-      (item) => item.barberId === barberId && item.date === date && item.status === "blocked"
+      (item) =>
+        item.barberId === barberId &&
+        item.date === date &&
+        item.status === "blocked" &&
+        item.negocioId === currentBusinessId()
     );
-    blocked.forEach((item) => this.deleteAppointment(item.id));
+    blocked.forEach((item) => this.deleteAppointment(item.id, item.negocioId));
     this.unblockDay(barberId, date);
   }
 
   saveService(payload) {
     if (payload.id) {
       this.state.services = this.state.services.map((service) =>
-        service.id === payload.id ? { ...service, ...payload } : service
+        service.id === payload.id && service.negocioId === (payload.negocioId || currentBusinessId())
+          ? { ...service, ...payload }
+          : service
       );
       this.persist({
         type: "UPDATE",
         table: "services",
-        record: this.state.services.find((service) => service.id === payload.id),
+        record: this.state.services.find(
+          (service) => service.id === payload.id && service.negocioId === (payload.negocioId || currentBusinessId())
+        ),
       });
       return;
     }
@@ -1139,21 +1201,27 @@ class StudioStore {
     this.persist({ type: "INSERT", table: "services", record: created });
   }
 
-  deleteService(id) {
-    this.state.services = this.state.services.filter((service) => service.id !== id);
-    this.state.barberServices = this.state.barberServices.filter((item) => item.serviceId !== id);
-    this.persist({ type: "DELETE", table: "services", id });
+  deleteService(id, negocioId = currentBusinessId()) {
+    this.state.services = this.state.services.filter(
+      (service) => !(service.id === id && service.negocioId === negocioId)
+    );
+    this.state.barberServices = this.state.barberServices.filter(
+      (item) => !(item.serviceId === id && item.negocioId === negocioId)
+    );
+    this.persist({ type: "DELETE", table: "services", id, businessId: negocioId });
   }
 
-  getBarberServiceIds(barberId) {
+  getBarberServiceIds(barberId, negocioId = currentBusinessId()) {
     return this.state.barberServices
-      .filter((item) => item.barberId === barberId && item.active)
+      .filter((item) => item.barberId === barberId && item.active && item.negocioId === negocioId)
       .map((item) => item.serviceId);
   }
 
   saveBarberServices(barberId, serviceIds, negocioId = currentBusinessId()) {
     const uniqueIds = [...new Set((serviceIds || []).filter(Boolean))];
-    this.state.barberServices = this.state.barberServices.filter((item) => item.barberId !== barberId);
+    this.state.barberServices = this.state.barberServices.filter(
+      (item) => !(item.barberId === barberId && item.negocioId === negocioId)
+    );
     const records = uniqueIds.map((serviceId) => ({
       id: uid("barber_service"),
       negocioId,
@@ -1162,7 +1230,7 @@ class StudioStore {
       active: true,
     }));
     this.state.barberServices.push(...records);
-    this.persist({ type: "REPLACE", table: "barber_services", barberId, records });
+    this.persist({ type: "REPLACE", table: "barber_services", barberId, businessId: negocioId, records });
     return records;
   }
 }
@@ -1173,6 +1241,7 @@ const ADMIN_ACCOUNTS_KEY = "barber-delux-admin-accounts-v1";
 const BUSINESS_ENV_ATTACHMENTS_KEY = "barber-delux-business-env-attachments-v1";
 const SUPER_ADMIN_SESSION_KEY = "vision-barber-super-admin-session";
 const BACKGROUND_MEDIA_KEY = "barber-delux-background-media-v1";
+const BACKGROUND_MEDIA_BY_BUSINESS_KEY = "barber-delux-background-media-by-business-v1";
 const SOUND_PREF_KEY = "barber-delux-sound-enabled";
 const MAX_BACKGROUND_VIDEO_BYTES = 10 * 1024 * 1024;
 const MAX_ENV_ARCHIVE_BYTES = 25 * 1024 * 1024;
@@ -1461,22 +1530,53 @@ function isPrincipalAdmin() {
   return app.adminSession?.role === PRINCIPAL_ADMIN.role;
 }
 
-function loadBackgroundMedia() {
-  const raw = localStorage.getItem(BACKGROUND_MEDIA_KEY);
-  if (!raw) return DEFAULT_BACKGROUND_VIDEO;
+function loadBackgroundMediaMap() {
+  const raw = localStorage.getItem(BACKGROUND_MEDIA_BY_BUSINESS_KEY);
+  if (!raw) return {};
   try {
     return JSON.parse(raw);
   } catch {
-    return DEFAULT_BACKGROUND_VIDEO;
+    return {};
   }
 }
 
-function saveBackgroundMedia(media) {
-  if (!media) {
-    localStorage.removeItem(BACKGROUND_MEDIA_KEY);
-    return;
+function loadBackgroundMedia(businessId = DEFAULT_BUSINESS_ID) {
+  const map = loadBackgroundMediaMap();
+  if (map[businessId]) return map[businessId];
+  if (businessId === DEFAULT_BUSINESS_ID) {
+    const legacy = localStorage.getItem(BACKGROUND_MEDIA_KEY);
+    if (legacy) {
+      try {
+        return JSON.parse(legacy);
+      } catch {
+        return DEFAULT_BACKGROUND_VIDEO;
+      }
+    }
+    return DEFAULT_BACKGROUND_VIDEO;
   }
-  localStorage.setItem(BACKGROUND_MEDIA_KEY, JSON.stringify(media));
+  return null;
+}
+
+function saveBackgroundMedia(media, businessId = currentBusinessId()) {
+  const map = loadBackgroundMediaMap();
+  if (!media) {
+    delete map[businessId];
+  } else {
+    map[businessId] = media;
+  }
+  localStorage.setItem(BACKGROUND_MEDIA_BY_BUSINESS_KEY, JSON.stringify(map));
+  if (businessId === DEFAULT_BUSINESS_ID) {
+    if (!media) {
+      localStorage.removeItem(BACKGROUND_MEDIA_KEY);
+    } else {
+      localStorage.setItem(BACKGROUND_MEDIA_KEY, JSON.stringify(media));
+    }
+  }
+}
+
+function currentBackgroundMedia() {
+  const businessId = currentBusinessId();
+  return loadBackgroundMedia(businessId);
 }
 
 function loadSoundPreference() {
@@ -1512,7 +1612,7 @@ const app = {
   adminAccountMessage: "",
   adminActionMessage: "",
   adminServiceMessage: "",
-  backgroundMedia: loadBackgroundMedia(),
+  backgroundMedia: loadBackgroundMedia(DEFAULT_BUSINESS_ID),
   backgroundMessage: "",
   pendingBackgroundVideo: null,
   soundEnabled: loadSoundPreference(),
@@ -1630,10 +1730,11 @@ function avatar(barber, size = "lg") {
 }
 
 function renderGlobalBackground() {
+  const backgroundMedia = currentBackgroundMedia();
   const useStaticSuperAdminBg = app.view === "super-admin";
-  const isVideo = app.backgroundMedia?.type === "video";
+  const isVideo = backgroundMedia?.type === "video";
   const videoMarkup = !useStaticSuperAdminBg && isVideo
-    ? `<video class="global-bg-video" src="${app.backgroundMedia.src}" autoplay muted loop playsinline preload="auto" poster="/assets/atelier-luxury-hero.png"></video>`
+    ? `<video class="global-bg-video" src="${backgroundMedia.src}" autoplay muted loop playsinline preload="auto" poster="/assets/atelier-luxury-hero.png"></video>`
     : "";
   return `
     <div class="global-bg ${useStaticSuperAdminBg ? "super-admin-bg" : ""}" aria-hidden="true" data-bg-kind="${useStaticSuperAdminBg ? "static" : isVideo ? "video" : "image"}">
@@ -1646,7 +1747,8 @@ function renderGlobalBackground() {
 
 function ensurePersistentBackground() {
   const existing = document.querySelector(".global-bg");
-  const signature = `${app.view}|${app.backgroundMedia?.type || "image"}|${app.backgroundMedia?.src || ""}`;
+  const backgroundMedia = currentBackgroundMedia();
+  const signature = `${app.view}|${currentBusinessId()}|${backgroundMedia?.type || "image"}|${backgroundMedia?.src || ""}`;
   if (!existing) {
     document.body.insertAdjacentHTML("afterbegin", renderGlobalBackground());
     document.body.dataset.backgroundSignature = signature;
@@ -1868,9 +1970,10 @@ function BusinessPublicTemplate({
   businessHasNoServices,
   businessHasNoBarbers,
 }) {
+  const backgroundMedia = currentBackgroundMedia();
   return appShell(`
     <section class="hero">
-      <div class="hero-bg ${app.backgroundMedia?.type === "video" ? "video-backed" : ""}"></div>
+      <div class="hero-bg ${backgroundMedia?.type === "video" ? "video-backed" : ""}"></div>
       <div class="hero-copy">
         <p class="eyebrow">Reservas premium para barberias modernas</p>
         <h1>${escapeHTML(business?.name || "Vision Barber")}</h1>
@@ -2256,9 +2359,10 @@ function renderPublic() {
       <p class="microcopy">Confirmacion inmediata en esta version local. La integracion real se conecta despues con Supabase.</p>`;
   }
 
+  const backgroundMedia = currentBackgroundMedia();
   return appShell(`
     <section class="hero">
-      <div class="hero-bg ${app.backgroundMedia?.type === "video" ? "video-backed" : ""}"></div>
+      <div class="hero-bg ${backgroundMedia?.type === "video" ? "video-backed" : ""}"></div>
       <div class="hero-copy">
         <p class="eyebrow">Reservas premium para barberias modernas</p>
         <h1>${escapeHTML(business?.name || "Vision Barber")}</h1>
@@ -3425,6 +3529,7 @@ function render() {
     "business-test": renderBusinessPublicTest,
   };
   ensurePersistentBackground();
+  app.backgroundMedia = currentBackgroundMedia();
   if (root.dataset.shellReady !== "true") {
     root.innerHTML = renderLayoutShell();
     root.dataset.shellReady = "true";
