@@ -594,6 +594,7 @@ class StudioStore {
     this.syncInFlight = true;
 
     try {
+      const localState = this.loadLocalState();
       const [businessesResult, barbersResult, appointmentsResult, blockedDaysResult, servicesResult, barberServicesResult] = await Promise.all([
         this.supabase.from("businesses").select("*").order("created_at", { ascending: true }),
         this.supabase.from("barbers").select("*").order("created_at", { ascending: true }),
@@ -608,6 +609,16 @@ class StudioStore {
       if (appointmentsResult.error) throw appointmentsResult.error;
       if (blockedDaysResult.error) throw blockedDaysResult.error;
       if (barberServicesResult.error) throw barberServicesResult.error;
+      const remoteBusinesses = (businessesResult.data || []).map(mapRowToBusiness);
+      const missingBusinesses = (localState.businesses || []).filter(
+        (business) => !remoteBusinesses.some((remoteBusiness) => remoteBusiness.id === business.id)
+      );
+      if (missingBusinesses.length) {
+        const { error } = await this.supabase
+          .from("businesses")
+          .upsert(missingBusinesses.map(mapBusinessToRow), { onConflict: "id" });
+        if (error) throw error;
+      }
       const servicesData =
         servicesResult.error || !servicesResult.data?.length
           ? defaultState().services
@@ -632,8 +643,8 @@ class StudioStore {
           selectedDate: this.state.meta.selectedDate || todayISO(),
         },
         businesses:
-          businessesResult.data?.length
-            ? (businessesResult.data || []).map(mapRowToBusiness)
+          remoteBusinesses.length || missingBusinesses.length
+            ? [...remoteBusinesses, ...missingBusinesses.filter((business) => !remoteBusinesses.some((remoteBusiness) => remoteBusiness.id === business.id))]
             : defaultState().businesses,
         barbers: (barbersResult.data || []).map((row, index) => mapRowToBarber(row, index)),
         appointments: (appointmentsResult.data || [])
