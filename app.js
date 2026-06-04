@@ -1120,6 +1120,9 @@ function resolveRoute(pathname = location.pathname) {
   if (parts[0] === "super-admin" || parts[0] === "admin-global") {
     return { view: "super-admin", businessSlug: DEFAULT_BUSINESS_SLUG };
   }
+  if (parts[0] === "barberia-test" && parts[1]) {
+    return { view: "business-test", businessSlug: parts[1] };
+  }
   if (parts[0] === "admin" && parts[1]) {
     return { view: "admin", businessSlug: parts[1] };
   }
@@ -1405,6 +1408,7 @@ function renderAccordionPanel(id, label, title, content, open = false) {
 function viewPath(view) {
   const slug = app.currentBusinessSlug || DEFAULT_BUSINESS_SLUG;
   if (view === "super-admin") return "/super-admin";
+  if (view === "business-test") return `/barberia-test/${slug}`;
   if (view === "admin") return slug === DEFAULT_BUSINESS_SLUG ? "/admin-vip" : `/admin/${slug}`;
   if (view === "barber") return slug === DEFAULT_BUSINESS_SLUG ? "/gestion-equipo" : `/barbero/${slug}`;
   return `/barberia/${slug}`;
@@ -1722,6 +1726,93 @@ function BusinessPublicTemplate({
         </dialog>`
         : ""
     }
+  `);
+}
+
+function renderBusinessPublicTest() {
+  const requested = requestedBusiness();
+  if (app.currentBusinessSlug && !requested && !store.remoteReady) {
+    return appShell(`
+      <section class="booking-surface">
+        <div class="section-title"><span>...</span><h2>Cargando negocio</h2></div>
+        <p class="microcopy">Estamos consultando el slug solicitado.</p>
+      </section>
+    `);
+  }
+
+  if (!requested) {
+    return appShell(`
+      <section class="booking-surface">
+        <div class="section-title"><span>!</span><h2>Negocio no encontrado</h2></div>
+        <p class="microcopy">No existe una barberia registrada para el slug <strong>${escapeHTML(app.currentBusinessSlug)}</strong>.</p>
+      </section>
+    `);
+  }
+
+  const businessId = requested.id;
+  const services = servicesForBusiness(businessId);
+  const activeBarbers = store.activeBarbersByBusiness(businessId);
+  const appointments = store.state.appointments.filter((appointment) => appointment.negocioId === businessId);
+  const blockedDays = store.state.blockedDays.filter((blockedDay) => blockedDay.negocioId === businessId);
+
+  return appShell(`
+    <section class="dashboard-head">
+      <div>
+        <p class="eyebrow">BusinessPublicTemplate test</p>
+        <h1>${escapeHTML(requested.name)}</h1>
+      </div>
+      <a class="secondary-action inline-action" href="${escapeHTML(`/barberia/${requested.slug}`)}">Abrir entorno publico</a>
+    </section>
+
+    <section class="admin-stack">
+      <section class="admin-main dashboard-lite">
+        <div class="section-title"><span>T</span><h2>Resumen del slug</h2></div>
+        <div class="dashboard-cards">
+          <div><span>Slug</span><strong>${escapeHTML(requested.slug)}</strong></div>
+          <div><span>Estado</span><strong>${requested.active ? "Activo" : "Inactivo"}</strong></div>
+          <div><span>Negocio ID</span><strong>${escapeHTML(requested.id)}</strong></div>
+        </div>
+      </section>
+
+      <section class="admin-main dashboard-lite">
+        <div class="section-title"><span>D</span><h2>Datos cargados</h2></div>
+        <div class="dashboard-cards">
+          <div><span>Servicios</span><strong>${services.length}</strong></div>
+          <div><span>Barberos activos</span><strong>${activeBarbers.length}</strong></div>
+          <div><span>Reservas</span><strong>${appointments.length}</strong></div>
+          <div><span>Bloqueos</span><strong>${blockedDays.length}</strong></div>
+        </div>
+      </section>
+
+      <section class="admin-main">
+        <div class="section-title"><span>E</span><h2>Estado del entorno</h2></div>
+        ${
+          !requested.active
+            ? `<div class="empty-state-card"><p>Este negocio no esta disponible actualmente.</p></div>`
+            : ""
+        }
+        ${
+          !services.length
+            ? `<div class="empty-state-card"><p>Aun no hay servicios disponibles.</p></div>`
+            : ""
+        }
+        ${
+          !activeBarbers.length
+            ? `<div class="empty-state-card"><p>Aun no hay barberos disponibles.</p></div>`
+            : ""
+        }
+        ${
+          !appointments.length
+            ? `<div class="empty-state-card"><p>Aun no hay reservas registradas.</p></div>`
+            : ""
+        }
+        ${
+          !blockedDays.length
+            ? `<div class="empty-state-card"><p>Aun no hay bloqueos configurados.</p></div>`
+            : ""
+        }
+      </section>
+    </section>
   `);
 }
 
@@ -3117,7 +3208,13 @@ function renderBarberV2() {
 
 function render() {
   const root = document.querySelector("#app");
-  const views = { public: renderPublic, admin: renderAdminV2, barber: renderBarberV2, "super-admin": renderSuperAdminV2 };
+  const views = {
+    public: renderPublic,
+    admin: renderAdminV2,
+    barber: renderBarberV2,
+    "super-admin": renderSuperAdminV2,
+    "business-test": renderBusinessPublicTest,
+  };
   ensurePersistentBackground();
   if (root.dataset.shellReady !== "true") {
     root.innerHTML = renderLayoutShell();
