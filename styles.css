@@ -2258,6 +2258,22 @@ dialog::backdrop {
   border-radius: 14px;
 }
 
+.super-admin-environment-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 1px dashed rgba(212, 175, 55, 0.22);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+}
+
+.super-admin-environment-preview strong {
+  color: var(--text);
+}
+
 .super-admin-admins {
   margin-top: 18px;
   padding-top: 18px;

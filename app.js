@@ -1097,10 +1097,12 @@ class StudioStore {
 const store = new StudioStore();
 const ADMIN_SESSION_KEY = "barber-delux-admin-session";
 const ADMIN_ACCOUNTS_KEY = "barber-delux-admin-accounts-v1";
+const BUSINESS_ENV_ATTACHMENTS_KEY = "barber-delux-business-env-attachments-v1";
 const SUPER_ADMIN_SESSION_KEY = "vision-barber-super-admin-session";
 const BACKGROUND_MEDIA_KEY = "barber-delux-background-media-v1";
 const SOUND_PREF_KEY = "barber-delux-sound-enabled";
 const MAX_BACKGROUND_VIDEO_BYTES = 10 * 1024 * 1024;
+const MAX_ENV_ARCHIVE_BYTES = 25 * 1024 * 1024;
 const DEFAULT_BACKGROUND_VIDEO = {
   type: "video",
   src: "./assets/v2_watermarked-a5df2acc-b2b0-45a5-9132-e0006456c345.mp4",
@@ -1156,6 +1158,132 @@ function saveAdminAccounts(accounts) {
     ...accounts.filter((account) => account.id !== PRINCIPAL_ADMIN.id),
   ];
   localStorage.setItem(ADMIN_ACCOUNTS_KEY, JSON.stringify(normalized));
+}
+
+function loadBusinessEnvironmentAttachments() {
+  const raw = localStorage.getItem(BUSINESS_ENV_ATTACHMENTS_KEY);
+  try {
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveBusinessEnvironmentAttachments(attachments) {
+  localStorage.setItem(BUSINESS_ENV_ATTACHMENTS_KEY, JSON.stringify(attachments || {}));
+}
+
+function businessEnvironmentAttachment(businessId) {
+  return loadBusinessEnvironmentAttachments()[businessId] || null;
+}
+
+function archiveExtension(fileName = "") {
+  const parts = String(fileName || "").toLowerCase().split(".");
+  return parts.length > 1 ? parts.at(-1) : "";
+}
+
+function formatBytes(size = 0) {
+  if (!size) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = Number(size);
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  const fixed = value >= 10 || index === 0 ? 0 : 1;
+  return `${value.toFixed(fixed)} ${units[index]}`;
+}
+
+function summarizeEnvironmentAttachment(meta) {
+  if (!meta) return "Usara la plantilla base dinamica del sistema.";
+  if (meta.mode === "dynamic_base") return "Usa la plantilla base dinamica del sistema.";
+  const validationLabel =
+    meta.validationMode === "zip_structure"
+      ? "ZIP validado"
+      : meta.validationMode === "rar_basic"
+        ? "RAR aceptado"
+        : "Adjunto validado";
+  return `${validationLabel}: ${meta.fileName} · ${formatBytes(meta.size)}`;
+}
+
+async function validateEnvironmentArchive(file) {
+  if (!file) {
+    return { valid: false, error: "Debes seleccionar un archivo .zip o .rar." };
+  }
+
+  const extension = archiveExtension(file.name);
+  if (!["zip", "rar"].includes(extension)) {
+    return { valid: false, error: "Formato no permitido. Usa .zip o .rar." };
+  }
+
+  if (file.size > MAX_ENV_ARCHIVE_BYTES) {
+    return { valid: false, error: "El archivo supera el tamano maximo de 25 MB." };
+  }
+
+  const baseMeta = {
+    fileName: file.name,
+    size: file.size,
+    mimeType: file.type || "",
+    extension,
+    validatedAt: new Date().toISOString(),
+  };
+
+  if (extension === "rar") {
+    return {
+      valid: true,
+      meta: {
+        ...baseMeta,
+        validationMode: "rar_basic",
+        structureOk: true,
+        notes: "Archivo RAR aceptado con validacion basica. Se recomienda ZIP para validacion estructural completa.",
+      },
+    };
+  }
+
+  if (!window.JSZip?.loadAsync) {
+    return {
+      valid: true,
+      meta: {
+        ...baseMeta,
+        validationMode: "zip_basic",
+        structureOk: true,
+        notes: "ZIP aceptado con validacion basica.",
+      },
+    };
+  }
+
+  try {
+    const zip = await window.JSZip.loadAsync(file);
+    const entryNames = Object.keys(zip.files)
+      .filter((name) => !zip.files[name].dir)
+      .map((name) => name.replaceAll("\\", "/"));
+    const requiredEntries = ["app.js", "index.html", "styles.css"];
+    const hasRequiredEntries = requiredEntries.every((requiredName) =>
+      entryNames.some((name) => name.toLowerCase().endsWith(requiredName))
+    );
+
+    if (!hasRequiredEntries) {
+      return {
+        valid: false,
+        error: "El ZIP no parece un entorno valido. Debe incluir al menos app.js, index.html y styles.css.",
+      };
+    }
+
+    return {
+      valid: true,
+      meta: {
+        ...baseMeta,
+        validationMode: "zip_structure",
+        structureOk: true,
+        entryCount: entryNames.length,
+        sampleEntries: entryNames.slice(0, 6),
+        notes: "ZIP validado correctamente como plantilla base.",
+      },
+    };
+  } catch {
+    return { valid: false, error: "No fue posible leer el ZIP. Verifica que no este danado." };
+  }
 }
 
 function currentBusiness() {
@@ -1305,6 +1433,7 @@ const app = {
   superAdminMessage: "",
   superAdminCredentialReveal: null,
   superAdminPendingLogos: {},
+  superAdminPendingEnvironmentArchives: {},
   superAdminOpenBusinessId: "",
   adminLoginError: "",
   adminAccountMessage: "",
@@ -2612,9 +2741,11 @@ function renderSuperAdmin() {
               </select>
             </label>
             <label class="file-control">Subir logo<input name="logo" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" data-business-logo-input="create" /></label>
+            <label class="file-control">Adjuntar Entorno<input name="environmentArchive" type="file" accept=".zip,.rar,application/zip,application/vnd.rar,application/x-rar-compressed" data-business-environment-input="create" /></label>
             <label>Administrador principal<input name="adminName" required placeholder="Nombre administrador" /></label>
           </div>
           <div class="super-admin-logo-preview">${app.superAdminPendingLogos.create ? `<img src="${escapeHTML(app.superAdminPendingLogos.create)}" alt="Vista previa logo" />` : `<span>Vista previa del logo</span>`}</div>
+          <div class="super-admin-environment-preview">${app.superAdminPendingEnvironmentArchives.create ? `<strong>${escapeHTML(app.superAdminPendingEnvironmentArchives.create.fileName)}</strong><span>${escapeHTML(summarizeEnvironmentAttachment(app.superAdminPendingEnvironmentArchives.create))}</span>` : `<span>Si no adjuntas entorno, la barberia usara la plantilla base dinamica.</span>`}</div>
           <p class="microcopy">El usuario administrador inicial se crea automaticamente como <strong>Desarrollo</strong> y el sistema genera una clave temporal segura.</p>
           <label class="toggle-line"><input name="active" type="checkbox" checked /> Negocio activo</label>
           <div class="button-row">
@@ -2653,6 +2784,7 @@ function renderSuperAdminV2() {
       const isOpen = app.superAdminOpenBusinessId === business.id;
       const barberCount = businessBarberCount(business.id);
       const reservationCount = businessTodayReservationCount(business.id);
+      const environmentAttachment = businessEnvironmentAttachment(business.id);
       const admins = loadAdminAccounts().filter(
         (account) => account.businessId === business.id && account.role !== PRINCIPAL_ADMIN.role
       );
@@ -2691,6 +2823,7 @@ function renderSuperAdminV2() {
           <div class="super-business-summary__stats">
             <span><strong>${barberCount}</strong> barberos</span>
             <span><strong>${reservationCount}</strong> reservas hoy</span>
+            <span><strong>${environmentAttachment?.mode === "attached_archive" ? "ZIP/RAR" : "Base"}</strong> entorno</span>
           </div>
           </button>
           <div class="super-business-summary__actions">
@@ -2704,6 +2837,7 @@ function renderSuperAdminV2() {
             <p>Slug: ${escapeHTML(business.slug)}</p>
             <p>Admin principal: ${escapeHTML(admin?.name || "Pendiente")} · Usuario: ${escapeHTML(admin?.user || "Desarrollo")}</p>
             <p>Entorno publico: <a class="inline-link" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">${escapeHTML(urls.public)}</a></p>
+            <p>Plantilla asociada: ${escapeHTML(summarizeEnvironmentAttachment(environmentAttachment))}</p>
           </div>
           <form class="super-business-edit form-stack" data-business-id="${escapeHTML(business.id)}">
             <div class="form-grid">
@@ -3350,6 +3484,39 @@ function bindEvents() {
     });
   });
 
+  document.querySelectorAll("[data-business-environment-input]").forEach((input) => {
+    input.addEventListener("change", async (event) => {
+      const file = event.currentTarget.files?.[0];
+      const targetKey = event.currentTarget.dataset.businessEnvironmentInput || "create";
+      if (!file) {
+        app.superAdminPendingEnvironmentArchives = {
+          ...app.superAdminPendingEnvironmentArchives,
+          [targetKey]: null,
+        };
+        render();
+        return;
+      }
+
+      const validation = await validateEnvironmentArchive(file);
+      if (!validation.valid) {
+        app.superAdminMessage = validation.error;
+        event.currentTarget.value = "";
+        render();
+        return;
+      }
+
+      app.superAdminPendingEnvironmentArchives = {
+        ...app.superAdminPendingEnvironmentArchives,
+        [targetKey]: validation.meta,
+      };
+      app.superAdminMessage =
+        validation.meta.validationMode === "rar_basic"
+          ? "Entorno adjunto aceptado. Para validacion completa se recomienda .zip."
+          : "Entorno adjunto validado correctamente.";
+      render();
+    });
+  });
+
   document.querySelector("#super-business-create")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -3370,6 +3537,7 @@ function bindEvents() {
 
     const theme = String(form.get("theme") || "gold_black");
     const palette = BUSINESS_THEMES[theme] || BUSINESS_THEMES.gold_black;
+    const environmentAttachment = app.superAdminPendingEnvironmentArchives.create || null;
     const business = store.saveBusiness({
       name,
       slug,
@@ -3380,6 +3548,27 @@ function bindEvents() {
       active: form.get("active") === "on",
     });
     seedBusinessFromTemplate(business);
+
+    const environmentAttachments = loadBusinessEnvironmentAttachments();
+    environmentAttachments[business.id] = environmentAttachment
+      ? {
+          ...environmentAttachment,
+          businessId: business.id,
+          businessSlug: business.slug,
+          mode: "attached_archive",
+          associatedAt: new Date().toISOString(),
+        }
+      : {
+          businessId: business.id,
+          businessSlug: business.slug,
+          mode: "dynamic_base",
+          associatedAt: new Date().toISOString(),
+          fileName: "",
+          size: 0,
+          validationMode: "dynamic_base",
+          notes: "Sin archivo adjunto. Usa la plantilla base dinamica del sistema.",
+        };
+    saveBusinessEnvironmentAttachments(environmentAttachments);
 
     const generatedPassword = generateSecurePassword(10);
     const accounts = loadAdminAccounts();
@@ -3407,8 +3596,14 @@ function bindEvents() {
         password: generatedPassword,
       };
       app.superAdminPendingLogos = { ...app.superAdminPendingLogos, create: "" };
+      app.superAdminPendingEnvironmentArchives = {
+        ...app.superAdminPendingEnvironmentArchives,
+        create: null,
+      };
       app.superAdminOpenBusinessId = business.id;
-      app.superAdminMessage = `Barberia creada: ${business.name}`;
+      app.superAdminMessage = environmentAttachment
+        ? `Barberia creada: ${business.name}. El entorno adjunto quedo asociado al negocio.`
+        : `Barberia creada: ${business.name}. Se usara la plantilla base dinamica del sistema.`;
       render();
     });
   });
@@ -3462,6 +3657,9 @@ function bindEvents() {
         return;
       }
       saveAdminAccounts(loadAdminAccounts().filter((account) => account.businessId !== businessId));
+      const environmentAttachments = loadBusinessEnvironmentAttachments();
+      delete environmentAttachments[businessId];
+      saveBusinessEnvironmentAttachments(environmentAttachments);
       delete app.superAdminPendingLogos[businessId];
       if (app.superAdminOpenBusinessId === businessId) {
         app.superAdminOpenBusinessId = "";
