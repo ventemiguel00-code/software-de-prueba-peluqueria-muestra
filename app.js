@@ -775,6 +775,25 @@ class StudioStore {
     }
 
     if (event.table === "businesses") {
+      if (event.type === "CASCADE_DELETE") {
+        const businessId = event.id;
+        if (!businessId) return;
+        const [appointmentsDelete, blockedDaysDelete, barberServicesDelete, servicesDelete, barbersDelete, businessDelete] = await Promise.all([
+          this.supabase.from("appointments").delete().eq("business_id", businessId),
+          this.supabase.from("blocked_days").delete().eq("business_id", businessId),
+          this.supabase.from("barber_services").delete().eq("business_id", businessId),
+          this.supabase.from("services").delete().eq("business_id", businessId),
+          this.supabase.from("barbers").delete().eq("business_id", businessId),
+          this.supabase.from("businesses").delete().eq("id", businessId),
+        ]);
+        if (appointmentsDelete.error) throw appointmentsDelete.error;
+        if (blockedDaysDelete.error) throw blockedDaysDelete.error;
+        if (barberServicesDelete.error) throw barberServicesDelete.error;
+        if (servicesDelete.error) throw servicesDelete.error;
+        if (barbersDelete.error) throw barbersDelete.error;
+        if (businessDelete.error) throw businessDelete.error;
+        return;
+      }
       if (event.type === "DELETE") {
         const { error } = await this.supabase.from("businesses").delete().eq("id", event.id);
         if (error) throw error;
@@ -895,6 +914,18 @@ class StudioStore {
     this.state.businesses.push(created);
     this.persist({ type: "INSERT", table: "businesses", record: created });
     return created;
+  }
+
+  deleteBusiness(businessId) {
+    if (!businessId || businessId === DEFAULT_BUSINESS_ID) return false;
+    this.state.businesses = this.state.businesses.filter((business) => business.id !== businessId);
+    this.state.barbers = this.state.barbers.filter((barber) => barber.negocioId !== businessId);
+    this.state.services = this.state.services.filter((service) => service.negocioId !== businessId);
+    this.state.appointments = this.state.appointments.filter((appointment) => appointment.negocioId !== businessId);
+    this.state.blockedDays = this.state.blockedDays.filter((blockedDay) => blockedDay.negocioId !== businessId);
+    this.state.barberServices = this.state.barberServices.filter((relation) => relation.negocioId !== businessId);
+    this.persist({ type: "CASCADE_DELETE", table: "businesses", id: businessId });
+    return true;
   }
 
   getAppointment(barberId, date, time) {
@@ -1125,7 +1156,10 @@ function saveAdminAccounts(accounts) {
 }
 
 function currentBusiness() {
-  return store.businessBySlug(app.currentBusinessSlug) || store.businessById(DEFAULT_BUSINESS_ID) || defaultBusiness();
+  if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG) {
+    return requestedBusiness() || normalizeBusiness({ name: "Barberia", slug: app.currentBusinessSlug, logoUrl: "", active: false });
+  }
+  return store.businessById(DEFAULT_BUSINESS_ID) || defaultBusiness();
 }
 
 function requestedBusiness() {
@@ -2525,6 +2559,7 @@ function renderSuperAdminV2() {
             <div class="button-row">
               <button class="primary-action">Guardar negocio</button>
               <a class="secondary-action inline-action" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">Entorno</a>
+              ${business.id !== DEFAULT_BUSINESS_ID ? `<button class="secondary-action danger" type="button" data-delete-business="${escapeHTML(business.id)}" data-delete-business-slug="${escapeHTML(business.slug)}" data-delete-business-name="${escapeHTML(business.name)}">Eliminar barberia</button>` : ""}
             </div>
           </form>
           <section class="super-admin-admins">
@@ -3235,6 +3270,33 @@ function bindEvents() {
       );
       app.superAdminPendingLogos = { ...app.superAdminPendingLogos, [current.id]: "" };
       app.superAdminMessage = `Negocio actualizado: ${updated.name}`;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-business]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const businessId = button.dataset.deleteBusiness;
+      const slug = button.dataset.deleteBusinessSlug || "";
+      const name = button.dataset.deleteBusinessName || "";
+      const confirmation = window.prompt(`¿Seguro que deseas eliminar esta barberia? Esta accion eliminara todo su entorno y no se podra deshacer.\n\nPara confirmar, escribe:\n${slug}`);
+      if (confirmation !== slug) {
+        app.superAdminMessage = "La confirmacion no coincide. No se elimino la barberia.";
+        render();
+        return;
+      }
+      const removed = store.deleteBusiness(businessId);
+      if (!removed) {
+        app.superAdminMessage = "No fue posible eliminar la barberia seleccionada.";
+        render();
+        return;
+      }
+      saveAdminAccounts(loadAdminAccounts().filter((account) => account.businessId !== businessId));
+      delete app.superAdminPendingLogos[businessId];
+      if (app.superAdminOpenBusinessId === businessId) {
+        app.superAdminOpenBusinessId = "";
+      }
+      app.superAdminMessage = `Barberia eliminada: ${name}`;
       render();
     });
   });
