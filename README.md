@@ -2,6 +2,8 @@
 
 Sincronizacion online verificada para el centro de mando SaaS.
 
+Ultima sincronizacion de despliegue: Super Admin con adjunto de entorno.
+
 Plataforma web premium para barberias modernas. Esta version local esta completa para validar experiencia, flujos y logica de negocio antes de conectar Supabase.
 
 ## Ejecutar local
