@@ -1117,6 +1117,10 @@ function currentBusiness() {
   return store.businessBySlug(app.currentBusinessSlug) || store.businessById(DEFAULT_BUSINESS_ID) || defaultBusiness();
 }
 
+function requestedBusiness() {
+  return store.businessBySlug(app.currentBusinessSlug) || null;
+}
+
 function currentBusinessId() {
   return currentBusiness()?.id || DEFAULT_BUSINESS_ID;
 }
@@ -1186,56 +1190,7 @@ function uniqueBusinessSlug(baseValue, excludeId = "") {
 }
 
 function seedBusinessFromTemplate(business) {
-  if (!business?.id || business.id === DEFAULT_BUSINESS_ID) return;
-  if (barbersForBusiness(business.id).length || servicesForBusiness(business.id).length) return;
-
-  const templateBusinessId = DEFAULT_BUSINESS_ID;
-  const templateBarbers = store.state.barbers.filter((barber) => barber.negocioId === templateBusinessId);
-  const templateServices = store.state.services.filter((service) => service.negocioId === templateBusinessId);
-  const templateRelations = (store.state.barberServices || []).filter((relation) => relation.negocioId === templateBusinessId);
-
-  const serviceIdMap = new Map();
-  const barberIdMap = new Map();
-
-  templateServices.forEach((service) => {
-    const createdId = uid("service");
-    serviceIdMap.set(service.id, createdId);
-    store.state.services.push({
-      ...service,
-      id: createdId,
-      negocioId: business.id,
-    });
-    store.persist({
-      type: "INSERT",
-      table: "services",
-      record: store.state.services[store.state.services.length - 1],
-    });
-  });
-
-  templateBarbers.forEach((barber) => {
-    const createdId = uid("barber");
-    barberIdMap.set(barber.id, createdId);
-    store.state.barbers.push({
-      ...barber,
-      id: createdId,
-      negocioId: business.id,
-    });
-    store.persist({
-      type: "INSERT",
-      table: "barbers",
-      record: store.state.barbers[store.state.barbers.length - 1],
-    });
-  });
-
-  templateBarbers.forEach((barber) => {
-    const barberId = barberIdMap.get(barber.id);
-    if (!barberId) return;
-    const serviceIds = templateRelations
-      .filter((relation) => relation.barberId === barber.id)
-      .map((relation) => serviceIdMap.get(relation.serviceId))
-      .filter(Boolean);
-    store.saveBarberServices(barberId, serviceIds, business.id);
-  });
+  return business;
 }
 
 async function findAdminAccount(user, password, businessId = null) {
@@ -1654,8 +1609,14 @@ function isPublicDateAvailable(barberId, date) {
 
 function renderPublic() {
   const business = currentBusiness();
-  if (business?.id && business.id !== DEFAULT_BUSINESS_ID && (!barbersForBusiness(business.id).length || !servicesForBusiness(business.id).length)) {
-    seedBusinessFromTemplate(business);
+  const requested = requestedBusiness();
+  if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested) {
+    return appShell(`
+      <section class="booking-surface">
+        <div class="section-title"><span>!</span><h2>Entorno no disponible</h2></div>
+        <p class="microcopy">La barberia solicitada aun no esta disponible o no termino de configurarse.</p>
+      </section>
+    `);
   }
   if (isPastDate(app.selectedDate)) {
     app.selectedDate = todayISO();
@@ -1716,7 +1677,7 @@ function renderPublic() {
           </div>`
         )
         .join("")
-          : `<p class="microcopy">Aun no hay servicios disponibles.</p>`
+          : `<div class="empty-state-card"><p>Aun no hay servicios disponibles.</p></div>`
       }
     </div>`;
   }
