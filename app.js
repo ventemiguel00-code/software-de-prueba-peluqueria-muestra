@@ -682,6 +682,11 @@ class StudioStore {
       this.dailyResetPending = false;
     }
     await this.syncFromRemote({ quiet: true });
+    if (!localStorage.getItem(MULTITENANT_SECONDARY_PURGE_KEY)) {
+      await this.purgeSecondaryBusinessesOperationalData();
+      localStorage.setItem(MULTITENANT_SECONDARY_PURGE_KEY, todayISO());
+      await this.syncFromRemote({ quiet: true });
+    }
     this.emit({ type: "SYNC", table: "remote", reason: "remote_bootstrap" });
     this.subscribeRemote();
   }
@@ -716,23 +721,11 @@ class StudioStore {
           .upsert(missingBusinesses.map(mapBusinessToRow), { onConflict: "id" });
         if (error) throw error;
       }
-      const servicesData =
-        servicesResult.error || !servicesResult.data?.length
-          ? defaultState().services
-          : (servicesResult.data || []).map(mapRowToService);
-      const barberServicesData =
-        !barberServicesResult.data?.length
-          ? defaultState().barberServices
-          : (barberServicesResult.data || []).map(mapRowToBarberService);
-
-      if (!barbersResult.data?.length) {
-        await this.seedRemoteFromLocal();
-        return;
-      }
+      const servicesData = servicesResult.error ? [] : (servicesResult.data || []).map(mapRowToService);
+      const barberServicesData = barberServicesResult.error ? [] : (barberServicesResult.data || []).map(mapRowToBarberService);
 
       const currentWeek = getWeekKey();
       const nextState = {
-        ...defaultState(),
         meta: {
           ...this.state.meta,
           dayKey: todayISO(),
@@ -1126,6 +1119,39 @@ class StudioStore {
     return true;
   }
 
+  async purgeSecondaryBusinessesOperationalData() {
+    const secondaryBusinessIds = (this.state.businesses || [])
+      .map((business) => business.id)
+      .filter((businessId) => businessId && businessId !== DEFAULT_BUSINESS_ID);
+
+    if (!secondaryBusinessIds.length) return true;
+
+    this.state.barbers = this.state.barbers.filter((barber) => barber.negocioId === DEFAULT_BUSINESS_ID);
+    this.state.services = this.state.services.filter((service) => service.negocioId === DEFAULT_BUSINESS_ID);
+    this.state.appointments = this.state.appointments.filter((appointment) => appointment.negocioId === DEFAULT_BUSINESS_ID);
+    this.state.blockedDays = this.state.blockedDays.filter((blockedDay) => blockedDay.negocioId === DEFAULT_BUSINESS_ID);
+    this.state.barberServices = this.state.barberServices.filter((relation) => relation.negocioId === DEFAULT_BUSINESS_ID);
+    localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+
+    if (!this.supabase) return true;
+
+    const deletions = await Promise.all([
+      this.supabase.from("appointments").delete().neq("business_id", DEFAULT_BUSINESS_ID),
+      this.supabase.from("blocked_days").delete().neq("business_id", DEFAULT_BUSINESS_ID),
+      this.supabase.from("barber_services").delete().neq("business_id", DEFAULT_BUSINESS_ID),
+      this.supabase.from("services").delete().neq("business_id", DEFAULT_BUSINESS_ID),
+      this.supabase.from("barbers").delete().neq("business_id", DEFAULT_BUSINESS_ID),
+    ]);
+
+    deletions.forEach((result) => {
+      if (result.error && result.error.code !== "42P01") {
+        throw result.error;
+      }
+    });
+
+    return true;
+  }
+
   deleteBusiness(businessId) {
     if (!businessId || businessId === DEFAULT_BUSINESS_ID) return false;
     this.state.businesses = this.state.businesses.filter((business) => business.id !== businessId);
@@ -1347,6 +1373,7 @@ const BUSINESS_ENV_ATTACHMENTS_KEY = "barber-delux-business-env-attachments-v1";
 const SUPER_ADMIN_SESSION_KEY = "vision-barber-super-admin-session";
 const BACKGROUND_MEDIA_KEY = "barber-delux-background-media-v1";
 const BACKGROUND_MEDIA_BY_BUSINESS_KEY = "barber-delux-background-media-by-business-v1";
+const MULTITENANT_SECONDARY_PURGE_KEY = "barber-delux-secondary-business-purge-v1";
 const SOUND_PREF_KEY = "barber-delux-sound-enabled";
 const MAX_BACKGROUND_VIDEO_BYTES = 10 * 1024 * 1024;
 const MAX_ENV_ARCHIVE_BYTES = 25 * 1024 * 1024;
