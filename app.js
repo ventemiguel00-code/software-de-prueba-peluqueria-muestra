@@ -1650,6 +1650,81 @@ function isPublicDateAvailable(barberId, date) {
   return baseSlots.some((time) => isPublicSlotBookable(barberId, date, time));
 }
 
+function BusinessPublicTemplate({
+  business,
+  currentStep,
+  bookingCardTitle,
+  bookingCardMicrocopy,
+  bookingStepper,
+  bookingCardSummary,
+  bookingCardActions,
+  bookingCardBody,
+  businessHasNoServices,
+  businessHasNoBarbers,
+}) {
+  return appShell(`
+    <section class="hero">
+      <div class="hero-bg ${app.backgroundMedia?.type === "video" ? "video-backed" : ""}"></div>
+      <div class="hero-copy">
+        <p class="eyebrow">Reservas premium para barberias modernas</p>
+        <h1>${escapeHTML(business?.name || "Vision Barber")}</h1>
+        <p>Agenda publica, control operativo y sincronizacion en tiempo real con una experiencia rapida para clientes, administradores y barberos.</p>
+      </div>
+    </section>
+
+    <section class="workspace public-flow">
+      <section class="flow-card open single-booking-card">
+        <div class="flow-card-head">
+          <div class="booking-card-top">
+            <div>
+              <div class="section-title">
+                <span>${currentStep === "services" ? "01" : currentStep === "barbers" ? "02" : currentStep === "days" ? "03" : currentStep === "slots" ? "04" : "05"}</span>
+                <h2>${bookingCardTitle}</h2>
+              </div>
+              <p class="microcopy">${escapeHTML(bookingCardMicrocopy)}</p>
+            </div>
+            ${bookingStepper}
+          </div>
+          ${bookingCardSummary ? `<div class="flow-summary">${bookingCardSummary}</div>` : ""}
+          ${bookingCardActions ? `<div class="step-toolbar flow-toolbar">${bookingCardActions}</div>` : ""}
+        </div>
+        <div class="flow-card-body booking-card-body">
+          ${bookingCardBody}
+          ${
+            currentStep === "services" && (businessHasNoServices || businessHasNoBarbers)
+              ? `<div class="empty-state-card">
+                  ${businessHasNoServices ? `<p>Aun no hay servicios disponibles.</p>` : ""}
+                  ${businessHasNoBarbers ? `<p>Aun no hay barberos disponibles.</p>` : ""}
+                  <p>Este negocio todavia no tiene horarios configurados.</p>
+                </div>`
+              : ""
+          }
+        </div>
+      </section>
+    </section>
+    ${
+      app.bookingConfirmation
+        ? `<dialog id="booking-confirm-dialog">
+          <div class="modal-card confirm-card booking-confirm-card">
+            <h3>Cita reservada</h3>
+            <p>Estimado/a ${escapeHTML(app.bookingConfirmation.clientName)}, su cita fue reservada exitosamente.</p>
+            <div class="confirmation-summary">
+              <span>Barbero</span><strong>${escapeHTML(app.bookingConfirmation.barberName)}</strong>
+              <span>Servicio</span><strong>${escapeHTML(app.bookingConfirmation.serviceName)}</strong>
+              <span>Fecha</span><strong>${escapeHTML(app.bookingConfirmation.date)}</strong>
+              <span>Horario</span><strong>${escapeHTML(app.bookingConfirmation.range)}</strong>
+              <span>WhatsApp</span><strong>${escapeHTML(app.bookingConfirmation.whatsapp)}</strong>
+            </div>
+            <div class="button-row">
+              <button class="primary-action" type="button" data-close-booking-confirm>Entendido</button>
+            </div>
+          </div>
+        </dialog>`
+        : ""
+    }
+  `);
+}
+
 function renderPublic() {
   const business = currentBusiness();
   const requested = requestedBusiness();
