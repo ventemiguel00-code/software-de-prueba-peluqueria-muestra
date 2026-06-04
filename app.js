@@ -953,6 +953,42 @@ class StudioStore {
     return true;
   }
 
+  clearBusinessOperationalDataLocal(businessId) {
+    if (!businessId || businessId === DEFAULT_BUSINESS_ID) return false;
+    this.state.barbers = this.state.barbers.filter((barber) => barber.negocioId !== businessId);
+    this.state.services = this.state.services.filter((service) => service.negocioId !== businessId);
+    this.state.appointments = this.state.appointments.filter((appointment) => appointment.negocioId !== businessId);
+    this.state.blockedDays = this.state.blockedDays.filter((blockedDay) => blockedDay.negocioId !== businessId);
+    this.state.barberServices = this.state.barberServices.filter((relation) => relation.negocioId !== businessId);
+    localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+    return true;
+  }
+
+  async ensureBusinessStartsEmpty(businessId) {
+    if (!businessId || businessId === DEFAULT_BUSINESS_ID) return true;
+
+    this.clearBusinessOperationalDataLocal(businessId);
+    this.emit({ type: "SYNC", table: "businesses", reason: "empty_business_bootstrap" });
+
+    if (!this.supabase) return true;
+
+    const deletions = await Promise.all([
+      this.supabase.from("appointments").delete().eq("business_id", businessId),
+      this.supabase.from("blocked_days").delete().eq("business_id", businessId),
+      this.supabase.from("barber_services").delete().eq("business_id", businessId),
+      this.supabase.from("services").delete().eq("business_id", businessId),
+      this.supabase.from("barbers").delete().eq("business_id", businessId),
+    ]);
+
+    deletions.forEach((result) => {
+      if (result.error && result.error.code !== "42P01") {
+        throw result.error;
+      }
+    });
+
+    return true;
+  }
+
   deleteBusiness(businessId) {
     if (!businessId || businessId === DEFAULT_BUSINESS_ID) return false;
     this.state.businesses = this.state.businesses.filter((business) => business.id !== businessId);
@@ -3623,6 +3659,7 @@ function bindEvents() {
 
     try {
       await store.ensureBusinessRemote(business, environmentAttachments[business.id]);
+      await store.ensureBusinessStartsEmpty(business.id);
     } catch (error) {
       store.deleteBusiness(business.id);
       const repairedAttachments = loadBusinessEnvironmentAttachments();
@@ -3666,8 +3703,8 @@ function bindEvents() {
     };
     app.superAdminOpenBusinessId = business.id;
     app.superAdminMessage = environmentAttachment
-      ? `Barberia creada: ${business.name}. El entorno adjunto quedo asociado al negocio.`
-      : `Barberia creada: ${business.name}. Se usara la plantilla base dinamica del sistema.`;
+      ? `Barberia creada: ${business.name}. El entorno adjunto quedo asociado y el negocio inicia sin datos operativos.`
+      : `Barberia creada: ${business.name}. Se usara la plantilla base dinamica del sistema y el negocio inicia sin datos operativos.`;
     render();
   });
 
