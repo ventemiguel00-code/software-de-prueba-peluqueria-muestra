@@ -344,6 +344,17 @@ function serviceCloneSignature(service) {
   ].join("|");
 }
 
+function appointmentCloneSignature(appointment) {
+  return [
+    normalizeSignaturePart(appointment.barberId),
+    normalizeSignaturePart(appointment.time),
+    normalizeSignaturePart(appointment.status),
+    normalizeSignaturePart(appointment.clientName),
+    normalizeSignaturePart(appointment.whatsapp),
+    normalizeSignaturePart(appointment.source),
+  ].join("|");
+}
+
 function visionSeedSnapshot() {
   const seed = defaultState();
   return {
@@ -353,6 +364,7 @@ function visionSeedSnapshot() {
     appointmentIds: new Set(seed.appointments.map((appointment) => appointment.id)),
     barberSignatures: new Set(seed.barbers.map(barberCloneSignature)),
     serviceSignatures: new Set(seed.services.map(serviceCloneSignature)),
+    appointmentSignatures: new Set(seed.appointments.map(appointmentCloneSignature)),
   };
 }
 
@@ -381,7 +393,23 @@ function detectReplicatedBusinessIds(state) {
         businessServices.length > 0 &&
         businessServices.every((service) => seed.serviceSignatures.has(serviceCloneSignature(service)));
 
-      return hasSeedIds || ((cloneBarbers || cloneServices) && (businessRelations.length > 0 || businessAppointments.length > 0 || businessBlockedDays.length > 0));
+      const cloneAppointments =
+        businessAppointments.length > 0 &&
+        businessAppointments.every((appointment) =>
+          seed.appointmentSignatures.has(appointmentCloneSignature(appointment))
+        );
+
+      const onlyCloneVisibleData =
+        (businessBarbers.length > 0 && cloneBarbers) ||
+        (businessServices.length > 0 && cloneServices) ||
+        (businessAppointments.length > 0 && cloneAppointments);
+
+      return (
+        hasSeedIds ||
+        onlyCloneVisibleData ||
+        ((cloneBarbers || cloneServices || cloneAppointments) &&
+          (businessRelations.length > 0 || businessAppointments.length > 0 || businessBlockedDays.length > 0))
+      );
     })
     .map((business) => business.id);
 }
