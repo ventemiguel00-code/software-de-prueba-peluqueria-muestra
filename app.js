@@ -921,6 +921,38 @@ class StudioStore {
     return created;
   }
 
+  async ensureBusinessRemote(business, environmentAttachment = null) {
+    if (!this.supabase || !business?.id) return true;
+
+    const businessUpsert = await this.supabase
+      .from("businesses")
+      .upsert(mapBusinessToRow(business), { onConflict: "id" });
+    if (businessUpsert.error) {
+      throw businessUpsert.error;
+    }
+
+    const businessSettingRecord = {
+      business_id: business.id,
+      public_path: "/barberia/:slug",
+      environment_archive_url: "",
+      environment_archive_name: environmentAttachment?.fileName || "",
+      environment_archive_meta: environmentAttachment || { mode: "dynamic_base" },
+      theme_override: business.theme || "",
+      custom_domain: "",
+      notes: environmentAttachment?.notes || "",
+    };
+
+    const settingsUpsert = await this.supabase
+      .from("business_settings")
+      .upsert(businessSettingRecord, { onConflict: "business_id" });
+
+    if (settingsUpsert.error && settingsUpsert.error.code !== "42P01") {
+      throw settingsUpsert.error;
+    }
+
+    return true;
+  }
+
   deleteBusiness(businessId) {
     if (!businessId || businessId === DEFAULT_BUSINESS_ID) return false;
     this.state.businesses = this.state.businesses.filter((business) => business.id !== businessId);
@@ -3536,7 +3568,7 @@ function bindEvents() {
     });
   });
 
-  document.querySelector("#super-business-create")?.addEventListener("submit", (event) => {
+  document.querySelector("#super-business-create")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const name = String(form.get("name") || "").trim();
@@ -3589,6 +3621,19 @@ function bindEvents() {
         };
     saveBusinessEnvironmentAttachments(environmentAttachments);
 
+    try {
+      await store.ensureBusinessRemote(business, environmentAttachments[business.id]);
+    } catch (error) {
+      store.deleteBusiness(business.id);
+      const repairedAttachments = loadBusinessEnvironmentAttachments();
+      delete repairedAttachments[business.id];
+      saveBusinessEnvironmentAttachments(repairedAttachments);
+      app.superAdminMessage = `No fue posible preparar el entorno de ${business.name}. La barberia no se creo en remoto.`;
+      console.error("Business remote bootstrap failed", error);
+      render();
+      return;
+    }
+
     const generatedPassword = generateSecurePassword(10);
     const accounts = loadAdminAccounts();
     accounts.push({
@@ -3602,29 +3647,28 @@ function bindEvents() {
       active: true,
       createdAt: todayISO(),
     });
-    Promise.resolve(sha256(generatedPassword)).then((hash) => {
-      accounts[accounts.length - 1].passwordHash = hash;
-      saveAdminAccounts(accounts);
-      const urls = businessUrlSet(business);
-      app.superAdminCredentialReveal = {
-        businessName: business.name,
-        publicUrl: urls.public,
-        adminUrl: urls.admin,
-        barberUrl: urls.barber,
-        user: "Desarrollo",
-        password: generatedPassword,
-      };
-      app.superAdminPendingLogos = { ...app.superAdminPendingLogos, create: "" };
-      app.superAdminPendingEnvironmentArchives = {
-        ...app.superAdminPendingEnvironmentArchives,
-        create: null,
-      };
-      app.superAdminOpenBusinessId = business.id;
-      app.superAdminMessage = environmentAttachment
-        ? `Barberia creada: ${business.name}. El entorno adjunto quedo asociado al negocio.`
-        : `Barberia creada: ${business.name}. Se usara la plantilla base dinamica del sistema.`;
-      render();
-    });
+    const hash = await sha256(generatedPassword);
+    accounts[accounts.length - 1].passwordHash = hash;
+    saveAdminAccounts(accounts);
+    const urls = businessUrlSet(business);
+    app.superAdminCredentialReveal = {
+      businessName: business.name,
+      publicUrl: urls.public,
+      adminUrl: urls.admin,
+      barberUrl: urls.barber,
+      user: "Desarrollo",
+      password: generatedPassword,
+    };
+    app.superAdminPendingLogos = { ...app.superAdminPendingLogos, create: "" };
+    app.superAdminPendingEnvironmentArchives = {
+      ...app.superAdminPendingEnvironmentArchives,
+      create: null,
+    };
+    app.superAdminOpenBusinessId = business.id;
+    app.superAdminMessage = environmentAttachment
+      ? `Barberia creada: ${business.name}. El entorno adjunto quedo asociado al negocio.`
+      : `Barberia creada: ${business.name}. Se usara la plantilla base dinamica del sistema.`;
+    render();
   });
 
   document.querySelectorAll(".super-business-edit").forEach((formEl) => {
