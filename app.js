@@ -1273,6 +1273,74 @@ class StudioStore {
     return appointment;
   }
 
+  async reservePublicAppointment(payload) {
+    const negocioId = payload.negocioId || currentBusinessId();
+    const existing = this.getAppointment(payload.barberId, payload.date, payload.time, negocioId);
+    if (existing && existing.status !== "available") {
+      return {
+        ok: false,
+        code: "slot_taken",
+        message: "Este horario ya no esta disponible. Por favor selecciona otro.",
+      };
+    }
+
+    const appointment = {
+      id: uid("apt"),
+      negocioId,
+      source: "public",
+      weekKey: getWeekKey(new Date(`${payload.date}T00:00:00`)),
+      clientName: payload.clientName || "",
+      whatsapp: payload.whatsapp || "",
+      ...payload,
+    };
+
+    if (!this.supabase) {
+      this.upsertAppointment(appointment);
+      return { ok: true, appointment };
+    }
+
+    const { data: remoteExisting, error: remoteLookupError } = await this.supabase
+      .from("appointments")
+      .select("id,status")
+      .eq("business_id", negocioId)
+      .eq("barber_id", payload.barberId)
+      .eq("date", payload.date)
+      .eq("time", payload.time)
+      .limit(1);
+
+    if (remoteLookupError) throw remoteLookupError;
+
+    if ((remoteExisting || []).length) {
+      return {
+        ok: false,
+        code: "slot_taken",
+        message: "Este horario ya no esta disponible. Por favor selecciona otro.",
+      };
+    }
+
+    const { error: insertError } = await this.supabase
+      .from("appointments")
+      .insert(mapAppointmentToRow(appointment));
+
+    if (insertError) {
+      if (insertError.code === "23505") {
+        return {
+          ok: false,
+          code: "slot_taken",
+          message: "Este horario ya no esta disponible. Por favor selecciona otro.",
+        };
+      }
+      throw insertError;
+    }
+
+    this.state.appointments.push(appointment);
+    localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+    const localEvent = { type: "INSERT", table: "appointments", record: appointment, source: "public_remote_safe" };
+    this.emit(localEvent);
+    this.channel?.postMessage(localEvent);
+    return { ok: true, appointment };
+  }
+
   deleteAppointment(id, negocioId = currentBusinessId()) {
     this.state.appointments = this.state.appointments.filter(
       (item) => !(item.id === id && item.negocioId === negocioId)
@@ -1807,6 +1875,8 @@ const app = {
   selectedDate: store.state.meta.selectedDate,
   publicDaySelected: false,
   selectedSlot: "",
+  bookingError: "",
+  bookingSubmitting: false,
   bookingConfirmation: null,
   adminBarberId: "",
   adminView: "home",
@@ -2573,6 +2643,7 @@ function renderPublic() {
     </div>`;
     bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action" type="button" data-reset-day>Cambiar fecha</button><button class="secondary-action" type="button" data-reset-slot>Cambiar hora</button>`;
     bookingCardBody = `<form id="public-booking-form" class="form-stack">
+        ${app.bookingError ? `<p class="form-feedback error">${escapeHTML(app.bookingError)}</p>` : ""}
         <div class="confirmation-summary">
           <span>Servicio</span><strong>${escapeHTML(selectedService?.name || "")}</strong>
           <span>Barbero</span><strong>${escapeHTML(selected?.name || "")}</strong>
@@ -2581,9 +2652,9 @@ function renderPublic() {
         </div>
         <label>Nombre<input name="clientName" required placeholder="Tu nombre" /></label>
         <label>WhatsApp<input name="whatsapp" required inputmode="tel" placeholder="300 123 4567" /></label>
-        <button class="primary-action">Confirmar cita</button>
+        <button class="primary-action" ${app.bookingSubmitting ? "disabled" : ""}>${app.bookingSubmitting ? "Reservando..." : "Confirmar cita"}</button>
       </form>
-      <p class="microcopy">Confirmacion inmediata en esta version local. La integracion real se conecta despues con Supabase.</p>`;
+      <p class="microcopy">Disponibilidad validada en tiempo real para evitar reservas duplicadas en el mismo horario.</p>`;
   }
 
   const backgroundMedia = currentBackgroundMedia();
@@ -4276,6 +4347,7 @@ function bindEvents() {
 
   document.querySelectorAll("[data-reset-barber]").forEach((button) => {
     button.addEventListener("click", () => {
+      app.bookingError = "";
       app.selectedBarberId = "";
       app.publicDaySelected = false;
       app.selectedSlot = "";
@@ -4285,6 +4357,7 @@ function bindEvents() {
 
   document.querySelectorAll("[data-reset-service]").forEach((button) => {
     button.addEventListener("click", () => {
+      app.bookingError = "";
       app.selectedServiceId = "";
       app.selectedBarberId = "";
       app.publicDaySelected = false;
@@ -4295,6 +4368,7 @@ function bindEvents() {
 
   document.querySelectorAll("[data-reset-day]").forEach((button) => {
     button.addEventListener("click", () => {
+      app.bookingError = "";
       app.publicDaySelected = false;
       app.selectedSlot = "";
       render();
@@ -4303,15 +4377,19 @@ function bindEvents() {
 
   document.querySelectorAll("[data-reset-slot]").forEach((button) => {
     button.addEventListener("click", () => {
+      app.bookingError = "";
       app.selectedSlot = "";
       render();
     });
   });
 
-  document.querySelector("#public-booking-form")?.addEventListener("submit", (event) => {
+  document.querySelector("#public-booking-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (app.bookingSubmitting) return;
     if (!app.selectedServiceId || !app.selectedBarberId || !app.selectedSlot) return;
+    app.bookingError = "";
     if (!isPublicSlotBookable(app.selectedBarberId, app.selectedDate, app.selectedSlot)) {
+      app.bookingError = "Este horario ya no esta disponible. Por favor selecciona otro.";
       app.selectedSlot = "";
       render();
       return;
@@ -4321,30 +4399,50 @@ function bindEvents() {
     const service = serviceById(app.selectedServiceId);
     const clientName = String(form.get("clientName") || "").trim();
     const whatsapp = String(form.get("whatsapp") || "").trim();
-    store.upsertAppointment({
-      serviceId: app.selectedServiceId,
-      serviceName: service?.name || "",
-      barberId: app.selectedBarberId,
-      date: app.selectedDate,
-      time: app.selectedSlot,
-      status: "reserved",
-      clientName,
-      whatsapp,
-      source: "public",
-    });
-    app.bookingConfirmation = {
-      clientName,
-      whatsapp,
-      serviceName: service?.name || "Servicio",
-      barberName: barber?.name || "Barbero",
-      date: app.selectedDate,
-      range: slotRange(app.selectedSlot),
-    };
+    app.bookingSubmitting = true;
     render();
+    try {
+      const result = await store.reservePublicAppointment({
+        negocioId: currentBusinessId(),
+        serviceId: app.selectedServiceId,
+        serviceName: service?.name || "",
+        barberId: app.selectedBarberId,
+        date: app.selectedDate,
+        time: app.selectedSlot,
+        status: "reserved",
+        clientName,
+        whatsapp,
+        source: "public",
+      });
+      if (!result.ok) {
+        app.bookingSubmitting = false;
+        app.bookingError = result.message || "No fue posible completar la reserva en este momento.";
+        app.selectedSlot = "";
+        render();
+        return;
+      }
+      app.bookingConfirmation = {
+        clientName,
+        whatsapp,
+        serviceName: service?.name || "Servicio",
+        barberName: barber?.name || "Barbero",
+        date: app.selectedDate,
+        range: slotRange(app.selectedSlot),
+      };
+      app.bookingSubmitting = false;
+      render();
+    } catch (error) {
+      console.error(error);
+      app.bookingSubmitting = false;
+      app.bookingError = "No fue posible completar la reserva en este momento. Intenta nuevamente.";
+      render();
+    }
   });
 
   document.querySelector("[data-close-booking-confirm]")?.addEventListener("click", () => {
     app.bookingConfirmation = null;
+    app.bookingError = "";
+    app.bookingSubmitting = false;
     app.selectedBarberId = "";
     app.selectedServiceId = "";
     app.publicDaySelected = false;
