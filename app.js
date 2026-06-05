@@ -615,8 +615,10 @@ class StudioStore {
     this.channel = "BroadcastChannel" in window ? new BroadcastChannel(CHANNEL) : null;
     this.supabase = createSupabaseClient();
     this.remoteChannel = null;
+    this.remoteScopeKey = "";
     this.remoteReady = false;
     this.syncInFlight = false;
+    this.syncQueued = false;
     this.applyingRemote = false;
     this.dailyResetPending = false;
     this.state = this.load();
@@ -691,6 +693,19 @@ class StudioStore {
     }
     this.emit({ type: "SYNC", table: "remote", reason: "remote_bootstrap" });
     this.subscribeRemote();
+  }
+
+  queueRemoteSync({ quiet = false } = {}) {
+    if (this.syncInFlight) {
+      this.syncQueued = true;
+      return;
+    }
+    this.syncQueued = true;
+    queueMicrotask(() => {
+      if (!this.syncQueued || this.syncInFlight) return;
+      this.syncQueued = false;
+      this.syncFromRemote({ quiet }).catch((error) => console.error(error));
+    });
   }
 
   async syncFromRemote({ quiet = false } = {}) {
@@ -806,6 +821,11 @@ class StudioStore {
     } finally {
       this.applyingRemote = false;
       this.syncInFlight = false;
+      if (this.syncQueued) {
+        const queuedQuiet = quiet;
+        this.syncQueued = false;
+        this.queueRemoteSync({ quiet: queuedQuiet });
+      }
     }
   }
 
@@ -833,7 +853,7 @@ class StudioStore {
   }
 
   subscribeRemote() {
-    if (!this.supabase || this.remoteChannel) return;
+    if (!this.supabase) return;
     const route = resolveRoute(location.pathname);
     const scopedBusiness =
       route.view === "super-admin"
@@ -845,6 +865,13 @@ class StudioStore {
         : route.businessSlug === DEFAULT_BUSINESS_SLUG
           ? DEFAULT_BUSINESS_ID
           : scopedBusiness?.id || null;
+    const scopeKey = `${route.view}:${scopedBusinessId || "global"}:${route.businessSlug || ""}`;
+    if (this.remoteChannel && this.remoteScopeKey === scopeKey) return;
+    if (this.remoteChannel) {
+      this.supabase.removeChannel(this.remoteChannel);
+      this.remoteChannel = null;
+    }
+    this.remoteScopeKey = scopeKey;
     const appointmentConfig =
       route.view === "super-admin"
         ? { event: "*", schema: "public", table: "appointments" }
@@ -867,24 +894,24 @@ class StudioStore {
         : { event: "*", schema: "public", table: "barber_services", filter: `business_id=eq.${scopedBusinessId}` };
 
     this.remoteChannel = this.supabase
-      .channel(`barber-delux-realtime-${route.view}-${scopedBusinessId || "global"}`)
+      .channel(`barber-delux-realtime-${scopeKey}`)
       .on("postgres_changes", barbersConfig, () => {
-        this.syncFromRemote().catch((error) => console.error(error));
+        this.queueRemoteSync();
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "businesses" }, () => {
-        this.syncFromRemote().catch((error) => console.error(error));
+        this.queueRemoteSync();
       })
       .on("postgres_changes", appointmentConfig, () => {
-        this.syncFromRemote().catch((error) => console.error(error));
+        this.queueRemoteSync();
       })
       .on("postgres_changes", blockedDaysConfig, () => {
-        this.syncFromRemote().catch((error) => console.error(error));
+        this.queueRemoteSync();
       })
       .on("postgres_changes", servicesConfig, () => {
-        this.syncFromRemote().catch((error) => console.error(error));
+        this.queueRemoteSync();
       })
       .on("postgres_changes", barberServicesConfig, () => {
-        this.syncFromRemote().catch((error) => console.error(error));
+        this.queueRemoteSync();
       })
       .subscribe();
   }
@@ -3879,6 +3906,10 @@ function renderBarberV2() {
 
 function render() {
   const root = document.querySelector("#app");
+  app.route = resolveRoute(location.pathname);
+  app.view = app.route.view;
+  app.currentBusinessSlug = app.route.businessSlug;
+  store.subscribeRemote();
   const views = {
     public: renderPublic,
     admin: renderAdminV2,

@@ -305,6 +305,11 @@ p {
   padding: clamp(18px, 4vw, 44px);
 }
 
+.barber-board {
+  content-visibility: auto;
+  contain-intrinsic-size: 720px;
+}
+
 .public-grid,
 .public-flow {
   display: flex;
@@ -1477,6 +1482,14 @@ input:focus {
 .admin-slots {
   display: grid;
   gap: 10px;
+  content-visibility: auto;
+  contain-intrinsic-size: 880px;
+}
+
+.admin-barber-grid,
+.slot-grid {
+  content-visibility: auto;
+  contain-intrinsic-size: 720px;
 }
 
 .slot-row {
