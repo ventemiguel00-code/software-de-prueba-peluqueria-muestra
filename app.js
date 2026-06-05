@@ -2799,7 +2799,7 @@ function renderPublic() {
 }
 
 function renderAdmin() {
-  const selected = barberById(app.adminBarberId) || store.state.barbers[0];
+  const selected = barberById(app.adminBarberId) || barbersForBusiness(currentBusinessId())[0];
   const rows = selected
     ? baseSlots.map((time) => ({ time, ...statusFor(selected.id, app.selectedDate, time) }))
     : [];
@@ -4324,8 +4324,9 @@ function bindEvents() {
         render();
         return;
       }
-      const accounts = adminAccountsForBusiness(currentBusinessId());
-      if (accounts.some((account) => account.user === user && account.businessId === businessId)) {
+      const allAccounts = loadAdminAccounts();
+      const businessAccounts = adminAccountsForBusiness(businessId);
+      if (businessAccounts.some((account) => account.user === user && account.businessId === businessId)) {
         app.superAdminMessage = "Ese usuario ya existe en esta barberia.";
         render();
         return;
@@ -4342,10 +4343,10 @@ function bindEvents() {
         active: form.get("active") === "on",
         createdAt: todayISO(),
       };
-      accounts.push(newAccount);
+      allAccounts.push(newAccount);
       Promise.resolve(sha256(generatedPassword)).then((hash) => {
         newAccount.passwordHash = hash;
-        saveAdminAccounts(accounts);
+        saveAdminAccounts(allAccounts);
         const urls = businessUrlSet(business);
         app.superAdminCredentialReveal = {
           businessName: business.name,
@@ -4366,12 +4367,12 @@ function bindEvents() {
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       const accountId = event.currentTarget.dataset.adminAccountId;
-      const accounts = adminAccountsForBusiness(currentBusinessId());
-      const account = accounts.find((item) => item.id === accountId);
+      const allAccounts = loadAdminAccounts();
+      const account = allAccounts.find((item) => item.id === accountId);
       if (!account) return;
       const nextUser = String(form.get("user") || "").trim();
       if (
-        accounts.some(
+        allAccounts.some(
           (item) => item.id !== account.id && item.businessId === account.businessId && item.user === nextUser
         )
       ) {
@@ -4382,7 +4383,7 @@ function bindEvents() {
       account.name = String(form.get("name") || "").trim();
       account.user = nextUser;
       account.active = form.get("active") === "on";
-      saveAdminAccounts(accounts);
+      saveAdminAccounts(allAccounts);
       app.superAdminMessage = `Administrador actualizado: ${account.name}`;
       render();
     });
