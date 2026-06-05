@@ -480,6 +480,7 @@ function mapAppointmentToRow(appointment) {
     whatsapp: appointment.whatsapp || "",
     source: appointment.source || "admin",
     week_key: appointment.weekKey || "permanent",
+    block_origin: appointment.blockOrigin || "",
     visit_state: appointment.visitState || "",
     notes: composeAppointmentNotes(appointment),
   };
@@ -569,6 +570,7 @@ function mapRowToAppointment(row) {
     whatsapp: row.whatsapp || "",
     source: row.source || "admin",
     weekKey: row.week_key || "permanent",
+    blockOrigin: row.block_origin || "",
     visitState: row.visit_state || "",
     notes: parsedMeta.notes,
     serviceId: parsedMeta.serviceId,
@@ -1255,6 +1257,10 @@ class StudioStore {
       negocioId: payload.negocioId || currentBusinessId(),
       source: payload.source || "admin",
       weekKey: payload.status === "reserved" ? getWeekKey(new Date(`${payload.date}T00:00:00`)) : "permanent",
+      blockOrigin:
+        payload.status === "blocked"
+          ? payload.blockOrigin || existing?.blockOrigin || "manual"
+          : "",
       clientName: payload.clientName || "",
       whatsapp: payload.whatsapp || "",
       ...payload,
@@ -1421,6 +1427,7 @@ class StudioStore {
           date,
           time,
           status: "blocked",
+          blockOrigin: "day_complete",
           clientName: "Bloqueo operativo",
           whatsapp: "",
           source: "admin",
@@ -1435,6 +1442,7 @@ class StudioStore {
         item.barberId === barberId &&
         item.date === date &&
         item.status === "blocked" &&
+        item.blockOrigin === "day_complete" &&
         item.negocioId === currentBusinessId()
     );
     blocked.forEach((item) => this.deleteAppointment(item.id, item.negocioId));
@@ -4934,6 +4942,7 @@ function bindEvents() {
         date: app.selectedDate,
         time,
         status,
+        blockOrigin: status === "blocked" ? "manual" : "",
         clientName: status === "blocked" ? form.get("clientName") || "Bloqueo operativo" : form.get("clientName"),
         whatsapp: status === "blocked" ? "" : form.get("whatsapp"),
         visitState: status === "blocked" ? "" : form.get("visitState"),
