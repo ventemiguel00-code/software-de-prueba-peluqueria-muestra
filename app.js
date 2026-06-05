@@ -1686,6 +1686,7 @@ class StudioStore {
 
 const store = new StudioStore();
 const ADMIN_SESSION_KEY = "barber-delux-admin-session";
+const BARBER_SESSION_KEY = "noxora-barber-session";
 const ADMIN_ACCOUNTS_KEY = "barber-delux-admin-accounts-v1";
 const BUSINESS_ENV_ATTACHMENTS_KEY = "barber-delux-business-env-attachments-v1";
 const SUPER_ADMIN_SESSION_KEY = "vision-barber-super-admin-session";
@@ -1754,6 +1755,41 @@ function saveAdminAccounts(accounts) {
     ...accounts.filter((account) => account.id !== PRINCIPAL_ADMIN.id),
   ];
   localStorage.setItem(ADMIN_ACCOUNTS_KEY, JSON.stringify(normalized));
+}
+
+function readStoredJSON(storage, key) {
+  if (!storage || !key) return null;
+  try {
+    const raw = storage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function businessScopedSessionKey(baseKey, businessSlug = DEFAULT_BUSINESS_SLUG) {
+  const slug = String(businessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
+  return `${baseKey}:${slug}`;
+}
+
+function loadScopedBusinessSession(baseKey, businessSlug, legacyKey = baseKey) {
+  const scoped = readStoredJSON(sessionStorage, businessScopedSessionKey(baseKey, businessSlug));
+  if (scoped) return scoped;
+  return readStoredJSON(sessionStorage, legacyKey);
+}
+
+function saveScopedBusinessSession(baseKey, businessSlug, value, legacyKey = baseKey) {
+  sessionStorage.setItem(businessScopedSessionKey(baseKey, businessSlug), JSON.stringify(value));
+  if (legacyKey) {
+    sessionStorage.removeItem(legacyKey);
+  }
+}
+
+function clearScopedBusinessSession(baseKey, businessSlug, legacyKey = baseKey) {
+  sessionStorage.removeItem(businessScopedSessionKey(baseKey, businessSlug));
+  if (legacyKey) {
+    sessionStorage.removeItem(legacyKey);
+  }
 }
 
 function loadBusinessEnvironmentAttachments() {
@@ -1911,6 +1947,21 @@ function currentBusinessId() {
   return currentBusiness()?.id || null;
 }
 
+function currentAdminAccountRecord() {
+  if (!app.adminSession) return null;
+  if (app.adminSession.id === PRINCIPAL_ADMIN.id) {
+    return currentBusinessId() === DEFAULT_BUSINESS_ID ? PRINCIPAL_ADMIN : null;
+  }
+  return (
+    adminAccountsForBusiness(currentBusinessId()).find(
+      (account) =>
+        account.id === app.adminSession.id &&
+        account.active &&
+        account.user === app.adminSession.user
+    ) || null
+  );
+}
+
 function servicesForBusiness(businessId = currentBusinessId()) {
   return store.state.services.filter((service) => service.negocioId === businessId);
 }
@@ -2060,10 +2111,12 @@ function loadSoundPreference() {
   return localStorage.getItem(SOUND_PREF_KEY) === "true";
 }
 
+const initialRoute = resolveRoute(location.pathname);
+
 const app = {
-  route: resolveRoute(location.pathname),
-  view: resolveRoute(location.pathname).view,
-  currentBusinessSlug: resolveRoute(location.pathname).businessSlug,
+  route: initialRoute,
+  view: initialRoute.view,
+  currentBusinessSlug: initialRoute.businessSlug,
   selectedServiceId: "",
   selectedBarberId: "",
   selectedDate: store.state.meta.selectedDate,
@@ -2079,7 +2132,7 @@ const app = {
   adminSelectedSlots: [],
   adminModalMode: "reserved",
   adminServiceEditAppointmentId: "",
-  adminSession: JSON.parse(sessionStorage.getItem(ADMIN_SESSION_KEY) || "null"),
+  adminSession: loadScopedBusinessSession(ADMIN_SESSION_KEY, initialRoute.businessSlug),
   superAdminSession: JSON.parse(sessionStorage.getItem(SUPER_ADMIN_SESSION_KEY) || "null"),
   superAdminLoginError: "",
   superAdminMessage: "",
@@ -2098,7 +2151,7 @@ const app = {
   soundEnabled: loadSoundPreference(),
   barberDate: todayISO(),
   barberScheduleView: "hours",
-  barberSession: JSON.parse(sessionStorage.getItem("noxora-barber-session") || "null"),
+  barberSession: loadScopedBusinessSession(BARBER_SESSION_KEY, initialRoute.businessSlug),
   barberLoginError: "",
   lastEvent: "",
 };
@@ -3777,8 +3830,16 @@ function renderAdminV2() {
 
   if (app.adminSession.businessId && app.adminSession.businessId !== currentBusinessId()) {
     app.adminSession = null;
-    sessionStorage.removeItem(ADMIN_SESSION_KEY);
+    clearScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug);
     app.adminLoginError = "Tu sesion administrativa pertenece a otro negocio.";
+    return renderAdminV2();
+  }
+
+  const adminAccount = currentAdminAccountRecord();
+  if (!adminAccount) {
+    app.adminSession = null;
+    clearScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug);
+    app.adminLoginError = "Tu acceso administrativo ya no esta disponible en este negocio.";
     return renderAdminV2();
   }
 
@@ -4025,15 +4086,15 @@ function renderBarberV2() {
   if (app.barberSession.businessId && app.barberSession.businessId !== currentBusinessId()) {
     app.barberSession = null;
     app.barberLoginError = "Tu sesion de barbero pertenece a otro negocio.";
-    sessionStorage.removeItem("noxora-barber-session");
+    clearScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
     return renderBarber();
   }
 
   const barber = barberById(app.barberSession.id);
-  if (!barber) {
+  if (!barber || !barber.active) {
     app.barberSession = null;
     app.barberLoginError = "Tu acceso ya no esta disponible en este negocio.";
-    sessionStorage.removeItem("noxora-barber-session");
+    clearScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
     return renderBarber();
   }
   const rows = baseSlots.map((time) => ({ time, ...statusFor(barber.id, app.barberDate, time) }));
@@ -4114,6 +4175,12 @@ function render() {
   app.route = resolveRoute(location.pathname);
   app.view = app.route.view;
   app.currentBusinessSlug = app.route.businessSlug;
+  if (app.view === "admin" && (!app.adminSession || app.adminSession.businessSlug !== app.currentBusinessSlug)) {
+    app.adminSession = loadScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug);
+  }
+  if (app.view === "barber" && (!app.barberSession || app.barberSession.businessSlug !== app.currentBusinessSlug)) {
+    app.barberSession = loadScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
+  }
   store.subscribeRemote();
   const views = {
     public: renderPublic,
@@ -4801,14 +4868,15 @@ function bindEvents() {
       app.adminScheduleView = "hours";
       app.selectedDate = todayISO();
       app.adminSelectedSlots = [];
-      sessionStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(app.adminSession));
+      app.adminSession.businessSlug = app.currentBusinessSlug;
+      saveScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug, app.adminSession);
       render();
       return;
     }
 
     app.adminSession = null;
     app.adminLoginError = "Usuario o contrasena incorrectos";
-    sessionStorage.removeItem(ADMIN_SESSION_KEY);
+    clearScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug);
     render();
   });
 
@@ -4822,7 +4890,7 @@ function bindEvents() {
     app.adminScheduleView = "hours";
     app.selectedDate = todayISO();
     app.adminSelectedSlots = [];
-    sessionStorage.removeItem(ADMIN_SESSION_KEY);
+    clearScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug);
     render();
   });
 
@@ -5374,7 +5442,7 @@ function bindEvents() {
     store.deleteBarber(barberId);
     if (app.barberSession?.id === barberId) {
       app.barberSession = null;
-      sessionStorage.removeItem("noxora-barber-session");
+      clearScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
     }
     app.adminBarberMessage = "Barbero eliminado correctamente.";
     app.adminBarberId = "";
@@ -5413,17 +5481,17 @@ function bindEvents() {
       return;
     }
     app.barberLoginError = "";
-    app.barberSession = { id: barber.id, businessId: currentBusinessId() };
+    app.barberSession = { id: barber.id, businessId: currentBusinessId(), businessSlug: app.currentBusinessSlug };
     app.barberDate = todayISO();
     app.barberScheduleView = "hours";
-    sessionStorage.setItem("noxora-barber-session", JSON.stringify(app.barberSession));
+    saveScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug, app.barberSession);
     render();
   });
 
   document.querySelector("[data-logout]")?.addEventListener("click", () => {
     app.barberSession = null;
     app.barberLoginError = "";
-    sessionStorage.removeItem("noxora-barber-session");
+    clearScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
     render();
   });
 }
