@@ -3609,18 +3609,26 @@ function renderSuperAdminV2() {
       const adminList = admins.length
         ? admins
             .map(
-              (account) => `<form class="super-admin-account-edit form-stack" data-admin-account-id="${escapeHTML(account.id)}">
+              (account) => {
+                const visiblePassword = visibleAdminPassword(account.id);
+                return `<form class="super-admin-account-edit form-stack" data-admin-account-id="${escapeHTML(account.id)}">
                 <div class="form-grid">
                   <label>Nombre<input name="name" required value="${escapeHTML(account.name || "")}" /></label>
                   <label>Usuario<input name="user" required value="${escapeHTML(account.user || "")}" /></label>
                   <label>Creado<input value="${escapeHTML(account.createdAt || todayISO())}" disabled /></label>
                 </div>
+                ${
+                  visiblePassword
+                    ? `<p class="form-note">Clave visible: <strong>${escapeHTML(visiblePassword.password || "")}</strong> · Usuario: <strong>${escapeHTML(visiblePassword.user || account.user || "")}</strong></p>`
+                    : `<p class="microcopy">No hay clave temporal visible guardada para este administrador.</p>`
+                }
                 <label class="toggle-line"><input name="active" type="checkbox" ${account.active ? "checked" : ""} /> Activo</label>
                 <div class="button-row">
                   <button class="primary-action">Guardar admin</button>
                   <button class="secondary-action" type="button" data-regenerate-admin-password="${escapeHTML(account.id)}">Regenerar contrasena</button>
                 </div>
-              </form>`
+              </form>`;
+              }
             )
             .join("")
         : `<p class="microcopy">Aun no hay administradores registrados para esta barberia.</p>`;
