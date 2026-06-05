@@ -1913,6 +1913,7 @@ const app = {
   barberDate: todayISO(),
   barberScheduleView: "hours",
   barberSession: JSON.parse(sessionStorage.getItem("noxora-barber-session") || "null"),
+  barberLoginError: "",
   lastEvent: "",
 };
 
@@ -2190,6 +2191,14 @@ function formatCOP(value) {
 
 function isRealizedAppointment(appointment) {
   return appointment?.visitState === "done";
+}
+
+function visitStateLabel(visitState = "") {
+  if (visitState === "arrived") return "Cliente llego";
+  if (visitState === "service") return "En servicio";
+  if (visitState === "done") return "Realizada";
+  if (visitState === "no_show") return "No asistio";
+  return "";
 }
 
 function calculateAppointmentIncome(appointment) {
@@ -2842,6 +2851,7 @@ function renderBarber() {
           <form id="barber-login" class="form-stack">
             <label>Usuario<input name="user" required placeholder="mateo" /></label>
             <label>Contrasena<input name="password" type="password" required placeholder="studio2026" /></label>
+            ${app.barberLoginError ? `<p class="form-error">${escapeHTML(app.barberLoginError)}</p>` : ""}
             <button class="primary-action">Entrar</button>
           </form>
         </div>
@@ -3793,11 +3803,13 @@ function renderBarberV2() {
   const barber = barberById(app.barberSession.id);
   if (!barber) {
     app.barberSession = null;
+    app.barberLoginError = "Tu acceso ya no esta disponible en este negocio.";
     sessionStorage.removeItem("noxora-barber-session");
     return renderBarber();
   }
   const rows = baseSlots.map((time) => ({ time, ...statusFor(barber.id, app.barberDate, time) }));
   const counterSummary = buildCounterSummary(app.barberDate);
+  const hasOperationalRows = rows.some(({ status, dayBlocked, appointment }) => dayBlocked || status !== "available" || appointment);
 
   return appShell(`
     <section class="dashboard-head">
@@ -3806,7 +3818,7 @@ function renderBarberV2() {
         <div class="barber-heading-copy">
           <p class="eyebrow">BARBEROS</p>
           <h1>${escapeHTML(barber.name)}</h1>
-          <span>Usuario: ${escapeHTML(barber.user)}</span>
+          <span>Usuario: ${escapeHTML(barber.user)} · ${escapeHTML(barber.specialty || "Servicio premium")}</span>
         </div>
         ${renderCounter(counterValue(counterSummary.weeklyByBarber, barber.id), "header-counter")}
       </div>
@@ -3830,16 +3842,28 @@ function renderBarberV2() {
           <div class="status-legend">
             ${Object.entries(STATUS).map(([, item]) => `<span class="${item.tone}"><i></i>${item.label}</span>`).join("")}
           </div>
+          ${
+            !hasOperationalRows
+              ? `<div class="empty-state-card">
+                  <p>Aun no tienes citas, bloqueos ni citas fijadas para este dia.</p>
+                  <p>Cuando el administrador o los clientes registren movimientos, apareceran aqui en tiempo real.</p>
+                </div>`
+              : ""
+          }
           <div class="admin-slots readonly">
             ${rows
               .map(({ time, status, appointment, dayBlocked }) => {
                 const unavailable = isUnavailableSlot(app.barberDate, time, status);
+                const serviceName = serviceNameForAppointment(appointment);
+                const visitState = visitStateLabel(appointment?.visitState);
                 return `
               <article class="slot-row ${STATUS[status].tone} ${unavailable ? "unavailable" : ""}">
                 <div><strong>${slotRange(time)}</strong><span>${dayBlocked ? "Dia bloqueado" : unavailable && status === "available" ? "No disponible" : STATUS[status].label}</span></div>
                 <div class="slot-client">
                   <strong>${escapeHTML(appointment?.clientName || (status === "available" ? "Disponible" : "Sin cliente"))}</strong>
                   <small>${appointment?.whatsapp ? displayPhone(appointment.whatsapp) : "Solo lectura"}</small>
+                  ${appointment ? `<small>Servicio: ${escapeHTML(serviceName)}</small>` : ""}
+                  ${visitState ? `<small>Estado: ${escapeHTML(visitState)}</small>` : ""}
                 </div>
               </article>`;
               })
@@ -5065,10 +5089,13 @@ function bindEvents() {
         item.negocioId === currentBusinessId()
     );
     if (!barber) {
+      app.barberLoginError = "Usuario o contrasena incorrectos para este negocio.";
       event.currentTarget.classList.add("shake");
       setTimeout(() => event.currentTarget.classList.remove("shake"), 500);
+      render();
       return;
     }
+    app.barberLoginError = "";
     app.barberSession = { id: barber.id };
     app.barberDate = todayISO();
     app.barberScheduleView = "hours";
@@ -5078,6 +5105,7 @@ function bindEvents() {
 
   document.querySelector("[data-logout]")?.addEventListener("click", () => {
     app.barberSession = null;
+    app.barberLoginError = "";
     sessionStorage.removeItem("noxora-barber-session");
     render();
   });
