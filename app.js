@@ -639,6 +639,13 @@ function mapRowToAdminAccount(row, businesses = []) {
   };
 }
 
+function mergeBusinessSettingsMeta(currentMeta, patchMeta) {
+  return {
+    ...(currentMeta && typeof currentMeta === "object" ? currentMeta : {}),
+    ...(patchMeta && typeof patchMeta === "object" ? patchMeta : {}),
+  };
+}
+
 class StudioStore {
   constructor() {
     this.listeners = new Set();
@@ -782,12 +789,13 @@ class StudioStore {
         return query.order(orderColumn, { ascending });
       };
 
-      const [barbersResult, appointmentsBaseResult, blockedDaysResult, servicesResult, barberServicesResult] = await Promise.all([
+      const [barbersResult, appointmentsBaseResult, blockedDaysResult, servicesResult, barberServicesResult, businessSettingsResult] = await Promise.all([
         queryScoped("barbers", "created_at", true),
         queryScoped("appointments", "date", true),
         queryScoped("blocked_days", "date", true),
         queryScoped("services", "created_at", true),
         queryScoped("barber_services", "created_at", true),
+        queryScoped("business_settings", "created_at", true),
       ]);
 
       if (barbersResult.error) throw barbersResult.error;
@@ -795,6 +803,7 @@ class StudioStore {
       if (blockedDaysResult.error) throw blockedDaysResult.error;
       if (servicesResult.error) throw servicesResult.error;
       if (barberServicesResult.error) throw barberServicesResult.error;
+      if (businessSettingsResult.error && businessSettingsResult.error.code !== "42P01") throw businessSettingsResult.error;
 
       const appointmentsResult = {
         ...appointmentsBaseResult,
@@ -805,6 +814,7 @@ class StudioStore {
 
       const servicesData = servicesResult.error ? [] : (servicesResult.data || []).map(mapRowToService);
       const barberServicesData = barberServicesResult.error ? [] : (barberServicesResult.data || []).map(mapRowToBarberService);
+      this.syncBusinessSettingsToLocal((businessSettingsResult.data || []), route.view === "super-admin" ? null : scopedBusinessId);
 
       const currentWeek = getWeekKey();
       const nextState = {
@@ -924,6 +934,10 @@ class StudioStore {
       route.view === "super-admin"
         ? { event: "*", schema: "public", table: "barber_services" }
         : { event: "*", schema: "public", table: "barber_services", filter: `business_id=eq.${scopedBusinessId}` };
+    const businessSettingsConfig =
+      route.view === "super-admin"
+        ? { event: "*", schema: "public", table: "business_settings" }
+        : { event: "*", schema: "public", table: "business_settings", filter: `business_id=eq.${scopedBusinessId}` };
 
     this.remoteChannel = this.supabase
       .channel(`barber-delux-realtime-${scopeKey}`)
@@ -943,6 +957,9 @@ class StudioStore {
         this.queueRemoteSync();
       })
       .on("postgres_changes", barberServicesConfig, () => {
+        this.queueRemoteSync();
+      })
+      .on("postgres_changes", businessSettingsConfig, () => {
         this.queueRemoteSync();
       })
       .subscribe();
@@ -1236,6 +1253,74 @@ class StudioStore {
       ? localAccounts.filter((account) => account.businessId !== businessId)
       : [];
     saveAdminAccounts([...preservedAccounts, ...remoteAccounts]);
+    return true;
+  }
+
+  syncBusinessSettingsToLocal(rows = [], scopedBusinessId = null) {
+    const map = loadBackgroundMediaMap();
+    const rowsByBusiness = new Map(
+      (rows || []).map((row) => [row.business_id || DEFAULT_BUSINESS_ID, row])
+    );
+
+    if (scopedBusinessId) {
+      const row = rowsByBusiness.get(scopedBusinessId);
+      const meta = row?.environment_archive_meta || {};
+      const backgroundMedia = meta?.backgroundMedia || null;
+      if (backgroundMedia) {
+        map[scopedBusinessId] = backgroundMedia;
+      } else {
+        delete map[scopedBusinessId];
+      }
+    } else {
+      this.state.businesses.forEach((business) => {
+        const row = rowsByBusiness.get(business.id);
+        const meta = row?.environment_archive_meta || {};
+        const backgroundMedia = meta?.backgroundMedia || null;
+        if (backgroundMedia) {
+          map[business.id] = backgroundMedia;
+        } else if (business.id !== DEFAULT_BUSINESS_ID) {
+          delete map[business.id];
+        }
+      });
+    }
+
+    localStorage.setItem(BACKGROUND_MEDIA_BY_BUSINESS_KEY, JSON.stringify(map));
+  }
+
+  async upsertBusinessSettingsRemote(businessId, patch = {}) {
+    if (!this.supabase || !businessId) return true;
+
+    const existingResult = await this.supabase
+      .from("business_settings")
+      .select("*")
+      .eq("business_id", businessId)
+      .maybeSingle();
+
+    if (existingResult.error && existingResult.error.code !== "PGRST116" && existingResult.error.code !== "42P01") {
+      throw existingResult.error;
+    }
+    if (existingResult.error?.code === "42P01") return false;
+
+    const existingRow = existingResult.data || {};
+    const nextMeta = mergeBusinessSettingsMeta(existingRow.environment_archive_meta, patch.environment_archive_meta);
+    const payload = {
+      business_id: businessId,
+      environment_archive_url: patch.environment_archive_url ?? existingRow.environment_archive_url ?? "",
+      environment_archive_name: patch.environment_archive_name ?? existingRow.environment_archive_name ?? "",
+      environment_archive_meta: nextMeta,
+      public_path: patch.public_path ?? existingRow.public_path ?? "/barberia/:slug",
+      theme_override: patch.theme_override ?? existingRow.theme_override ?? "",
+      custom_domain: patch.custom_domain ?? existingRow.custom_domain ?? "",
+      notes: patch.notes ?? existingRow.notes ?? "",
+    };
+
+    const { error } = await this.supabase
+      .from("business_settings")
+      .upsert(payload, { onConflict: "business_id" });
+    if (error) {
+      if (error.code === "42P01") return false;
+      throw error;
+    }
     return true;
   }
 
@@ -4943,20 +5028,40 @@ function bindEvents() {
     render();
   });
 
-  document.querySelector("#background-form")?.addEventListener("submit", (event) => {
+  document.querySelector("#background-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!app.pendingBackgroundVideo) return;
     app.backgroundMedia = app.pendingBackgroundVideo;
     saveBackgroundMedia(app.backgroundMedia);
+    try {
+      await store.upsertBusinessSettingsRemote(currentBusinessId(), {
+        environment_archive_meta: { backgroundMedia: app.backgroundMedia },
+      });
+    } catch (error) {
+      app.backgroundMessage = "No fue posible guardar el fondo de esta barberia.";
+      console.error("Remote background save failed", error);
+      render();
+      return;
+    }
     app.pendingBackgroundVideo = null;
     app.backgroundMessage = "Video guardado como fondo activo.";
     render();
   });
 
-  document.querySelector("[data-reset-background]")?.addEventListener("click", () => {
+  document.querySelector("[data-reset-background]")?.addEventListener("click", async () => {
     app.backgroundMedia = null;
     app.pendingBackgroundVideo = null;
     saveBackgroundMedia(null);
+    try {
+      await store.upsertBusinessSettingsRemote(currentBusinessId(), {
+        environment_archive_meta: { backgroundMedia: null },
+      });
+    } catch (error) {
+      app.backgroundMessage = "No fue posible restaurar el fondo de esta barberia.";
+      console.error("Remote background reset failed", error);
+      render();
+      return;
+    }
     app.backgroundMessage = "Fondo estatico restaurado.";
     render();
   });
