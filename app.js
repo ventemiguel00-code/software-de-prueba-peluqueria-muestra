@@ -1223,35 +1223,12 @@ class StudioStore {
   }
 
   async purgeSecondaryBusinessesOperationalData() {
-    const secondaryBusinessIds = (this.state.businesses || [])
-      .map((business) => business.id)
-      .filter((businessId) => businessId && businessId !== DEFAULT_BUSINESS_ID);
+    const replicatedBusinessIds = detectReplicatedBusinessIds(this.state);
+    if (!replicatedBusinessIds.length) return true;
 
-    if (!secondaryBusinessIds.length) return true;
-
-    this.state.barbers = this.state.barbers.filter((barber) => barber.negocioId === DEFAULT_BUSINESS_ID);
-    this.state.services = this.state.services.filter((service) => service.negocioId === DEFAULT_BUSINESS_ID);
-    this.state.appointments = this.state.appointments.filter((appointment) => appointment.negocioId === DEFAULT_BUSINESS_ID);
-    this.state.blockedDays = this.state.blockedDays.filter((blockedDay) => blockedDay.negocioId === DEFAULT_BUSINESS_ID);
-    this.state.barberServices = this.state.barberServices.filter((relation) => relation.negocioId === DEFAULT_BUSINESS_ID);
-    localStorage.setItem(APP_KEY, JSON.stringify(this.state));
-
-    if (!this.supabase) return true;
-
-    const deletions = await Promise.all([
-      this.supabase.from("appointments").delete().neq("business_id", DEFAULT_BUSINESS_ID),
-      this.supabase.from("blocked_days").delete().neq("business_id", DEFAULT_BUSINESS_ID),
-      this.supabase.from("barber_services").delete().neq("business_id", DEFAULT_BUSINESS_ID),
-      this.supabase.from("services").delete().neq("business_id", DEFAULT_BUSINESS_ID),
-      this.supabase.from("barbers").delete().neq("business_id", DEFAULT_BUSINESS_ID),
-    ]);
-
-    deletions.forEach((result) => {
-      if (result.error && result.error.code !== "42P01") {
-        throw result.error;
-      }
-    });
-
+    for (const businessId of replicatedBusinessIds) {
+      await this.ensureBusinessStartsEmpty(businessId);
+    }
     return true;
   }
 
