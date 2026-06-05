@@ -1603,6 +1603,10 @@ function loadAdminAccounts() {
   return [PRINCIPAL_ADMIN, ...secondary];
 }
 
+function adminAccountsForBusiness(businessId = currentBusinessId()) {
+  return loadAdminAccounts().filter((account) => account.businessId === businessId);
+}
+
 function saveAdminAccounts(accounts) {
   const normalized = [
     PRINCIPAL_ADMIN,
@@ -1837,7 +1841,7 @@ async function findAdminAccount(user, password, businessId = null) {
     (account) =>
       account.active &&
       account.user === user &&
-      (!businessId || account.role === PRINCIPAL_ADMIN.role || account.businessId === businessId)
+      (!businessId || account.businessId === businessId)
   );
   if (!candidates.length) return null;
 
@@ -1950,8 +1954,16 @@ const app = {
   lastEvent: "",
 };
 
-function barberById(id) {
-  return store.state.barbers.find((barber) => barber.id === id);
+function barberById(id, businessId = currentBusinessId()) {
+  return store.state.barbers.find((barber) => barber.id === id && barber.negocioId === businessId);
+}
+
+function appointmentById(id, businessId = currentBusinessId()) {
+  return (
+    store.state.appointments.find(
+      (appointment) => appointment.id === id && appointment.negocioId === businessId
+    ) || null
+  );
 }
 
 function businessBarberCount(businessId) {
@@ -3015,7 +3027,7 @@ function barberSummaryCards(barber, anchorDate, viewer = "barber") {
 }
 
 function adminAccountsSection() {
-  const accounts = loadAdminAccounts();
+  const accounts = adminAccountsForBusiness(currentBusinessId());
   return `<section class="admin-main">
     <div class="section-title"><span>U</span><h2>Gestionar administradores</h2></div>
     ${app.adminAccountMessage ? `<p class="form-note">${escapeHTML(app.adminAccountMessage)}</p>` : ""}
@@ -3065,7 +3077,7 @@ function adminAccountsSection() {
   </section>`;
 }
 
-function validateAdminAccountPayload(payload, accounts, editingId = "") {
+function validateAdminAccountPayload(payload, accounts, editingId = "", businessId = currentBusinessId()) {
   if (!payload.name || !payload.user || !payload.password || !payload.confirmPassword) {
     return "Todos los campos son obligatorios.";
   }
@@ -3073,7 +3085,7 @@ function validateAdminAccountPayload(payload, accounts, editingId = "") {
     return "Las contrasenas no coinciden.";
   }
   const duplicate = accounts.find(
-    (account) => account.user === payload.user && account.id !== editingId
+    (account) => account.businessId === businessId && account.user === payload.user && account.id !== editingId
   );
   if (duplicate) return "Ya existe un administrador con ese usuario.";
   return "";
@@ -3109,6 +3121,7 @@ function validateBarberPayload(payload, editingId = "") {
   const duplicateUser = store.state.barbers.find(
     (barber) =>
       barber.id !== editingId &&
+      barber.negocioId === currentBusinessId() &&
       String(barber.user || "").trim().toLowerCase() === normalizedUser
   );
   if (duplicateUser) {
@@ -3605,6 +3618,13 @@ function renderAdminV2() {
     `);
   }
 
+  if (app.adminSession.businessId && app.adminSession.businessId !== currentBusinessId()) {
+    app.adminSession = null;
+    sessionStorage.removeItem(ADMIN_SESSION_KEY);
+    app.adminLoginError = "Tu sesion administrativa pertenece a otro negocio.";
+    return renderAdminV2();
+  }
+
   const selected = barberById(app.adminBarberId);
   const businessBarbers = [...store.state.barbers].sort((a, b) => a.name.localeCompare(b.name, "es"));
   const counterSummary = buildCounterSummary(app.selectedDate);
@@ -3826,7 +3846,7 @@ function adminHoursView(barber) {
         <select name="serviceId">
           ${services
             .map((service) => {
-              const selectedOption = service.id === (store.state.appointments.find((item) => item.id === app.adminServiceEditAppointmentId)?.serviceId || "") ? "selected" : "";
+              const selectedOption = service.id === (appointmentById(app.adminServiceEditAppointmentId)?.serviceId || "") ? "selected" : "";
               return `<option value="${escapeHTML(service.id)}" ${selectedOption}>${escapeHTML(service.name)} - ${formatCOP(service.value)}</option>`;
             })
             .join("")}
@@ -3842,6 +3862,13 @@ function adminHoursView(barber) {
 
 function renderBarberV2() {
   if (!app.barberSession) {
+    return renderBarber();
+  }
+
+  if (app.barberSession.businessId && app.barberSession.businessId !== currentBusinessId()) {
+    app.barberSession = null;
+    app.barberLoginError = "Tu sesion de barbero pertenece a otro negocio.";
+    sessionStorage.removeItem("noxora-barber-session");
     return renderBarber();
   }
 
@@ -4297,7 +4324,7 @@ function bindEvents() {
         render();
         return;
       }
-      const accounts = loadAdminAccounts();
+      const accounts = adminAccountsForBusiness(currentBusinessId());
       if (accounts.some((account) => account.user === user && account.businessId === businessId)) {
         app.superAdminMessage = "Ese usuario ya existe en esta barberia.";
         render();
@@ -4339,7 +4366,7 @@ function bindEvents() {
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       const accountId = event.currentTarget.dataset.adminAccountId;
-      const accounts = loadAdminAccounts();
+      const accounts = adminAccountsForBusiness(currentBusinessId());
       const account = accounts.find((item) => item.id === accountId);
       if (!account) return;
       const nextUser = String(form.get("user") || "").trim();
@@ -4447,7 +4474,7 @@ function bindEvents() {
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const appointment = store.state.appointments.find((item) => item.id === button.dataset.markDone);
+      const appointment = appointmentById(button.dataset.markDone);
       if (!appointment) return;
       store.upsertAppointment({
         ...appointment,
@@ -4575,6 +4602,7 @@ function bindEvents() {
         user: account.user,
         name: account.name,
         role: account.role,
+        businessId: currentBusinessId(),
         startedAt: new Date().toISOString(),
       };
       app.adminLoginError = "";
@@ -4614,7 +4642,8 @@ function bindEvents() {
     event.preventDefault();
     if (!isPrincipalAdmin()) return;
     const form = new FormData(event.currentTarget);
-    const accounts = loadAdminAccounts();
+    const allAccounts = loadAdminAccounts();
+    const businessAccounts = adminAccountsForBusiness(currentBusinessId());
     const payload = {
       name: String(form.get("name") || "").trim(),
       user: String(form.get("user") || "").trim(),
@@ -4622,14 +4651,14 @@ function bindEvents() {
       confirmPassword: String(form.get("confirmPassword") || ""),
       active: form.get("active") === "on",
     };
-    const error = validateAdminAccountPayload(payload, accounts);
+    const error = validateAdminAccountPayload(payload, businessAccounts, "", currentBusinessId());
     if (error) {
       app.adminAccountMessage = error;
       render();
       return;
     }
 
-    accounts.push({
+    allAccounts.push({
       id: uid("admin"),
       businessId: currentBusiness().id,
       businessSlug: currentBusiness().slug,
@@ -4639,7 +4668,7 @@ function bindEvents() {
       role: "administrador_secundario",
       active: payload.active,
     });
-    saveAdminAccounts(accounts);
+    saveAdminAccounts(allAccounts);
     app.adminAccountMessage = "Administrador creado correctamente.";
     render();
   });
@@ -4710,7 +4739,8 @@ function bindEvents() {
       const id = event.currentTarget.dataset.adminAccountId;
       if (id === PRINCIPAL_ADMIN.id) return;
       const form = new FormData(event.currentTarget);
-      const accounts = loadAdminAccounts();
+      const allAccounts = loadAdminAccounts();
+      const businessAccounts = adminAccountsForBusiness(currentBusinessId());
       const payload = {
         name: String(form.get("name") || "").trim(),
         user: String(form.get("user") || "").trim(),
@@ -4718,7 +4748,7 @@ function bindEvents() {
         confirmPassword: String(form.get("confirmPassword") || ""),
         active: form.get("active") === "on",
       };
-      const error = validateAdminAccountPayload(payload, accounts, id);
+      const error = validateAdminAccountPayload(payload, businessAccounts, id, currentBusinessId());
       if (error) {
         app.adminAccountMessage = error;
         render();
@@ -4726,7 +4756,7 @@ function bindEvents() {
       }
 
       saveAdminAccounts(
-        accounts.map((account) =>
+        allAccounts.map((account) =>
           account.id === id
             ? {
                 ...account,
@@ -4937,7 +4967,7 @@ function bindEvents() {
 
   document.querySelector("#service-change-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
-    const appointment = store.state.appointments.find((item) => item.id === app.adminServiceEditAppointmentId);
+    const appointment = appointmentById(app.adminServiceEditAppointmentId);
     if (!appointment) return;
     const form = new FormData(event.currentTarget);
     const service = serviceById(String(form.get("serviceId") || ""));
@@ -5148,7 +5178,7 @@ function bindEvents() {
       return;
     }
     app.barberLoginError = "";
-    app.barberSession = { id: barber.id };
+    app.barberSession = { id: barber.id, businessId: currentBusinessId() };
     app.barberDate = todayISO();
     app.barberScheduleView = "hours";
     sessionStorage.setItem("noxora-barber-session", JSON.stringify(app.barberSession));
