@@ -1388,6 +1388,14 @@ input:focus {
   justify-content: flex-end;
 }
 
+.dashboard-head > div span {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .profile-card {
   display: flex;
   align-items: center;

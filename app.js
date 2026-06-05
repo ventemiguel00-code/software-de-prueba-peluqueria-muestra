@@ -3523,6 +3523,7 @@ function renderAdminV2() {
   }
 
   const selected = barberById(app.adminBarberId);
+  const businessBarbers = [...store.state.barbers].sort((a, b) => a.name.localeCompare(b.name, "es"));
   const counterSummary = buildCounterSummary(app.selectedDate);
   const selectedRecords = app.adminSelectedSlots
     .map((time) => selected && store.getAppointment(selected.id, app.selectedDate, time))
@@ -3534,6 +3535,7 @@ function renderAdminV2() {
       <div>
         <p class="eyebrow">Centro de operaciones</p>
         <h1>ADMINISTRADOR</h1>
+        <span>${escapeHTML(app.adminSession.name || "Administrador")} · ${escapeHTML(app.adminSession.user || "")}</span>
       </div>
       <button class="secondary-action" data-admin-logout>Cerrar sesión</button>
     </section>
@@ -3544,8 +3546,11 @@ function renderAdminV2() {
         ${adminDashboardSection()}
         <section class="admin-main">
           <div class="section-title"><span>A</span><h2>Barberos</h2></div>
-          <div class="admin-barber-grid">
-            ${store.state.barbers
+          <p class="microcopy">Selecciona un barbero para abrir automaticamente su agenda del dia actual.</p>
+          ${
+            businessBarbers.length
+              ? `<div class="admin-barber-grid">
+            ${businessBarbers
               .map(
                 (barber) => `<button class="barber-card admin-person-card ${barber.active ? "" : "inactive"}" data-admin-barber="${barber.id}">
                   ${avatar(barber, "md")}
@@ -3558,7 +3563,12 @@ function renderAdminV2() {
                 </button>`
               )
               .join("")}
-          </div>
+          </div>`
+              : `<div class="empty-state-card">
+                  <p>Aun no hay barberos creados en este negocio.</p>
+                  <p>Crea el primer barbero desde el modulo Nuevo barbero para empezar a gestionar la agenda.</p>
+                </div>`
+          }
         </section>
         ${renderAccordionPanel("new-barber", "+", "Nuevo barbero", barberEditorForm(null, "Crear barbero"), app.adminOpenPanel === "new-barber")}
         ${renderAccordionPanel("services", "S", "Servicios", servicesSection(), app.adminOpenPanel === "services")}
@@ -4469,6 +4479,9 @@ function bindEvents() {
       app.adminAccountMessage = "";
       app.adminView = "home";
       app.adminBarberId = "";
+      app.adminOpenPanel = "";
+      app.adminScheduleView = "hours";
+      app.selectedDate = todayISO();
       app.adminSelectedSlots = [];
       sessionStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(app.adminSession));
       render();
@@ -4487,6 +4500,9 @@ function bindEvents() {
     app.adminAccountMessage = "";
     app.adminView = "home";
     app.adminBarberId = "";
+    app.adminOpenPanel = "";
+    app.adminScheduleView = "hours";
+    app.selectedDate = todayISO();
     app.adminSelectedSlots = [];
     sessionStorage.removeItem(ADMIN_SESSION_KEY);
     render();
@@ -4722,6 +4738,7 @@ function bindEvents() {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
+    const editingExistingBarber = Boolean(data.get("id"));
     const selected = barberById(data.get("id"));
     const file = data.get("photo");
     const photo = file?.size ? await fileToDataURL(file) : selected?.photo || "";
@@ -4739,7 +4756,14 @@ function bindEvents() {
     if (barberRecord?.id) {
       store.saveBarberServices(barberRecord.id, selectedServiceIds);
     }
-    if (!app.adminBarberId && barberRecord?.id) app.adminBarberId = barberRecord.id;
+    if (editingExistingBarber && barberRecord?.id) {
+      app.adminBarberId = barberRecord.id;
+      app.adminView = "profile";
+    } else {
+      app.adminBarberId = "";
+      app.adminView = "home";
+      app.adminOpenPanel = "";
+    }
     render();
   });
 
@@ -4820,6 +4844,8 @@ function bindEvents() {
     button.addEventListener("click", () => {
       app.adminView = "home";
       app.adminBarberId = "";
+      app.adminScheduleView = "hours";
+      app.selectedDate = todayISO();
       app.adminSelectedSlots = [];
       render();
     });
