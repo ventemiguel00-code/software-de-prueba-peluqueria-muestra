@@ -1689,6 +1689,7 @@ const ADMIN_SESSION_KEY = "barber-delux-admin-session";
 const BARBER_SESSION_KEY = "noxora-barber-session";
 const ADMIN_ACCOUNTS_KEY = "barber-delux-admin-accounts-v1";
 const BUSINESS_ENV_ATTACHMENTS_KEY = "barber-delux-business-env-attachments-v1";
+const SUPER_ADMIN_VISIBLE_PASSWORDS_KEY = "barber-delux-super-admin-visible-passwords-v1";
 const SUPER_ADMIN_SESSION_KEY = "vision-barber-super-admin-session";
 const BACKGROUND_MEDIA_KEY = "barber-delux-background-media-v1";
 const BACKGROUND_MEDIA_BY_BUSINESS_KEY = "barber-delux-background-media-by-business-v1";
@@ -1755,6 +1756,36 @@ function saveAdminAccounts(accounts) {
     ...accounts.filter((account) => account.id !== PRINCIPAL_ADMIN.id),
   ];
   localStorage.setItem(ADMIN_ACCOUNTS_KEY, JSON.stringify(normalized));
+}
+
+function loadVisibleAdminPasswords() {
+  const raw = localStorage.getItem(SUPER_ADMIN_VISIBLE_PASSWORDS_KEY);
+  try {
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveVisibleAdminPasswords(map) {
+  localStorage.setItem(SUPER_ADMIN_VISIBLE_PASSWORDS_KEY, JSON.stringify(map || {}));
+}
+
+function setVisibleAdminPassword(accountId, payload) {
+  const map = loadVisibleAdminPasswords();
+  if (!payload) {
+    delete map[accountId];
+  } else {
+    map[accountId] = {
+      ...payload,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+  saveVisibleAdminPasswords(map);
+}
+
+function visibleAdminPassword(accountId) {
+  return loadVisibleAdminPasswords()[accountId] || null;
 }
 
 function readStoredJSON(storage, key) {
@@ -3407,18 +3438,26 @@ function renderSuperAdmin() {
       const adminList = admins.length
         ? admins
             .map(
-              (account) => `<form class="super-admin-account-edit form-stack" data-admin-account-id="${escapeHTML(account.id)}">
+              (account) => {
+                const visiblePassword = visibleAdminPassword(account.id);
+                return `<form class="super-admin-account-edit form-stack" data-admin-account-id="${escapeHTML(account.id)}">
                 <div class="form-grid">
                   <label>Nombre<input name="name" required value="${escapeHTML(account.name || "")}" /></label>
                   <label>Usuario<input name="user" required value="${escapeHTML(account.user || "")}" /></label>
                   <label>Creado<input value="${escapeHTML(account.createdAt || todayISO())}" disabled /></label>
                 </div>
+                ${
+                  visiblePassword
+                    ? `<p class="form-note">Clave visible: <strong>${escapeHTML(visiblePassword.password || "")}</strong> · Usuario: <strong>${escapeHTML(visiblePassword.user || account.user || "")}</strong></p>`
+                    : `<p class="microcopy">No hay clave temporal visible guardada para este administrador.</p>`
+                }
                 <label class="toggle-line"><input name="active" type="checkbox" ${account.active ? "checked" : ""} /> Activo</label>
                 <div class="button-row">
                   <button class="primary-action">Guardar admin</button>
                   <button class="secondary-action" type="button" data-regenerate-admin-password="${escapeHTML(account.id)}">Regenerar contrasena</button>
                 </div>
-              </form>`
+              </form>`;
+              }
             )
             .join("")
         : `<p class="microcopy">Aun no hay administradores registrados para esta barberia.</p>`;
@@ -4453,6 +4492,12 @@ function bindEvents() {
     const hash = await sha256(generatedPassword);
     accounts[accounts.length - 1].passwordHash = hash;
     saveAdminAccounts(accounts);
+    setVisibleAdminPassword(accounts[accounts.length - 1].id, {
+      businessId: business.id,
+      businessName: business.name,
+      user: "Desarrollo",
+      password: generatedPassword,
+    });
     try {
       await store.upsertAdminAccountRemote(accounts[accounts.length - 1]);
     } catch (error) {
@@ -4536,6 +4581,13 @@ function bindEvents() {
         return;
       }
       saveAdminAccounts(loadAdminAccounts().filter((account) => account.businessId !== businessId));
+      const visiblePasswords = loadVisibleAdminPasswords();
+      Object.keys(visiblePasswords).forEach((accountId) => {
+        if (visiblePasswords[accountId]?.businessId === businessId) {
+          delete visiblePasswords[accountId];
+        }
+      });
+      saveVisibleAdminPasswords(visiblePasswords);
       const environmentAttachments = loadBusinessEnvironmentAttachments();
       delete environmentAttachments[businessId];
       saveBusinessEnvironmentAttachments(environmentAttachments);
@@ -4584,6 +4636,12 @@ function bindEvents() {
       try {
         newAccount.passwordHash = await sha256(generatedPassword);
         saveAdminAccounts(allAccounts);
+        setVisibleAdminPassword(newAccount.id, {
+          businessId,
+          businessName: business.name,
+          user,
+          password: generatedPassword,
+        });
         await store.upsertAdminAccountRemote(newAccount);
         const urls = businessUrlSet(business);
         app.superAdminCredentialReveal = {
@@ -4650,6 +4708,12 @@ function bindEvents() {
         account.password = "";
         account.passwordHash = hash;
         saveAdminAccounts(accounts);
+        setVisibleAdminPassword(account.id, {
+          businessId: account.businessId,
+          businessName: business?.name || "Barberia",
+          user: account.user,
+          password: generatedPassword,
+        });
         await store.upsertAdminAccountRemote(account);
         const business = store.businessById(account.businessId);
         const urls = businessUrlSet(business);
@@ -5056,6 +5120,7 @@ function bindEvents() {
       if (id === PRINCIPAL_ADMIN.id) return;
       const account = loadAdminAccounts().find((item) => item.id === id);
       saveAdminAccounts(loadAdminAccounts().filter((accountItem) => accountItem.id !== id));
+      setVisibleAdminPassword(id, null);
       try {
         await store.deleteAdminAccountRemote(id, account?.businessId || currentBusinessId());
         app.adminAccountMessage = "Administrador eliminado correctamente.";
