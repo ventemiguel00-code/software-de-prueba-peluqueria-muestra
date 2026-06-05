@@ -976,6 +976,22 @@ p {
   --state: #aeb8bb;
 }
 
+.arrived {
+  --state: #f2cf7b;
+}
+
+.service {
+  --state: #7be0d4;
+}
+
+.done {
+  --state: #79e0b2;
+}
+
+.no-show {
+  --state: #ff9b73;
+}
+
 .slot.available,
 .slot-row.available {
   border-color: rgba(121, 224, 178, 0.38);
@@ -2290,6 +2306,46 @@ dialog::backdrop {
   border: 1px dashed rgba(212, 175, 55, 0.26);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.03);
+}
+
+.visit-legend {
+  margin-top: -4px;
+  margin-bottom: 16px;
+}
+
+.visit-state-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--white);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.visit-state-pill.arrived {
+  border-color: rgba(242, 207, 123, 0.4);
+  background: rgba(242, 207, 123, 0.14);
+}
+
+.visit-state-pill.service {
+  border-color: rgba(123, 224, 212, 0.4);
+  background: rgba(123, 224, 212, 0.12);
+}
+
+.visit-state-pill.done {
+  border-color: rgba(121, 224, 178, 0.42);
+  background: rgba(121, 224, 178, 0.12);
+}
+
+.visit-state-pill.no-show {
+  border-color: rgba(255, 155, 115, 0.4);
+  background: rgba(255, 155, 115, 0.13);
 }
 
 .super-admin-logo-preview img {

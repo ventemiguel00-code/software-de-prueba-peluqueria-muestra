@@ -13,6 +13,12 @@ const STATUS = {
   fixed: { label: "Cita fija", short: "Fija", tone: "fixed" },
   blocked: { label: "Bloqueado", short: "Bloq.", tone: "blocked" },
 };
+const VISIT_STATE_META = {
+  arrived: { label: "Cliente llego", tone: "arrived" },
+  service: { label: "En servicio", tone: "service" },
+  done: { label: "Realizada", tone: "done" },
+  no_show: { label: "No asistio", tone: "no-show" },
+};
 const COUNTABLE_STATUSES = new Set(["reserved", "fixed"]);
 
 const dayNames = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
@@ -2228,6 +2234,20 @@ function visitStateLabel(visitState = "") {
   return "";
 }
 
+function operationalStatusLabel({ appointment, status, dayBlocked, unavailable = false }) {
+  const visitLabel = visitStateLabel(appointment?.visitState);
+  if (visitLabel) return visitLabel;
+  if (dayBlocked) return "Dia completo bloqueado";
+  if (unavailable && status === "available") return "No disponible";
+  return STATUS[status]?.label || "Disponible";
+}
+
+function renderVisitStatePill(visitState = "") {
+  const meta = VISIT_STATE_META[visitState];
+  if (!meta) return "";
+  return `<span class="visit-state-pill ${meta.tone}">${escapeHTML(meta.label)}</span>`;
+}
+
 function calculateAppointmentIncome(appointment) {
   const value = serviceValueForAppointment(appointment);
   const share = serviceShareForAppointment(appointment);
@@ -3759,6 +3779,9 @@ function adminHoursView(barber) {
   <div class="status-legend">
     ${Object.entries(STATUS).map(([, item]) => `<span class="${item.tone}"><i></i>${item.label}</span>`).join("")}
   </div>
+  <div class="status-legend visit-legend">
+    ${Object.entries(VISIT_STATE_META).map(([, item]) => `<span class="visit-state-pill ${item.tone}">${escapeHTML(item.label)}</span>`).join("")}
+  </div>
   <div class="admin-slots selectable">
     ${rows
       .map(({ time, status, appointment, dayBlocked }) => {
@@ -3768,13 +3791,7 @@ function adminHoursView(barber) {
         const serviceValue = formatCOP(serviceValueForAppointment(appointment));
         const realized = isRealizedAppointment(appointment);
         const actionEnabled = appointment && COUNTABLE_STATUSES.has(appointment.status);
-        const statusLabel = realized
-          ? "Realizada"
-          : dayBlocked
-            ? "Dia completo bloqueado"
-            : unavailable && status === "available"
-              ? "No disponible"
-              : STATUS[status].label;
+        const statusLabel = operationalStatusLabel({ appointment, status, dayBlocked, unavailable });
         return `
       <button class="slot-row ${realized ? "completed" : STATUS[status].tone} ${unavailable ? "unavailable" : ""} ${app.adminSelectedSlots.includes(time) ? "picked" : ""}" data-admin-slot="${time}">
         <div><strong>${slotRange(time)}</strong><span>${statusLabel}</span></div>
@@ -3784,6 +3801,7 @@ function adminHoursView(barber) {
           ${appointment ? `<small>Servicio: ${escapeHTML(serviceName)}</small>` : ""}
           ${appointment ? `<small>Valor: ${serviceValue}</small>` : ""}
           ${appointment ? `<small>Barbero: ${escapeHTML(barber.name)}</small>` : ""}
+          ${appointment ? renderVisitStatePill(appointment.visitState) : ""}
         </div>
         ${
           chatPhone || actionEnabled
@@ -3869,6 +3887,9 @@ function renderBarberV2() {
           <div class="status-legend">
             ${Object.entries(STATUS).map(([, item]) => `<span class="${item.tone}"><i></i>${item.label}</span>`).join("")}
           </div>
+          <div class="status-legend visit-legend">
+            ${Object.entries(VISIT_STATE_META).map(([, item]) => `<span class="visit-state-pill ${item.tone}">${escapeHTML(item.label)}</span>`).join("")}
+          </div>
           ${
             !hasOperationalRows
               ? `<div class="empty-state-card">
@@ -3882,15 +3903,15 @@ function renderBarberV2() {
               .map(({ time, status, appointment, dayBlocked }) => {
                 const unavailable = isUnavailableSlot(app.barberDate, time, status);
                 const serviceName = serviceNameForAppointment(appointment);
-                const visitState = visitStateLabel(appointment?.visitState);
+                const statusLabel = operationalStatusLabel({ appointment, status, dayBlocked, unavailable });
                 return `
               <article class="slot-row ${STATUS[status].tone} ${unavailable ? "unavailable" : ""}">
-                <div><strong>${slotRange(time)}</strong><span>${dayBlocked ? "Dia bloqueado" : unavailable && status === "available" ? "No disponible" : STATUS[status].label}</span></div>
+                <div><strong>${slotRange(time)}</strong><span>${statusLabel}</span></div>
                 <div class="slot-client">
                   <strong>${escapeHTML(appointment?.clientName || (status === "available" ? "Disponible" : "Sin cliente"))}</strong>
                   <small>${appointment?.whatsapp ? displayPhone(appointment.whatsapp) : "Solo lectura"}</small>
                   ${appointment ? `<small>Servicio: ${escapeHTML(serviceName)}</small>` : ""}
-                  ${visitState ? `<small>Estado: ${escapeHTML(visitState)}</small>` : ""}
+                  ${appointment ? renderVisitStatePill(appointment.visitState) : ""}
                 </div>
               </article>`;
               })
