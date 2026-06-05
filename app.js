@@ -2800,6 +2800,10 @@ function renderPublic() {
 
 function renderAdmin() {
   const selected = barberById(app.adminBarberId) || barbersForBusiness(currentBusinessId())[0];
+  const businessId = currentBusinessId();
+  const businessBarbers = barbersForBusiness(businessId);
+  const businessAppointments = store.state.appointments.filter((appointment) => appointment.negocioId === businessId);
+  const businessBlockedDays = store.state.blockedDays.filter((blockedDay) => blockedDay.negocioId === businessId);
   const rows = selected
     ? baseSlots.map((time) => ({ time, ...statusFor(selected.id, app.selectedDate, time) }))
     : [];
@@ -2812,9 +2816,9 @@ function renderAdmin() {
         <h1>Panel administrador</h1>
       </div>
       <div class="metric-row">
-        <div><strong>${store.state.barbers.length}</strong><span>Barberos</span></div>
-        <div><strong>${store.state.appointments.filter((a) => a.date === app.selectedDate).length}</strong><span>Citas hoy</span></div>
-        <div><strong>${store.state.blockedDays.length}</strong><span>Dias bloqueados</span></div>
+        <div><strong>${businessBarbers.length}</strong><span>Barberos</span></div>
+        <div><strong>${businessAppointments.filter((appointment) => appointment.date === app.selectedDate).length}</strong><span>Citas hoy</span></div>
+        <div><strong>${businessBlockedDays.length}</strong><span>Dias bloqueados</span></div>
       </div>
     </section>
 
@@ -2822,7 +2826,7 @@ function renderAdmin() {
       <aside class="admin-sidebar">
         <div class="section-title"><span>A</span><h2>Barberos</h2></div>
         <div class="barber-list compact">
-          ${store.state.barbers
+          ${businessBarbers
             .map(
               (barber) => `
               <button class="barber-card ${barber.id === selected?.id ? "active" : ""}" data-admin-barber="${barber.id}">
@@ -2957,8 +2961,9 @@ function renderBarber() {
 }
 
 function barberEditorForm(barber, submitLabel) {
-  const services = [...store.state.services].filter((service) => service.active);
-  const storedServiceIds = barber ? store.getBarberServiceIds(barber.id) : [];
+  const businessId = barber?.negocioId || currentBusinessId();
+  const services = activeServicesForBusiness(businessId);
+  const storedServiceIds = barber ? store.getBarberServiceIds(barber.id, businessId) : [];
   const selectedServiceIds = new Set(
     storedServiceIds.length ? storedServiceIds : services.map((service) => service.id)
   );
@@ -3149,7 +3154,7 @@ function serviceEditorCard(service) {
 }
 
 function servicesSection() {
-  const services = [...store.state.services].sort((a, b) => a.name.localeCompare(b.name, "es"));
+  const services = [...servicesForBusiness(currentBusinessId())].sort((a, b) => a.name.localeCompare(b.name, "es"));
   return `<section class="admin-main">
     <div class="section-title"><span>S</span><h2>Servicios</h2></div>
     <p class="microcopy">Crea y administra servicios sin tocar todavia el flujo actual de reservas.</p>
@@ -3543,13 +3548,15 @@ function backgroundSettingsSection() {
 }
 
 function adminDashboardSection() {
+  const businessId = currentBusinessId();
   const today = todayISO();
-  const todayAppointments = store.state.appointments.filter((item) => item.date === today);
+  const businessAppointments = store.state.appointments.filter((item) => item.negocioId === businessId);
+  const todayAppointments = businessAppointments.filter((item) => item.date === today);
   const currentWeekDates = getWeekDates(new Date(`${today}T00:00:00`)).filter((date) => date <= today);
   const currentWeekSet = new Set(currentWeekDates);
   const reservedToday = todayAppointments.filter((item) => COUNTABLE_STATUSES.has(item.status)).length;
   const realizedToday = todayAppointments.filter(isRealizedAppointment);
-  const realizedWeek = store.state.appointments.filter(
+  const realizedWeek = businessAppointments.filter(
     (item) => isRealizedAppointment(item) && currentWeekSet.has(item.date)
   );
   const incomeToday = realizedToday.reduce((sum, appointment) => sum + serviceValueForAppointment(appointment), 0);
@@ -3579,13 +3586,14 @@ function adminDashboardSection() {
 
 function clientHistorySummary(record) {
   if (!record?.clientName && !record?.whatsapp) return `<p class="microcopy">Sin historial disponible.</p>`;
+  const businessId = record?.negocioId || currentBusinessId();
   const keyPhone = moneylessPhone(record.whatsapp);
   const keyName = String(record.clientName || "").trim().toLowerCase();
   const visits = store.state.appointments
     .filter((item) => {
       const samePhone = keyPhone && moneylessPhone(item.whatsapp) === keyPhone;
       const sameName = keyName && String(item.clientName || "").trim().toLowerCase() === keyName;
-      return (samePhone || sameName) && item.id !== record.id;
+      return item.negocioId === businessId && (samePhone || sameName) && item.id !== record.id;
     })
     .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
     .slice(0, 3);
@@ -3626,7 +3634,7 @@ function renderAdminV2() {
   }
 
   const selected = barberById(app.adminBarberId);
-  const businessBarbers = [...store.state.barbers].sort((a, b) => a.name.localeCompare(b.name, "es"));
+  const businessBarbers = [...barbersForBusiness(currentBusinessId())].sort((a, b) => a.name.localeCompare(b.name, "es"));
   const counterSummary = buildCounterSummary(app.selectedDate);
   const selectedRecords = app.adminSelectedSlots
     .map((time) => selected && store.getAppointment(selected.id, app.selectedDate, time))
@@ -3783,7 +3791,7 @@ function renderAdminV2() {
 function adminHoursView(barber) {
   const counterSummary = buildCounterSummary(app.selectedDate);
   const rows = baseSlots.map((time) => ({ time, ...statusFor(barber.id, app.selectedDate, time) }));
-  const services = store.state.services.filter((service) => service.active);
+  const services = activeServicesForBusiness(currentBusinessId());
   return `<div class="agenda-toolbar">
     <div>
       <div class="section-title"><span>H</span><h2>Horarios del dia</h2></div>
