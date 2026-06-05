@@ -608,6 +608,37 @@ function mapRowToBarberService(row) {
   };
 }
 
+function mapAdminAccountToRow(account) {
+  return {
+    id: account.id,
+    business_id: account.businessId || DEFAULT_BUSINESS_ID,
+    admin_name: account.name || "",
+    admin_user: account.user || "",
+    password_hash: account.passwordHash || "",
+    role: account.role || "admin_negocio",
+    active: account.active !== false,
+    created_at: account.createdAt || todayISO(),
+    updated_at: todayISO(),
+  };
+}
+
+function mapRowToAdminAccount(row, businesses = []) {
+  const businessId = row.business_id || DEFAULT_BUSINESS_ID;
+  const business = businesses.find((item) => item.id === businessId);
+  return {
+    id: row.id,
+    businessId,
+    businessSlug: business?.slug || "",
+    name: row.admin_name || "",
+    user: row.admin_user || "",
+    password: "",
+    passwordHash: row.password_hash || "",
+    role: row.role || "admin_negocio",
+    active: row.active !== false,
+    createdAt: row.created_at || todayISO(),
+  };
+}
+
 class StudioStore {
   constructor() {
     this.listeners = new Set();
@@ -795,6 +826,8 @@ class StudioStore {
         services: servicesData,
         barberServices: barberServicesData,
       };
+
+      await this.syncAdminAccountsFromRemote(route.view === "super-admin" ? null : scopedBusinessId, nextState.businesses);
 
       const replicatedBusinessIds = detectReplicatedBusinessIds(nextState);
 
@@ -1182,6 +1215,53 @@ class StudioStore {
       throw settingsUpsert.error;
     }
 
+    return true;
+  }
+
+  async syncAdminAccountsFromRemote(businessId = null, businesses = this.state.businesses) {
+    if (!this.supabase) return true;
+    let query = this.supabase.from("admin_accounts").select("*").order("created_at", { ascending: true });
+    if (businessId) {
+      query = query.eq("business_id", businessId);
+    }
+    const { data, error } = await query;
+    if (error) {
+      if (error.code === "42P01") return false;
+      throw error;
+    }
+
+    const remoteAccounts = (data || []).map((row) => mapRowToAdminAccount(row, businesses));
+    const localAccounts = loadAdminAccounts().filter((account) => account.id !== PRINCIPAL_ADMIN.id);
+    const preservedAccounts = businessId
+      ? localAccounts.filter((account) => account.businessId !== businessId)
+      : [];
+    saveAdminAccounts([...preservedAccounts, ...remoteAccounts]);
+    return true;
+  }
+
+  async upsertAdminAccountRemote(account) {
+    if (!this.supabase || !account?.id || account.id === PRINCIPAL_ADMIN.id) return true;
+    const { error } = await this.supabase
+      .from("admin_accounts")
+      .upsert(mapAdminAccountToRow(account), { onConflict: "id" });
+    if (error) {
+      if (error.code === "42P01") return false;
+      throw error;
+    }
+    return true;
+  }
+
+  async deleteAdminAccountRemote(id, businessId = null) {
+    if (!this.supabase || !id || id === PRINCIPAL_ADMIN.id) return true;
+    let query = this.supabase.from("admin_accounts").delete().eq("id", id);
+    if (businessId) {
+      query = query.eq("business_id", businessId);
+    }
+    const { error } = await query;
+    if (error) {
+      if (error.code === "42P01") return false;
+      throw error;
+    }
     return true;
   }
 
@@ -1813,6 +1893,14 @@ function seedBusinessFromTemplate(business) {
 }
 
 async function findAdminAccount(user, password, businessId = null) {
+  if (businessId && store?.supabase) {
+    try {
+      await store.syncAdminAccountsFromRemote(businessId);
+    } catch (error) {
+      console.warn("Admin accounts sync skipped", error);
+    }
+  }
+
   const candidates = loadAdminAccounts().filter(
     (account) =>
       account.active &&
@@ -4213,6 +4301,19 @@ function bindEvents() {
     const hash = await sha256(generatedPassword);
     accounts[accounts.length - 1].passwordHash = hash;
     saveAdminAccounts(accounts);
+    try {
+      await store.upsertAdminAccountRemote(accounts[accounts.length - 1]);
+    } catch (error) {
+      saveAdminAccounts(accounts.filter((account) => account.id !== accounts[accounts.length - 1].id));
+      store.deleteBusiness(business.id);
+      const repairedAttachments = loadBusinessEnvironmentAttachments();
+      delete repairedAttachments[business.id];
+      saveBusinessEnvironmentAttachments(repairedAttachments);
+      app.superAdminMessage = `No fue posible guardar el administrador inicial de ${business.name}.`;
+      console.error("Initial business admin remote bootstrap failed", error);
+      render();
+      return;
+    }
     const urls = businessUrlSet(business);
     app.superAdminCredentialReveal = {
       businessName: business.name,
@@ -4296,7 +4397,7 @@ function bindEvents() {
   });
 
   document.querySelectorAll(".super-admin-account-create").forEach((formEl) => {
-    formEl.addEventListener("submit", (event) => {
+    formEl.addEventListener("submit", async (event) => {
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       const businessId = event.currentTarget.dataset.businessId;
@@ -4328,9 +4429,10 @@ function bindEvents() {
         createdAt: todayISO(),
       };
       allAccounts.push(newAccount);
-      Promise.resolve(sha256(generatedPassword)).then((hash) => {
-        newAccount.passwordHash = hash;
+      try {
+        newAccount.passwordHash = await sha256(generatedPassword);
         saveAdminAccounts(allAccounts);
+        await store.upsertAdminAccountRemote(newAccount);
         const urls = businessUrlSet(business);
         app.superAdminCredentialReveal = {
           businessName: business.name,
@@ -4341,13 +4443,18 @@ function bindEvents() {
           password: generatedPassword,
         };
         app.superAdminMessage = `Administrador creado para ${business.name}`;
-        render();
-      });
+      } catch (error) {
+        allAccounts.pop();
+        saveAdminAccounts(allAccounts);
+        app.superAdminMessage = `No fue posible guardar el administrador de ${business.name}.`;
+        console.error("Remote business admin create failed", error);
+      }
+      render();
     });
   });
 
   document.querySelectorAll(".super-admin-account-edit").forEach((formEl) => {
-    formEl.addEventListener("submit", (event) => {
+    formEl.addEventListener("submit", async (event) => {
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       const accountId = event.currentTarget.dataset.adminAccountId;
@@ -4368,22 +4475,30 @@ function bindEvents() {
       account.user = nextUser;
       account.active = form.get("active") === "on";
       saveAdminAccounts(allAccounts);
-      app.superAdminMessage = `Administrador actualizado: ${account.name}`;
+      try {
+        await store.upsertAdminAccountRemote(account);
+        app.superAdminMessage = `Administrador actualizado: ${account.name}`;
+      } catch (error) {
+        app.superAdminMessage = `No fue posible actualizar el administrador ${account.name}.`;
+        console.error("Remote business admin update failed", error);
+      }
       render();
     });
   });
 
   document.querySelectorAll("[data-regenerate-admin-password]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const accountId = button.dataset.regenerateAdminPassword;
       const accounts = loadAdminAccounts();
       const account = accounts.find((item) => item.id === accountId);
       if (!account) return;
       const generatedPassword = generateSecurePassword(10);
-      Promise.resolve(sha256(generatedPassword)).then((hash) => {
+      try {
+        const hash = await sha256(generatedPassword);
         account.password = "";
         account.passwordHash = hash;
         saveAdminAccounts(accounts);
+        await store.upsertAdminAccountRemote(account);
         const business = store.businessById(account.businessId);
         const urls = businessUrlSet(business);
         app.superAdminCredentialReveal = {
@@ -4395,8 +4510,11 @@ function bindEvents() {
           password: generatedPassword,
         };
         app.superAdminMessage = `Nueva clave temporal generada para ${account.name}`;
-        render();
-      });
+      } catch (error) {
+        app.superAdminMessage = `No fue posible regenerar la clave de ${account.name}.`;
+        console.error("Remote business admin password regenerate failed", error);
+      }
+      render();
     });
   });
 
@@ -4623,7 +4741,7 @@ function bindEvents() {
     render();
   });
 
-  document.querySelector("#admin-account-create")?.addEventListener("submit", (event) => {
+  document.querySelector("#admin-account-create")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!isPrincipalAdmin()) return;
     const form = new FormData(event.currentTarget);
@@ -4643,18 +4761,27 @@ function bindEvents() {
       return;
     }
 
-    allAccounts.push({
+    const newAccount = {
       id: uid("admin"),
       businessId: currentBusiness().id,
       businessSlug: currentBusiness().slug,
       name: payload.name,
       user: payload.user,
-      password: payload.password,
+      password: "",
+      passwordHash: await sha256(payload.password),
       role: "administrador_secundario",
       active: payload.active,
-    });
+    };
+    allAccounts.push(newAccount);
     saveAdminAccounts(allAccounts);
-    app.adminAccountMessage = "Administrador creado correctamente.";
+    try {
+      await store.upsertAdminAccountRemote(newAccount);
+      app.adminAccountMessage = "Administrador creado correctamente.";
+    } catch (error) {
+      saveAdminAccounts(allAccounts.filter((account) => account.id !== newAccount.id));
+      app.adminAccountMessage = "No fue posible guardar el administrador.";
+      console.error("Remote admin create failed", error);
+    }
     render();
   });
 
@@ -4718,7 +4845,7 @@ function bindEvents() {
   });
 
   document.querySelectorAll(".admin-account-edit").forEach((formElement) => {
-    formElement.addEventListener("submit", (event) => {
+    formElement.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (!isPrincipalAdmin()) return;
       const id = event.currentTarget.dataset.adminAccountId;
@@ -4739,32 +4866,50 @@ function bindEvents() {
         render();
         return;
       }
-
-      saveAdminAccounts(
-        allAccounts.map((account) =>
-          account.id === id
-            ? {
-                ...account,
-                name: payload.name,
-                user: payload.user,
-                password: payload.password,
-                active: payload.active,
-              }
-            : account
-        )
+      const nextAccounts = allAccounts.map((account) =>
+        account.id === id
+          ? {
+              ...account,
+              name: payload.name,
+              user: payload.user,
+              password: "",
+              passwordHash: payload.password ? account.passwordHash : account.passwordHash,
+              active: payload.active,
+            }
+          : account
       );
-      app.adminAccountMessage = "Administrador actualizado correctamente.";
+      const updatedAccount = nextAccounts.find((account) => account.id === id);
+      if (updatedAccount && payload.password) {
+        updatedAccount.passwordHash = await sha256(payload.password);
+      }
+      saveAdminAccounts(nextAccounts);
+      try {
+        if (updatedAccount) {
+          await store.upsertAdminAccountRemote(updatedAccount);
+        }
+        app.adminAccountMessage = "Administrador actualizado correctamente.";
+      } catch (error) {
+        app.adminAccountMessage = "No fue posible actualizar el administrador.";
+        console.error("Remote admin update failed", error);
+      }
       render();
     });
   });
 
   document.querySelectorAll("[data-delete-admin-account]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       if (!isPrincipalAdmin()) return;
       const id = button.dataset.deleteAdminAccount;
       if (id === PRINCIPAL_ADMIN.id) return;
-      saveAdminAccounts(loadAdminAccounts().filter((account) => account.id !== id));
-      app.adminAccountMessage = "Administrador eliminado correctamente.";
+      const account = loadAdminAccounts().find((item) => item.id === id);
+      saveAdminAccounts(loadAdminAccounts().filter((accountItem) => accountItem.id !== id));
+      try {
+        await store.deleteAdminAccountRemote(id, account?.businessId || currentBusinessId());
+        app.adminAccountMessage = "Administrador eliminado correctamente.";
+      } catch (error) {
+        app.adminAccountMessage = "No fue posible eliminar el administrador.";
+        console.error("Remote admin delete failed", error);
+      }
       render();
     });
   });
