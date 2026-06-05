@@ -1904,6 +1904,7 @@ const app = {
   adminLoginError: "",
   adminAccountMessage: "",
   adminActionMessage: "",
+  adminBarberMessage: "",
   adminServiceMessage: "",
   backgroundMedia: loadBackgroundMedia(DEFAULT_BUSINESS_ID),
   backgroundMessage: "",
@@ -2894,6 +2895,7 @@ function barberEditorForm(barber, submitLabel) {
   );
   return `<form id="barber-form" class="editor-card">
     <input type="hidden" name="id" value="${escapeHTML(barber?.id || "")}" />
+    ${app.adminBarberMessage ? `<p class="form-note">${escapeHTML(app.adminBarberMessage)}</p>` : ""}
     <label>Nombre<input name="name" required value="${escapeHTML(barber?.name || "")}" /></label>
     <label>WhatsApp<input name="whatsapp" inputmode="tel" value="${escapeHTML(barber?.whatsapp || "")}" placeholder="300 123 4567" /></label>
     <label>Usuario<input name="user" required value="${escapeHTML(barber?.user || "")}" /></label>
@@ -3038,6 +3040,22 @@ function validateServicePayload(payload) {
   }
   if (adminPercentage + barberPercentage !== 100) {
     return "Los porcentajes deben sumar 100%.";
+  }
+  return "";
+}
+
+function validateBarberPayload(payload, editingId = "") {
+  if (!payload.name || !payload.user || !payload.password) {
+    return "Nombre, usuario y clave del barbero son obligatorios.";
+  }
+  const normalizedUser = String(payload.user || "").trim().toLowerCase();
+  const duplicateUser = store.state.barbers.find(
+    (barber) =>
+      barber.id !== editingId &&
+      String(barber.user || "").trim().toLowerCase() === normalizedUser
+  );
+  if (duplicateUser) {
+    return "Ya existe un barbero con ese usuario en este negocio.";
   }
   return "";
 }
@@ -4747,17 +4765,32 @@ function bindEvents() {
     const form = event.currentTarget;
     const data = new FormData(form);
     const editingExistingBarber = Boolean(data.get("id"));
+    const payload = {
+      id: data.get("id") || "",
+      name: String(data.get("name") || "").trim(),
+      user: String(data.get("user") || "").trim(),
+      password: String(data.get("password") || ""),
+      whatsapp: String(data.get("whatsapp") || "").trim(),
+      specialty: String(data.get("specialty") || "").trim(),
+      active: data.get("active") === "on",
+    };
+    const barberError = validateBarberPayload(payload, payload.id);
+    if (barberError) {
+      app.adminBarberMessage = barberError;
+      render();
+      return;
+    }
     const selected = barberById(data.get("id"));
     const file = data.get("photo");
     const photo = file?.size ? await fileToDataURL(file) : selected?.photo || "";
     const barberRecord = store.saveBarber({
-      id: data.get("id") || undefined,
-      name: data.get("name"),
-      user: data.get("user"),
-      password: data.get("password"),
-      whatsapp: data.get("whatsapp"),
-      specialty: data.get("specialty"),
-      active: data.get("active") === "on",
+      id: payload.id || undefined,
+      name: payload.name,
+      user: payload.user,
+      password: payload.password,
+      whatsapp: payload.whatsapp,
+      specialty: payload.specialty,
+      active: payload.active,
       photo,
     });
     const selectedServiceIds = data.getAll("serviceIds").map(String);
@@ -4767,10 +4800,12 @@ function bindEvents() {
     if (editingExistingBarber && barberRecord?.id) {
       app.adminBarberId = barberRecord.id;
       app.adminView = "profile";
+      app.adminBarberMessage = "Perfil del barbero actualizado correctamente.";
     } else {
       app.adminBarberId = "";
       app.adminView = "home";
       app.adminOpenPanel = "";
+      app.adminBarberMessage = "Barbero creado correctamente.";
     }
     render();
   });
@@ -4994,7 +5029,13 @@ function bindEvents() {
   });
 
   document.querySelector("[data-delete-barber]")?.addEventListener("click", (event) => {
-    store.deleteBarber(event.currentTarget.dataset.deleteBarber);
+    const barberId = event.currentTarget.dataset.deleteBarber;
+    store.deleteBarber(barberId);
+    if (app.barberSession?.id === barberId) {
+      app.barberSession = null;
+      sessionStorage.removeItem("noxora-barber-session");
+    }
+    app.adminBarberMessage = "Barbero eliminado correctamente.";
     app.adminBarberId = "";
     app.adminView = "home";
     render();
