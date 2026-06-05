@@ -405,17 +405,10 @@ function detectReplicatedBusinessIds(state) {
           seed.appointmentSignatures.has(appointmentCloneSignature(appointment))
         );
 
-      const onlyCloneVisibleData =
-        (businessBarbers.length > 0 && cloneBarbers) ||
-        (businessServices.length > 0 && cloneServices) ||
-        (businessAppointments.length > 0 && cloneAppointments);
+      const cloneSignalCount = [cloneBarbers, cloneServices, cloneAppointments].filter(Boolean).length;
+      const hasOperationalCloneLinks = businessRelations.length > 0 || businessAppointments.length > 0 || businessBlockedDays.length > 0;
 
-      return (
-        hasSeedIds ||
-        onlyCloneVisibleData ||
-        ((cloneBarbers || cloneServices || cloneAppointments) &&
-          (businessRelations.length > 0 || businessAppointments.length > 0 || businessBlockedDays.length > 0))
-      );
+      return hasSeedIds || (cloneSignalCount >= 2 && hasOperationalCloneLinks);
     })
     .map((business) => business.id);
 }
@@ -990,7 +983,10 @@ class StudioStore {
         return;
       }
       if (!event.record) return;
-      const record = this.state.barbers.find((barber) => barber.id === event.record.id) || event.record;
+      const record =
+        this.state.barbers.find(
+          (barber) => barber.id === event.record.id && barber.negocioId === (event.record.negocioId || currentBusinessId())
+        ) || event.record;
       const { error } = await this.supabase.from("barbers").upsert(mapBarberToRow(record), { onConflict: "id" });
       if (error) throw error;
       return;
@@ -1045,7 +1041,10 @@ class StudioStore {
       if (!event.record) return;
       const existing =
         this.state.blockedDays.find(
-          (item) => item.barberId === event.record.barberId && item.date === event.record.date
+          (item) =>
+            item.barberId === event.record.barberId &&
+            item.date === event.record.date &&
+            item.negocioId === (event.record.negocioId || currentBusinessId())
         ) || event.record;
       const { error } = await this.supabase
         .from("blocked_days")
