@@ -459,6 +459,7 @@ function mapBarberToRow(barber) {
     name: barber.name,
     user: barber.user,
     password: barber.password,
+    password_hash: barber.passwordHash || "",
     whatsapp: barber.whatsapp || "",
     active: Boolean(barber.active),
     photo: barber.photo || "",
@@ -548,6 +549,7 @@ function mapRowToBarber(row, index = 0) {
     name: row.name || "",
     user: row.user || "",
     password: row.password || "",
+    passwordHash: row.password_hash || "",
     whatsapp: row.whatsapp || "",
     active: row.active ?? true,
     photo: row.photo || "",
@@ -1695,6 +1697,7 @@ const BACKGROUND_MEDIA_KEY = "barber-delux-background-media-v1";
 const BACKGROUND_MEDIA_BY_BUSINESS_KEY = "barber-delux-background-media-by-business-v1";
 const MULTITENANT_SECONDARY_PURGE_KEY = "barber-delux-secondary-business-purge-v1";
 const SOUND_PREF_KEY = "barber-delux-sound-enabled";
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const MAX_BACKGROUND_VIDEO_BYTES = 10 * 1024 * 1024;
 const MAX_ENV_ARCHIVE_BYTES = 25 * 1024 * 1024;
 const DEFAULT_BACKGROUND_VIDEO = {
@@ -1821,6 +1824,13 @@ function clearScopedBusinessSession(baseKey, businessSlug, legacyKey = baseKey) 
   if (legacyKey) {
     sessionStorage.removeItem(legacyKey);
   }
+}
+
+function isSessionExpired(session) {
+  if (!session?.startedAt) return false;
+  const startedAt = new Date(session.startedAt).getTime();
+  if (!Number.isFinite(startedAt)) return false;
+  return Date.now() - startedAt > SESSION_TTL_MS;
 }
 
 function loadBusinessEnvironmentAttachments() {
@@ -2080,6 +2090,21 @@ async function findAdminAccount(user, password, businessId = null) {
   return (
     candidates.find((account) => account.passwordHash && account.passwordHash === passwordHash) ||
     candidates.find((account) => account.password && account.password === password) ||
+    null
+  );
+}
+
+async function findBarberAccount(user, password, businessId = currentBusinessId()) {
+  const normalizedUser = String(user || "").trim().toLowerCase();
+  const candidates = barbersForBusiness(businessId).filter(
+    (barber) => barber.active && String(barber.user || "").trim().toLowerCase() === normalizedUser
+  );
+  if (!candidates.length) return null;
+
+  const passwordHash = await sha256(password);
+  return (
+    candidates.find((barber) => barber.passwordHash && barber.passwordHash === passwordHash) ||
+    candidates.find((barber) => barber.password && barber.password === password) ||
     null
   );
 }
@@ -3206,7 +3231,7 @@ function barberEditorForm(barber, submitLabel) {
     <label>Nombre<input name="name" required value="${escapeHTML(barber?.name || "")}" /></label>
     <label>WhatsApp<input name="whatsapp" inputmode="tel" value="${escapeHTML(barber?.whatsapp || "")}" placeholder="300 123 4567" /></label>
     <label>Usuario<input name="user" required value="${escapeHTML(barber?.user || "")}" /></label>
-    <label>Clave<input name="password" required value="${escapeHTML(barber?.password || "studio2026")}" /></label>
+    <label>Clave<input name="password" ${barber ? "" : "required"} value="" placeholder="${escapeHTML(barber ? "Deja vacio para conservar la clave actual" : "studio2026")}" /></label>
     <label>Especialidad<input name="specialty" value="${escapeHTML(barber?.specialty || "Servicio premium")}" /></label>
     <label class="file-control">Fotografia<input name="photo" type="file" accept="image/*" /></label>
     <div class="service-checklist-block">
@@ -3352,7 +3377,7 @@ function validateServicePayload(payload) {
 }
 
 function validateBarberPayload(payload, editingId = "") {
-  if (!payload.name || !payload.user || !payload.password) {
+  if (!payload.name || !payload.user || (!editingId && !payload.password)) {
     return "Nombre, usuario y clave del barbero son obligatorios.";
   }
   const normalizedUser = String(payload.user || "").trim().toLowerCase();
@@ -3581,6 +3606,12 @@ function renderSuperAdmin() {
 }
 
 function renderSuperAdminV2() {
+  if (isSessionExpired(app.superAdminSession)) {
+    app.superAdminSession = null;
+    app.superAdminLoginError = "La sesion del super administrador expiro. Inicia sesion nuevamente.";
+    sessionStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
+  }
+
   const businesses = [...store.state.businesses].sort((a, b) => a.name.localeCompare(b.name, "es"));
   const credentialReveal = app.superAdminCredentialReveal
     ? `<div class="editor-card credential-reveal-card">
@@ -3858,6 +3889,13 @@ function clientHistorySummary(record) {
 }
 
 function renderAdminV2() {
+  if (isSessionExpired(app.adminSession)) {
+    app.adminSession = null;
+    clearScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug);
+    app.adminLoginError = "La sesion administrativa expiro. Inicia sesion nuevamente.";
+    return renderAdminV2();
+  }
+
   if (!app.adminSession) {
     return appShell(`
       <section class="login-view">
@@ -3925,7 +3963,7 @@ function renderAdminV2() {
                   <span class="barber-card-copy">
                     <strong>${escapeHTML(barber.name)}</strong>
                     <small>${barber.whatsapp ? displayPhone(barber.whatsapp) : "Sin WhatsApp"}</small>
-                    <small>Usuario: ${escapeHTML(barber.user)} · Clave: ${escapeHTML(barber.password)}</small>
+                    <small>Usuario: ${escapeHTML(barber.user)} · Clave protegida</small>
                   </span>
                   ${renderCounter(counterValue(counterSummary.weeklyByBarber, barber.id))}
                 </button>`
@@ -4126,6 +4164,13 @@ function adminHoursView(barber) {
 }
 
 function renderBarberV2() {
+  if (isSessionExpired(app.barberSession)) {
+    app.barberSession = null;
+    app.barberLoginError = "La sesion del barbero expiro. Inicia sesion nuevamente.";
+    clearScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
+    return renderBarber();
+  }
+
   if (!app.barberSession) {
     return renderBarber();
   }
@@ -5265,11 +5310,13 @@ function bindEvents() {
     const selected = barberById(data.get("id"));
     const file = data.get("photo");
     const photo = file?.size ? await fileToDataURL(file) : selected?.photo || "";
+    const passwordHash = payload.password ? await sha256(payload.password) : selected?.passwordHash || "";
     const barberRecord = store.saveBarber({
       id: payload.id || undefined,
       name: payload.name,
       user: payload.user,
-      password: payload.password,
+      password: payload.password || selected?.password || "",
+      passwordHash,
       whatsapp: payload.whatsapp,
       specialty: payload.specialty,
       active: payload.active,
@@ -5536,16 +5583,10 @@ function bindEvents() {
     });
   });
 
-  document.querySelector("#barber-login")?.addEventListener("submit", (event) => {
+  document.querySelector("#barber-login")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const barber = store.state.barbers.find(
-      (item) =>
-        item.user === form.get("user") &&
-        item.password === form.get("password") &&
-        item.active &&
-        item.negocioId === currentBusinessId()
-    );
+    const barber = await findBarberAccount(form.get("user"), form.get("password"), currentBusinessId());
     if (!barber) {
       app.barberLoginError = "Usuario o contrasena incorrectos para este negocio.";
       event.currentTarget.classList.add("shake");
@@ -5554,7 +5595,12 @@ function bindEvents() {
       return;
     }
     app.barberLoginError = "";
-    app.barberSession = { id: barber.id, businessId: currentBusinessId(), businessSlug: app.currentBusinessSlug };
+    app.barberSession = {
+      id: barber.id,
+      businessId: currentBusinessId(),
+      businessSlug: app.currentBusinessSlug,
+      startedAt: new Date().toISOString(),
+    };
     app.barberDate = todayISO();
     app.barberScheduleView = "hours";
     saveScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug, app.barberSession);
