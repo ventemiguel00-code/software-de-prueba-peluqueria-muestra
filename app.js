@@ -2326,6 +2326,24 @@ function generateSecurePassword(length = 10) {
   return picks.sort(() => Math.random() - 0.5).join("");
 }
 
+async function authenticateViaBackend(role, user, password, businessSlug = app.currentBusinessSlug) {
+  try {
+    const response = await fetch("/api/auth-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role, user, password, businessSlug }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (result?.fallback) return { ok: false, fallback: true, error: result.error || "" };
+    if (!response.ok || !result?.ok) {
+      return { ok: false, fallback: false, error: result?.error || "Credenciales invalidas." };
+    }
+    return { ok: true, ...result };
+  } catch {
+    return { ok: false, fallback: true, error: "" };
+  }
+}
+
 function businessUrlSet(business) {
   const slug = business?.slug || DEFAULT_BUSINESS_SLUG;
   return {
@@ -5352,7 +5370,18 @@ function bindEvents() {
       render();
       return;
     }
-    const account = await findAdminAccount(user, password, currentBusiness()?.id);
+    const backendAuth = await authenticateViaBackend("admin", user, password, app.currentBusinessSlug);
+    if (!backendAuth.ok && !backendAuth.fallback) {
+      app.adminSession = null;
+      const failedAttempt = registerFailedAuthAttempt("admin", app.currentBusinessSlug, user);
+      app.adminLoginError = failedAttempt.blockedUntil
+        ? authBlockMessage("Acceso administrativo", failedAttempt.blockedUntil)
+        : `${backendAuth.error || "Usuario o contrasena incorrectos"}. Intentos restantes: ${failedAttempt.remainingAttempts}.`;
+      clearScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug);
+      render();
+      return;
+    }
+    const account = backendAuth.ok ? backendAuth.account : await findAdminAccount(user, password, currentBusiness()?.id);
 
     if (account) {
       app.adminSession = {
@@ -5995,7 +6024,19 @@ function bindEvents() {
       render();
       return;
     }
-    const barber = await findBarberAccount(user, form.get("password"), currentBusinessId());
+    const password = String(form.get("password") || "");
+    const backendAuth = await authenticateViaBackend("barber", user, password, app.currentBusinessSlug);
+    if (!backendAuth.ok && !backendAuth.fallback) {
+      const failedAttempt = registerFailedAuthAttempt("barber", app.currentBusinessSlug, user);
+      app.barberLoginError = failedAttempt.blockedUntil
+        ? authBlockMessage("Acceso de barbero", failedAttempt.blockedUntil)
+        : `${backendAuth.error || "Usuario o contrasena incorrectos para este negocio"}. Intentos restantes: ${failedAttempt.remainingAttempts}.`;
+      event.currentTarget.classList.add("shake");
+      setTimeout(() => event.currentTarget.classList.remove("shake"), 500);
+      render();
+      return;
+    }
+    const barber = backendAuth.ok ? backendAuth.barber : await findBarberAccount(user, password, currentBusinessId());
     if (!barber) {
       const failedAttempt = registerFailedAuthAttempt("barber", app.currentBusinessSlug, user);
       app.barberLoginError = failedAttempt.blockedUntil
