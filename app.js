@@ -1709,7 +1709,8 @@ const PRINCIPAL_ADMIN = {
   id: "admin_principal",
   name: "Administrador principal",
   user: "admin",
-  password: "admin123",
+  password: "",
+  passwordHash: "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
   role: "administrador_principal",
   businessId: DEFAULT_BUSINESS_ID,
   active: true,
@@ -2087,12 +2088,38 @@ async function findAdminAccount(user, password, businessId = null) {
   );
   if (!candidates.length) return null;
 
+  const normalizedUser = String(user || "").trim().toLowerCase();
   const passwordHash = await sha256(password);
-  return (
-    candidates.find((account) => account.passwordHash && account.passwordHash === passwordHash) ||
-    candidates.find((account) => account.password && account.password === password) ||
-    null
-  );
+  const hashedMatch =
+    candidates.find(
+      (account) =>
+        String(account.user || "").trim().toLowerCase() === normalizedUser &&
+        account.passwordHash &&
+        account.passwordHash === passwordHash
+    ) || null;
+  if (hashedMatch) return hashedMatch;
+
+  const legacyMatch =
+    candidates.find(
+      (account) =>
+        String(account.user || "").trim().toLowerCase() === normalizedUser &&
+        account.password &&
+        account.password === password
+    ) || null;
+  if (!legacyMatch) return null;
+
+  if (legacyMatch.id !== PRINCIPAL_ADMIN.id) {
+    legacyMatch.passwordHash = passwordHash;
+    legacyMatch.password = "";
+    saveAdminAccounts(loadAdminAccounts().map((account) => (account.id === legacyMatch.id ? legacyMatch : account)));
+    try {
+      await store.upsertAdminAccountRemote(legacyMatch);
+    } catch (error) {
+      console.warn("Legacy admin hash upgrade skipped", error);
+    }
+  }
+
+  return legacyMatch;
 }
 
 async function findBarberAccount(user, password, businessId = currentBusinessId()) {
@@ -2103,11 +2130,22 @@ async function findBarberAccount(user, password, businessId = currentBusinessId(
   if (!candidates.length) return null;
 
   const passwordHash = await sha256(password);
-  return (
-    candidates.find((barber) => barber.passwordHash && barber.passwordHash === passwordHash) ||
-    candidates.find((barber) => barber.password && barber.password === password) ||
-    null
-  );
+  const hashedMatch = candidates.find((barber) => barber.passwordHash && barber.passwordHash === passwordHash) || null;
+  if (hashedMatch) return hashedMatch;
+
+  const legacyMatch = candidates.find((barber) => barber.password && barber.password === password) || null;
+  if (!legacyMatch) return null;
+
+  legacyMatch.passwordHash = passwordHash;
+  legacyMatch.password = "";
+  store.saveBarber({
+    ...legacyMatch,
+    id: legacyMatch.id,
+    negocioId: legacyMatch.negocioId || businessId,
+    password: "",
+    passwordHash,
+  });
+  return legacyMatch;
 }
 
 function isPrincipalAdmin() {
