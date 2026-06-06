@@ -1699,6 +1699,12 @@ const BACKGROUND_MEDIA_BY_BUSINESS_KEY = "barber-delux-background-media-by-busin
 const MULTITENANT_SECONDARY_PURGE_KEY = "barber-delux-secondary-business-purge-v1";
 const SOUND_PREF_KEY = "barber-delux-sound-enabled";
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const SESSION_IDLE_TTL_MS = 45 * 60 * 1000;
+const SESSION_HEARTBEAT_MS = 60 * 1000;
+const AUTH_ATTEMPTS_KEY = "barber-delux-auth-attempts-v1";
+const AUTH_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_BLOCK_MS = 20 * 60 * 1000;
+const AUTH_MAX_ATTEMPTS = 5;
 const MAX_BACKGROUND_VIDEO_BYTES = 10 * 1024 * 1024;
 const MAX_ENV_ARCHIVE_BYTES = 25 * 1024 * 1024;
 const DEFAULT_BACKGROUND_VIDEO = {
@@ -1828,11 +1834,127 @@ function clearScopedBusinessSession(baseKey, businessSlug, legacyKey = baseKey) 
   }
 }
 
-function isSessionExpired(session) {
+function buildSessionFingerprint(role = "session", businessSlug = DEFAULT_BUSINESS_SLUG, businessId = "") {
+  const host = window.location?.host || "local";
+  const userAgent = window.navigator?.userAgent || "ua";
+  return [
+    String(role || "session").trim().toLowerCase(),
+    String(businessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase(),
+    String(businessId || "").trim().toLowerCase(),
+    host,
+    userAgent.slice(0, 160),
+  ].join("|");
+}
+
+function isSessionExpired(session, context = {}) {
   if (!session?.startedAt) return false;
   const startedAt = new Date(session.startedAt).getTime();
   if (!Number.isFinite(startedAt)) return false;
-  return Date.now() - startedAt > SESSION_TTL_MS;
+  if (Date.now() - startedAt > SESSION_TTL_MS) return true;
+  const lastSeenAt = new Date(session.lastSeenAt || session.startedAt).getTime();
+  if (Number.isFinite(lastSeenAt) && Date.now() - lastSeenAt > SESSION_IDLE_TTL_MS) return true;
+  const expectedFingerprint = buildSessionFingerprint(
+    context.role || session.role || "session",
+    context.businessSlug || session.businessSlug || DEFAULT_BUSINESS_SLUG,
+    context.businessId || session.businessId || ""
+  );
+  return Boolean(session.fingerprint && expectedFingerprint && session.fingerprint !== expectedFingerprint);
+}
+
+function refreshSessionHeartbeat(baseKey, businessSlug, session, context = {}, legacyKey = baseKey) {
+  if (!session) return null;
+  const nextSession = {
+    ...session,
+    lastSeenAt: new Date().toISOString(),
+    fingerprint: buildSessionFingerprint(
+      context.role || session.role || "session",
+      context.businessSlug || session.businessSlug || businessSlug || DEFAULT_BUSINESS_SLUG,
+      context.businessId || session.businessId || ""
+    ),
+  };
+  const previousHeartbeat = new Date(session.lastSeenAt || session.startedAt || 0).getTime();
+  if (
+    !Number.isFinite(previousHeartbeat) ||
+    Date.now() - previousHeartbeat > SESSION_HEARTBEAT_MS ||
+    nextSession.fingerprint !== session.fingerprint
+  ) {
+    if (baseKey === SUPER_ADMIN_SESSION_KEY) {
+      sessionStorage.setItem(baseKey, JSON.stringify(nextSession));
+    } else {
+      saveScopedBusinessSession(baseKey, businessSlug, nextSession, legacyKey);
+    }
+  }
+  return nextSession;
+}
+
+function loadAuthAttempts() {
+  return readStoredJSON(localStorage, AUTH_ATTEMPTS_KEY) || {};
+}
+
+function saveAuthAttempts(map) {
+  localStorage.setItem(AUTH_ATTEMPTS_KEY, JSON.stringify(map || {}));
+}
+
+function authAttemptIdentity(role = "session", businessSlug = DEFAULT_BUSINESS_SLUG, user = "") {
+  return [
+    String(role || "session").trim().toLowerCase(),
+    String(businessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase(),
+    String(user || "").trim().toLowerCase(),
+  ].join(":");
+}
+
+function readAuthAttemptState(role, businessSlug, user) {
+  const key = authAttemptIdentity(role, businessSlug, user);
+  const all = loadAuthAttempts();
+  const record = all[key] || { failures: [], blockedUntil: "" };
+  const now = Date.now();
+  const failures = (record.failures || []).filter((value) => Number.isFinite(value) && now - value <= AUTH_WINDOW_MS);
+  const blockedUntil = new Date(record.blockedUntil || 0).getTime();
+  if (failures.length !== (record.failures || []).length || (!Number.isFinite(blockedUntil) && record.blockedUntil)) {
+    all[key] = {
+      failures,
+      blockedUntil: Number.isFinite(blockedUntil) && blockedUntil > now ? new Date(blockedUntil).toISOString() : "",
+    };
+    saveAuthAttempts(all);
+  }
+  return {
+    key,
+    failures,
+    blockedUntil: Number.isFinite(blockedUntil) && blockedUntil > now ? blockedUntil : 0,
+  };
+}
+
+function remainingAuthBlockLabel(blockedUntil) {
+  const remainingMs = Math.max(0, blockedUntil - Date.now());
+  const totalMinutes = Math.ceil(remainingMs / 60000);
+  return totalMinutes <= 1 ? "1 minuto" : `${totalMinutes} minutos`;
+}
+
+function registerFailedAuthAttempt(role, businessSlug, user) {
+  const state = readAuthAttemptState(role, businessSlug, user);
+  const all = loadAuthAttempts();
+  const now = Date.now();
+  const failures = [...state.failures, now].filter((value) => now - value <= AUTH_WINDOW_MS);
+  const blockedUntil =
+    failures.length >= AUTH_MAX_ATTEMPTS ? new Date(now + AUTH_BLOCK_MS).toISOString() : "";
+  all[state.key] = { failures, blockedUntil };
+  saveAuthAttempts(all);
+  return {
+    remainingAttempts: Math.max(0, AUTH_MAX_ATTEMPTS - failures.length),
+    blockedUntil: blockedUntil ? new Date(blockedUntil).getTime() : 0,
+  };
+}
+
+function clearAuthAttemptState(role, businessSlug, user) {
+  const key = authAttemptIdentity(role, businessSlug, user);
+  const all = loadAuthAttempts();
+  if (!all[key]) return;
+  delete all[key];
+  saveAuthAttempts(all);
+}
+
+function authBlockMessage(roleLabel, blockedUntil) {
+  return `${roleLabel} bloqueado temporalmente. Intenta de nuevo en ${remainingAuthBlockLabel(blockedUntil)}.`;
 }
 
 function loadBusinessEnvironmentAttachments() {
@@ -3645,11 +3767,17 @@ function renderSuperAdmin() {
 }
 
 function renderSuperAdminV2() {
-  if (isSessionExpired(app.superAdminSession)) {
+  if (isSessionExpired(app.superAdminSession, { role: "super_admin", businessSlug: DEFAULT_BUSINESS_SLUG })) {
     app.superAdminSession = null;
     app.superAdminLoginError = "La sesion del super administrador expiro. Inicia sesion nuevamente.";
     sessionStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
   }
+  app.superAdminSession = refreshSessionHeartbeat(
+    SUPER_ADMIN_SESSION_KEY,
+    DEFAULT_BUSINESS_SLUG,
+    app.superAdminSession,
+    { role: "super_admin", businessSlug: DEFAULT_BUSINESS_SLUG }
+  );
 
   const businesses = [...store.state.businesses].sort((a, b) => a.name.localeCompare(b.name, "es"));
   const credentialReveal = app.superAdminCredentialReveal
@@ -3928,7 +4056,7 @@ function clientHistorySummary(record) {
 }
 
 function renderAdminV2() {
-  if (isSessionExpired(app.adminSession)) {
+  if (isSessionExpired(app.adminSession, { role: "admin", businessSlug: app.currentBusinessSlug, businessId: currentBusinessId() })) {
     app.adminSession = null;
     clearScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug);
     app.adminLoginError = "La sesion administrativa expiro. Inicia sesion nuevamente.";
@@ -3966,6 +4094,12 @@ function renderAdminV2() {
     app.adminLoginError = "Tu acceso administrativo ya no esta disponible en este negocio.";
     return renderAdminV2();
   }
+  app.adminSession = refreshSessionHeartbeat(
+    ADMIN_SESSION_KEY,
+    app.currentBusinessSlug,
+    app.adminSession,
+    { role: "admin", businessSlug: app.currentBusinessSlug, businessId: currentBusinessId() }
+  );
 
   const selected = barberById(app.adminBarberId);
   const businessBarbers = [...barbersForBusiness(currentBusinessId())].sort((a, b) => a.name.localeCompare(b.name, "es"));
@@ -4203,7 +4337,7 @@ function adminHoursView(barber) {
 }
 
 function renderBarberV2() {
-  if (isSessionExpired(app.barberSession)) {
+  if (isSessionExpired(app.barberSession, { role: "barber", businessSlug: app.currentBusinessSlug, businessId: currentBusinessId() })) {
     app.barberSession = null;
     app.barberLoginError = "La sesion del barbero expiro. Inicia sesion nuevamente.";
     clearScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
@@ -4228,6 +4362,12 @@ function renderBarberV2() {
     clearScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
     return renderBarber();
   }
+  app.barberSession = refreshSessionHeartbeat(
+    BARBER_SESSION_KEY,
+    app.currentBusinessSlug,
+    app.barberSession,
+    { role: "barber", businessSlug: app.currentBusinessSlug, businessId: currentBusinessId() }
+  );
   const rows = baseSlots.map((time) => ({ time, ...statusFor(barber.id, app.barberDate, time) }));
   const counterSummary = buildCounterSummary(app.barberDate);
   const hasOperationalRows = rows.some(({ status, dayBlocked, appointment }) => dayBlocked || status !== "available" || appointment);
@@ -4404,6 +4544,13 @@ function bindEvents() {
     const form = new FormData(event.currentTarget);
     const user = String(form.get("user") || "").trim();
     const password = String(form.get("password") || "");
+    const superAdminAttemptState = readAuthAttemptState("super_admin", DEFAULT_BUSINESS_SLUG, user);
+    if (superAdminAttemptState.blockedUntil) {
+      app.superAdminSession = null;
+      app.superAdminLoginError = authBlockMessage("Acceso de super administrador", superAdminAttemptState.blockedUntil);
+      render();
+      return;
+    }
     const hash = await sha256(password);
 
     if (user === SUPER_ADMIN_USER && hash === SUPER_ADMIN_PASSWORD_HASH) {
@@ -4411,15 +4558,22 @@ function bindEvents() {
         user: SUPER_ADMIN_USER,
         role: "super_admin",
         startedAt: new Date().toISOString(),
+        lastSeenAt: new Date().toISOString(),
+        businessSlug: DEFAULT_BUSINESS_SLUG,
+        fingerprint: buildSessionFingerprint("super_admin", DEFAULT_BUSINESS_SLUG, ""),
       };
       app.superAdminLoginError = "";
+      clearAuthAttemptState("super_admin", DEFAULT_BUSINESS_SLUG, user);
       sessionStorage.setItem(SUPER_ADMIN_SESSION_KEY, JSON.stringify(app.superAdminSession));
       render();
       return;
     }
 
     app.superAdminSession = null;
-    app.superAdminLoginError = "Credenciales invalidas";
+    const failedAttempt = registerFailedAuthAttempt("super_admin", DEFAULT_BUSINESS_SLUG, user);
+    app.superAdminLoginError = failedAttempt.blockedUntil
+      ? authBlockMessage("Acceso de super administrador", failedAttempt.blockedUntil)
+      : `Credenciales invalidas. Intentos restantes: ${failedAttempt.remainingAttempts}.`;
     sessionStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
     render();
   });
@@ -5005,6 +5159,22 @@ function bindEvents() {
     const form = new FormData(event.currentTarget);
     const user = String(form.get("user") || "").trim();
     const password = String(form.get("password") || "");
+    const business = currentBusiness();
+    if (!business?.active) {
+      app.adminSession = null;
+      app.adminLoginError = "Este negocio esta inactivo. No es posible iniciar sesion administrativa.";
+      clearScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug);
+      render();
+      return;
+    }
+    const adminAttemptState = readAuthAttemptState("admin", app.currentBusinessSlug, user);
+    if (adminAttemptState.blockedUntil) {
+      app.adminSession = null;
+      app.adminLoginError = authBlockMessage("Acceso administrativo", adminAttemptState.blockedUntil);
+      clearScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug);
+      render();
+      return;
+    }
     const account = await findAdminAccount(user, password, currentBusiness()?.id);
 
     if (account) {
@@ -5015,6 +5185,7 @@ function bindEvents() {
         role: account.role,
         businessId: currentBusinessId(),
         startedAt: new Date().toISOString(),
+        lastSeenAt: new Date().toISOString(),
       };
       app.adminLoginError = "";
       app.adminAccountMessage = "";
@@ -5025,13 +5196,18 @@ function bindEvents() {
       app.selectedDate = todayISO();
       app.adminSelectedSlots = [];
       app.adminSession.businessSlug = app.currentBusinessSlug;
+      app.adminSession.fingerprint = buildSessionFingerprint("admin", app.currentBusinessSlug, currentBusinessId());
+      clearAuthAttemptState("admin", app.currentBusinessSlug, user);
       saveScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug, app.adminSession);
       render();
       return;
     }
 
     app.adminSession = null;
-    app.adminLoginError = "Usuario o contrasena incorrectos";
+    const failedAttempt = registerFailedAuthAttempt("admin", app.currentBusinessSlug, user);
+    app.adminLoginError = failedAttempt.blockedUntil
+      ? authBlockMessage("Acceso administrativo", failedAttempt.blockedUntil)
+      : `Usuario o contrasena incorrectos. Intentos restantes: ${failedAttempt.remainingAttempts}.`;
     clearScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug);
     render();
   });
@@ -5625,9 +5801,29 @@ function bindEvents() {
   document.querySelector("#barber-login")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const barber = await findBarberAccount(form.get("user"), form.get("password"), currentBusinessId());
+    const user = String(form.get("user") || "").trim();
+    const business = currentBusiness();
+    if (!business?.active) {
+      app.barberSession = null;
+      app.barberLoginError = "Este negocio esta inactivo. No es posible iniciar sesion de barbero.";
+      clearScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
+      render();
+      return;
+    }
+    const barberAttemptState = readAuthAttemptState("barber", app.currentBusinessSlug, user);
+    if (barberAttemptState.blockedUntil) {
+      app.barberSession = null;
+      app.barberLoginError = authBlockMessage("Acceso de barbero", barberAttemptState.blockedUntil);
+      clearScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
+      render();
+      return;
+    }
+    const barber = await findBarberAccount(user, form.get("password"), currentBusinessId());
     if (!barber) {
-      app.barberLoginError = "Usuario o contrasena incorrectos para este negocio.";
+      const failedAttempt = registerFailedAuthAttempt("barber", app.currentBusinessSlug, user);
+      app.barberLoginError = failedAttempt.blockedUntil
+        ? authBlockMessage("Acceso de barbero", failedAttempt.blockedUntil)
+        : `Usuario o contrasena incorrectos para este negocio. Intentos restantes: ${failedAttempt.remainingAttempts}.`;
       event.currentTarget.classList.add("shake");
       setTimeout(() => event.currentTarget.classList.remove("shake"), 500);
       render();
@@ -5639,7 +5835,11 @@ function bindEvents() {
       businessId: currentBusinessId(),
       businessSlug: app.currentBusinessSlug,
       startedAt: new Date().toISOString(),
+      lastSeenAt: new Date().toISOString(),
+      role: "barber",
+      fingerprint: buildSessionFingerprint("barber", app.currentBusinessSlug, currentBusinessId()),
     };
+    clearAuthAttemptState("barber", app.currentBusinessSlug, user);
     app.barberDate = todayISO();
     app.barberScheduleView = "hours";
     saveScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug, app.barberSession);
