@@ -42,14 +42,14 @@ const avatarGradients = [
   "linear-gradient(145deg, #0b1519, #8ca2a7)",
 ];
 const BUSINESS_THEMES = {
-  gold_black: { label: "Dorado + Negro", primary: "#d4af37", secondary: "#111111" },
-  blue_black: { label: "Azul + Negro", primary: "#3f7cff", secondary: "#111111" },
-  red_black: { label: "Rojo + Negro", primary: "#d14b4b", secondary: "#111111" },
-  green_black: { label: "Verde + Negro", primary: "#2ea36f", secondary: "#111111" },
-  purple_black: { label: "Morado + Negro", primary: "#7b4bd1", secondary: "#111111" },
-  white_black: { label: "Blanco + Negro", primary: "#f4f7f6", secondary: "#111111" },
-  gray_black: { label: "Gris + Negro", primary: "#8f969b", secondary: "#111111" },
-  orange_black: { label: "Naranja + Negro", primary: "#e28a2d", secondary: "#111111" },
+  gold_black: { label: "Dorado + Negro", primary: "#d4af37", secondary: "#111111", background: "#050505", text: "#ffffff", button: "#f5d76e" },
+  blue_black: { label: "Azul + Negro", primary: "#3f7cff", secondary: "#111111", background: "#07111f", text: "#f4f8ff", button: "#70a5ff" },
+  red_black: { label: "Rojo + Negro", primary: "#d14b4b", secondary: "#111111", background: "#160809", text: "#fff5f5", button: "#ff7575" },
+  green_black: { label: "Verde + Negro", primary: "#2ea36f", secondary: "#111111", background: "#06140e", text: "#effff7", button: "#66d99f" },
+  purple_black: { label: "Morado + Negro", primary: "#7b4bd1", secondary: "#111111", background: "#10091c", text: "#fbf7ff", button: "#a77cff" },
+  white_black: { label: "Blanco + Negro", primary: "#f4f7f6", secondary: "#111111", background: "#060607", text: "#ffffff", button: "#ffffff" },
+  gray_black: { label: "Gris + Negro", primary: "#8f969b", secondary: "#111111", background: "#090b0c", text: "#f5f7f8", button: "#c5cbd0" },
+  orange_black: { label: "Naranja + Negro", primary: "#e28a2d", secondary: "#111111", background: "#170d04", text: "#fff8ef", button: "#ffad55" },
 };
 
 function uid(prefix = "id") {
@@ -190,6 +190,9 @@ function normalizeBusiness(record = {}) {
     theme,
     primaryColor: record.primaryColor || palette.primary,
     secondaryColor: record.secondaryColor || palette.secondary,
+    backgroundColor: record.backgroundColor || palette.background,
+    textColor: record.textColor || palette.text,
+    buttonColor: record.buttonColor || palette.button,
     updatedAt: record.updatedAt || todayISO(),
   };
 }
@@ -228,6 +231,57 @@ function mergeBusinessesById(...groups) {
       seen.set(normalized.id, normalized);
     });
   return [...seen.values()];
+}
+
+function paletteForTheme(themeKey = "gold_black") {
+  return BUSINESS_THEMES[themeKey] || BUSINESS_THEMES.gold_black;
+}
+
+function colorsForBusiness(business = currentBusiness()) {
+  const palette = paletteForTheme(business?.theme || "gold_black");
+  return {
+    primary: business?.primaryColor || palette.primary,
+    secondary: business?.secondaryColor || palette.secondary,
+    background: business?.backgroundColor || palette.background,
+    text: business?.textColor || palette.text,
+    button: business?.buttonColor || palette.button,
+  };
+}
+
+function businessThemePatch(themeKey = "gold_black") {
+  const palette = paletteForTheme(themeKey);
+  return {
+    theme: themeKey,
+    primaryColor: palette.primary,
+    secondaryColor: palette.secondary,
+    backgroundColor: palette.background,
+    textColor: palette.text,
+    buttonColor: palette.button,
+  };
+}
+
+function businessThemePatchFromMeta(themeColors = {}) {
+  if (!themeColors || typeof themeColors !== "object") return {};
+  return {
+    ...(themeColors.primary ? { primaryColor: themeColors.primary } : {}),
+    ...(themeColors.secondary ? { secondaryColor: themeColors.secondary } : {}),
+    ...(themeColors.background ? { backgroundColor: themeColors.background } : {}),
+    ...(themeColors.text ? { textColor: themeColors.text } : {}),
+    ...(themeColors.button ? { buttonColor: themeColors.button } : {}),
+  };
+}
+
+function applyBusinessSettingsThemeColors(businesses = [], settingsRows = []) {
+  const themeByBusiness = new Map(
+    (settingsRows || [])
+      .filter((row) => row?.business_id && row?.environment_archive_meta?.themeColors)
+      .map((row) => [row.business_id, businessThemePatchFromMeta(row.environment_archive_meta.themeColors)])
+  );
+  return (businesses || []).map((business) =>
+    themeByBusiness.has(business.id)
+      ? normalizeBusiness({ ...business, ...themeByBusiness.get(business.id) })
+      : business
+  );
 }
 
 function emptyBusinessSummary(business = {}) {
@@ -524,6 +578,9 @@ function mapRowToBusiness(row) {
     theme: row.theme || "gold_black",
     primaryColor: row.primary_color || "#d4af37",
     secondaryColor: row.secondary_color || "#111111",
+    backgroundColor: row.color_fondo || "",
+    textColor: row.color_texto || "",
+    buttonColor: row.color_boton || "",
     backgroundUrl: row.background_url || "",
     active: row.active !== false,
     createdAt: row.created_at || todayISO(),
@@ -913,7 +970,9 @@ class StudioStore {
           });
         }
 
-        this.syncBusinessSettingsToLocal((businessSettingsResult.data || []), null);
+        const businessSettingsRows = businessSettingsResult.data || [];
+        const themedBusinesses = applyBusinessSettingsThemeColors(mergedBusinesses, businessSettingsRows);
+        this.syncBusinessSettingsToLocal(businessSettingsRows, null);
         const nextState = {
           meta: {
             ...this.state.meta,
@@ -922,7 +981,7 @@ class StudioStore {
             selectedDate: this.state.meta.selectedDate || todayISO(),
             businessSummaryById,
           },
-          businesses: mergedBusinesses.length ? mergedBusinesses : defaultState().businesses,
+          businesses: themedBusinesses.length ? themedBusinesses : defaultState().businesses,
           barbers: [],
           appointments: [],
           blockedDays: [],
@@ -980,7 +1039,9 @@ class StudioStore {
 
       const servicesData = servicesResult.error ? [] : (servicesResult.data || []).map(mapRowToService);
       const barberServicesData = barberServicesResult.error ? [] : (barberServicesResult.data || []).map(mapRowToBarberService);
-      this.syncBusinessSettingsToLocal((businessSettingsResult.data || []), route.view === "super-admin" ? null : scopedBusinessId);
+      const scopedBusinessSettingsRows = businessSettingsResult.data || [];
+      const scopedThemedBusinesses = applyBusinessSettingsThemeColors(mergedBusinesses, scopedBusinessSettingsRows);
+      this.syncBusinessSettingsToLocal(scopedBusinessSettingsRows, route.view === "super-admin" ? null : scopedBusinessId);
 
       const currentWeek = getWeekKey();
       const nextState = {
@@ -991,7 +1052,7 @@ class StudioStore {
           selectedDate: this.state.meta.selectedDate || todayISO(),
           businessSummaryById: this.state.meta.businessSummaryById || {},
         },
-        businesses: mergedBusinesses.length ? mergedBusinesses : defaultState().businesses,
+        businesses: scopedThemedBusinesses.length ? scopedThemedBusinesses : defaultState().businesses,
         barbers: (barbersResult.data || []).map((row, index) => mapRowToBarber(row, index)),
         appointments: (appointmentsResult.data || [])
           .map(mapRowToAppointment)
@@ -1382,7 +1443,10 @@ class StudioStore {
       public_path: "/barberia/:slug",
       environment_archive_url: "",
       environment_archive_name: environmentAttachment?.fileName || "",
-      environment_archive_meta: environmentAttachment || { mode: "dynamic_base" },
+      environment_archive_meta: {
+        ...(environmentAttachment || { mode: "dynamic_base" }),
+        themeColors: colorsForBusiness(business),
+      },
       theme_override: business.theme || "",
       custom_domain: "",
       notes: environmentAttachment?.notes || "",
@@ -1422,6 +1486,7 @@ class StudioStore {
 
   syncBusinessSettingsToLocal(rows = [], scopedBusinessId = null) {
     const map = loadBackgroundMediaMap();
+    const businessesById = new Map(this.state.businesses.map((business) => [business.id, business]));
     const rowsByBusiness = new Map(
       (rows || []).map((row) => [row.business_id || DEFAULT_BUSINESS_ID, row])
     );
@@ -1435,6 +1500,12 @@ class StudioStore {
       } else {
         delete map[scopedBusinessId];
       }
+      if (meta?.themeColors && businessesById.has(scopedBusinessId)) {
+        businessesById.set(scopedBusinessId, normalizeBusiness({
+          ...businessesById.get(scopedBusinessId),
+          ...businessThemePatchFromMeta(meta.themeColors),
+        }));
+      }
     } else {
       this.state.businesses.forEach((business) => {
         const row = rowsByBusiness.get(business.id);
@@ -1445,10 +1516,34 @@ class StudioStore {
         } else if (business.id !== DEFAULT_BUSINESS_ID) {
           delete map[business.id];
         }
+        if (meta?.themeColors) {
+          businessesById.set(business.id, normalizeBusiness({
+            ...business,
+            ...businessThemePatchFromMeta(meta.themeColors),
+          }));
+        }
       });
     }
 
+    this.state.businesses = [...businessesById.values()];
     localStorage.setItem(BACKGROUND_MEDIA_BY_BUSINESS_KEY, JSON.stringify(map));
+  }
+
+  async uploadBusinessLogo(businessId, file) {
+    if (!this.supabase || !businessId || !file) return "";
+    const extension = archiveExtension(file.name) || "png";
+    const cleanExtension = ["png", "jpg", "jpeg", "webp"].includes(extension) ? extension : "png";
+    const filePath = `${businessId}/logo-${Date.now()}.${cleanExtension}`;
+    const { error } = await this.supabase.storage
+      .from("logos-negocios")
+      .upload(filePath, file, {
+        cacheControl: "3600",
+        upsert: true,
+        contentType: file.type || `image/${cleanExtension}`,
+      });
+    if (error) throw error;
+    const { data } = this.supabase.storage.from("logos-negocios").getPublicUrl(filePath);
+    return data?.publicUrl || "";
   }
 
   async upsertBusinessSettingsRemote(businessId, patch = {}) {
@@ -1853,6 +1948,7 @@ const ADMIN_SESSION_KEY = "barber-delux-admin-session";
 const BARBER_SESSION_KEY = "noxora-barber-session";
 const ADMIN_ACCOUNTS_KEY = "barber-delux-admin-accounts-v1";
 const BUSINESS_ENV_ATTACHMENTS_KEY = "barber-delux-business-env-attachments-v1";
+const VISUAL_NAV_STATE_KEY = "barber-delux-visual-nav-state-v1";
 const SUPER_ADMIN_VISIBLE_PASSWORDS_KEY = "barber-delux-super-admin-visible-passwords-v1";
 const SUPER_ADMIN_SESSION_KEY = "vision-barber-super-admin-session";
 const BACKGROUND_MEDIA_KEY = "barber-delux-background-media-v1";
@@ -1973,6 +2069,90 @@ function readStoredJSON(storage, key) {
 function businessScopedSessionKey(baseKey, businessSlug = DEFAULT_BUSINESS_SLUG) {
   const slug = String(businessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
   return `${baseKey}:${slug}`;
+}
+
+function visualRouteKey(view = app.view, businessSlug = app.currentBusinessSlug) {
+  return `${view || "public"}:${String(businessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase()}`;
+}
+
+function readVisualNavState() {
+  return readStoredJSON(sessionStorage, VISUAL_NAV_STATE_KEY) || {};
+}
+
+function writeVisualNavState(routeKey, state) {
+  const all = readVisualNavState();
+  all[routeKey] = {
+    ...(all[routeKey] || {}),
+    ...state,
+    updatedAt: new Date().toISOString(),
+  };
+  sessionStorage.setItem(VISUAL_NAV_STATE_KEY, JSON.stringify(all));
+}
+
+function stateFromCurrentUrl() {
+  const params = new URLSearchParams(location.search);
+  return {
+    superBusinessId: params.get("negocio") || "",
+    adminView: params.get("section") || "",
+    adminOpenPanel: params.get("panel") || "",
+    adminBarberId: params.get("barbero") || "",
+    barberScheduleView: params.get("vista") || "",
+    barberDate: params.get("fecha") || "",
+    publicStep: params.get("step") || "",
+  };
+}
+
+function applyVisualRouteState() {
+  const routeKey = visualRouteKey();
+  if (app.lastVisualRouteKey === routeKey) return;
+  app.lastVisualRouteKey = routeKey;
+  const saved = readVisualNavState()[routeKey] || {};
+  const fromUrl = stateFromCurrentUrl();
+  const state = { ...saved, ...Object.fromEntries(Object.entries(fromUrl).filter(([, value]) => value)) };
+
+  if (app.view === "super-admin" && state.superBusinessId) {
+    app.superAdminOpenBusinessId = state.superBusinessId;
+  }
+  if (app.view === "admin") {
+    if (state.adminView) app.adminView = state.adminView;
+    if (state.adminOpenPanel) app.adminOpenPanel = state.adminOpenPanel;
+    if (state.adminBarberId) app.adminBarberId = state.adminBarberId;
+  }
+  if (app.view === "barber") {
+    if (state.barberScheduleView) app.barberScheduleView = state.barberScheduleView;
+    if (state.barberDate) app.barberDate = state.barberDate;
+  }
+}
+
+function persistVisualRouteState() {
+  const routeKey = visualRouteKey();
+  const state = {
+    superBusinessId: app.superAdminOpenBusinessId || "",
+    adminView: app.adminView || "",
+    adminOpenPanel: app.adminOpenPanel || "",
+    adminBarberId: app.adminBarberId || "",
+    barberScheduleView: app.barberScheduleView || "",
+    barberDate: app.barberDate || "",
+    publicStep: app.selectedSlot ? "confirmacion" : app.publicDaySelected ? "hora" : app.selectedBarberId ? "fecha" : app.selectedServiceId ? "barbero" : "servicio",
+  };
+  writeVisualNavState(routeKey, state);
+
+  const params = new URLSearchParams();
+  if (app.view === "super-admin" && state.superBusinessId) params.set("negocio", state.superBusinessId);
+  if (app.view === "admin") {
+    if (state.adminView && state.adminView !== "home") params.set("section", state.adminView);
+    if (state.adminOpenPanel) params.set("panel", state.adminOpenPanel);
+    if (state.adminBarberId) params.set("barbero", state.adminBarberId);
+  }
+  if (app.view === "barber") {
+    if (state.barberScheduleView && state.barberScheduleView !== "hours") params.set("vista", state.barberScheduleView);
+    if (state.barberDate && state.barberDate !== todayISO()) params.set("fecha", state.barberDate);
+  }
+  if (app.view === "public" && state.publicStep && state.publicStep !== "servicio") params.set("step", state.publicStep);
+  const nextUrl = `${location.pathname}${params.toString() ? `?${params}` : ""}`;
+  if (`${location.pathname}${location.search}` !== nextUrl) {
+    history.replaceState(null, "", nextUrl);
+  }
 }
 
 function loadScopedBusinessSession(baseKey, businessSlug, legacyKey = baseKey) {
@@ -2573,6 +2753,7 @@ const app = {
   superAdminMessage: "",
   superAdminCredentialReveal: null,
   superAdminPendingLogos: {},
+  superAdminPendingLogoFiles: {},
   superAdminPendingEnvironmentArchives: {},
   superAdminOpenBusinessId: "",
   adminLoginError: "",
@@ -2589,6 +2770,7 @@ const app = {
   barberSession: loadScopedBusinessSession(BARBER_SESSION_KEY, initialRoute.businessSlug),
   barberLoginError: "",
   lastEvent: "",
+  lastVisualRouteKey: "",
 };
 
 function barberById(id, businessId = currentBusinessId()) {
@@ -2781,9 +2963,9 @@ function renderLayoutShell() {
     ["barber", "Barbero"],
   ];
   return `
-    <header class="topbar">
+    <header class="topbar" style="${businessThemeStyle(business)}">
       <button class="brand" data-view="public" aria-label="Ir a agenda publica">
-        <span class="brand-mark"></span>
+        ${businessLogoMarkup(business)}
         <span><strong>${escapeHTML(business?.name || "Vision")}</strong><small>${escapeHTML(business?.slug || "Barber")}</small></span>
       </button>
       <nav class="nav-tabs" aria-label="Navegacion principal">
@@ -2795,6 +2977,55 @@ function renderLayoutShell() {
       <span></span>
       <strong></strong>
     </div>
+  `;
+}
+
+function businessThemeStyle(business = currentBusiness()) {
+  const colors = colorsForBusiness(business);
+  return [
+    `--petrol:${colors.primary}`,
+    `--petrol-bright:${colors.button}`,
+    `--black:${colors.background}`,
+    `--matte:${colors.secondary}`,
+    `--graphite:${colors.secondary}`,
+    `--white:${colors.text}`,
+    `--silver:${colors.text}`,
+    `--line:${colors.primary}59`,
+    `--line-strong:${colors.button}82`,
+    `--glass:${colors.secondary}c7`,
+    `--glass-soft:${colors.primary}12`,
+  ].join(";");
+}
+
+function businessLogoMarkup(business = currentBusiness()) {
+  return business?.logoUrl
+    ? `<span class="brand-mark business-logo-mark" style="background-image:url('${escapeHTML(business.logoUrl)}')"></span>`
+    : `<span class="brand-mark business-logo-mark empty-logo">${escapeHTML((business?.name || "B").slice(0, 1).toUpperCase())}</span>`;
+}
+
+function refreshPersistentShellBrand() {
+  if (app.view === "super-admin") return;
+  const business = currentBusiness();
+  const colors = colorsForBusiness(business);
+  const rootStyle = document.documentElement.style;
+  rootStyle.setProperty("--petrol", colors.primary);
+  rootStyle.setProperty("--petrol-bright", colors.button);
+  rootStyle.setProperty("--black", colors.background);
+  rootStyle.setProperty("--matte", colors.secondary);
+  rootStyle.setProperty("--graphite", colors.secondary);
+  rootStyle.setProperty("--white", colors.text);
+  rootStyle.setProperty("--silver", colors.text);
+  rootStyle.setProperty("--line", `${colors.primary}59`);
+  rootStyle.setProperty("--line-strong", `${colors.button}82`);
+  rootStyle.setProperty("--glass", `${colors.secondary}c7`);
+  rootStyle.setProperty("--glass-soft", `${colors.primary}12`);
+  const topbar = document.querySelector(".topbar");
+  const brand = document.querySelector(".brand");
+  if (topbar) topbar.setAttribute("style", businessThemeStyle(business));
+  if (!brand) return;
+  brand.innerHTML = `
+    ${businessLogoMarkup(business)}
+    <span><strong>${escapeHTML(business?.name || "Barberia")}</strong><small>${escapeHTML(business?.slug || "entorno")}</small></span>
   `;
 }
 
@@ -4692,6 +4923,7 @@ function render() {
   if (app.view === "barber" && (!app.barberSession || app.barberSession.businessSlug !== app.currentBusinessSlug)) {
     app.barberSession = loadScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
   }
+  applyVisualRouteState();
   store.subscribeRemote();
   const views = {
     public: renderPublic,
@@ -4710,6 +4942,7 @@ function render() {
     bindChromeEvents();
     root.dataset.chromeBound = "true";
   }
+  refreshPersistentShellBrand();
   document.querySelectorAll(".nav-tabs [data-view]").forEach((button) => {
     button.classList.toggle("active", button.dataset.view === app.view);
   });
@@ -4734,6 +4967,7 @@ function render() {
       </section>
     `);
   }
+  persistVisualRouteState();
   bindEvents();
   document.querySelector("#booking-confirm-dialog")?.showModal();
   requestAnimationFrame(fitPanelTitles);
@@ -4842,7 +5076,9 @@ function bindEvents() {
     input.addEventListener("change", async (event) => {
       const file = event.currentTarget.files?.[0];
       if (!file) return;
-      if (!/^image\/(png|jpeg|jpg|webp)$/i.test(file.type)) {
+      const extension = archiveExtension(file.name);
+      const validLogoType = /^image\/(png|jpeg|jpg|webp)$/i.test(file.type || "") || ["png", "jpg", "jpeg", "webp"].includes(extension);
+      if (!validLogoType) {
         app.superAdminMessage = "Formato de logo no permitido.";
         render();
         return;
@@ -4854,9 +5090,14 @@ function bindEvents() {
         reader.readAsDataURL(file);
       }).catch(() => "");
       if (!src) return;
+      const targetKey = event.currentTarget.dataset.businessLogoInput || "create";
       app.superAdminPendingLogos = {
         ...app.superAdminPendingLogos,
-        [event.currentTarget.dataset.businessLogoInput]: src,
+        [targetKey]: src,
+      };
+      app.superAdminPendingLogoFiles = {
+        ...app.superAdminPendingLogoFiles,
+        [targetKey]: file,
       };
       render();
     });
@@ -4914,17 +5155,30 @@ function bindEvents() {
     }
 
     const theme = String(form.get("theme") || "gold_black");
-    const palette = BUSINESS_THEMES[theme] || BUSINESS_THEMES.gold_black;
+    const themePatch = businessThemePatch(theme);
     const environmentAttachment = app.superAdminPendingEnvironmentArchives.create || null;
-    const business = store.saveBusiness({
+    let business = store.saveBusiness({
       name,
       slug,
-      logoUrl: app.superAdminPendingLogos.create || "",
-      theme,
-      primaryColor: palette.primary,
-      secondaryColor: palette.secondary,
+      logoUrl: "",
+      ...themePatch,
       active: form.get("active") === "on",
     });
+    const logoFile = app.superAdminPendingLogoFiles.create || null;
+    if (logoFile) {
+      try {
+        const logoUrl = await store.uploadBusinessLogo(business.id, logoFile);
+        if (logoUrl) {
+          business = store.saveBusiness({ ...business, logoUrl });
+        }
+      } catch (error) {
+        store.deleteBusiness(business.id);
+        app.superAdminMessage = "No fue posible subir el logo. Verifica el bucket logos-negocios en Supabase Storage.";
+        console.error("Business logo upload failed", error);
+        render();
+        return;
+      }
+    }
     seedBusinessFromTemplate(business);
 
     const environmentAttachments = loadBusinessEnvironmentAttachments();
@@ -5007,6 +5261,7 @@ function bindEvents() {
       password: generatedPassword,
     };
     app.superAdminPendingLogos = { ...app.superAdminPendingLogos, create: "" };
+    app.superAdminPendingLogoFiles = { ...app.superAdminPendingLogoFiles, create: null };
     app.superAdminPendingEnvironmentArchives = {
       ...app.superAdminPendingEnvironmentArchives,
       create: null,
@@ -5019,7 +5274,7 @@ function bindEvents() {
   });
 
   document.querySelectorAll(".super-business-edit").forEach((formEl) => {
-    formEl.addEventListener("submit", (event) => {
+    formEl.addEventListener("submit", async (event) => {
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       const businessId = event.currentTarget.dataset.businessId;
@@ -5027,23 +5282,42 @@ function bindEvents() {
       if (!current) return;
       const slug = uniqueBusinessSlug(form.get("slug") || current.slug, current.id);
       const theme = String(form.get("theme") || current.theme || "gold_black");
-      const palette = BUSINESS_THEMES[theme] || BUSINESS_THEMES.gold_black;
+      const themePatch = businessThemePatch(theme);
+      let logoUrl = current.logoUrl;
+      const logoFile = app.superAdminPendingLogoFiles[current.id] || null;
+      if (logoFile) {
+        try {
+          logoUrl = await store.uploadBusinessLogo(current.id, logoFile);
+        } catch (error) {
+          app.superAdminMessage = "No fue posible subir el logo. Verifica el bucket logos-negocios en Supabase Storage.";
+          console.error("Business logo upload failed", error);
+          render();
+          return;
+        }
+      }
       const updated = store.saveBusiness({
         id: current.id,
         name: String(form.get("name") || "").trim(),
         slug,
-        logoUrl: app.superAdminPendingLogos[current.id] || current.logoUrl,
-        theme,
-        primaryColor: palette.primary,
-        secondaryColor: palette.secondary,
+        logoUrl,
+        ...themePatch,
         active: form.get("active") === "on",
       });
+      try {
+        await store.upsertBusinessSettingsRemote(updated.id, {
+          theme_override: updated.theme,
+          environment_archive_meta: { themeColors: colorsForBusiness(updated) },
+        });
+      } catch (error) {
+        console.warn("Business theme settings sync skipped", error);
+      }
       saveAdminAccounts(
         loadAdminAccounts().map((account) =>
           account.businessId === updated.id ? { ...account, businessSlug: updated.slug } : account
         )
       );
       app.superAdminPendingLogos = { ...app.superAdminPendingLogos, [current.id]: "" };
+      app.superAdminPendingLogoFiles = { ...app.superAdminPendingLogoFiles, [current.id]: null };
       app.superAdminMessage = `Negocio actualizado: ${updated.name}`;
       render();
     });
