@@ -1546,6 +1546,16 @@ class StudioStore {
     return data?.publicUrl || "";
   }
 
+  async updateBusinessLogoRemote(businessId, logoUrl) {
+    if (!this.supabase || !businessId || !logoUrl) return true;
+    const { error } = await this.supabase
+      .from("businesses")
+      .update({ logo_url: logoUrl, updated_at: todayISO() })
+      .eq("id", businessId);
+    if (error) throw error;
+    return true;
+  }
+
   async upsertBusinessSettingsRemote(businessId, patch = {}) {
     if (!this.supabase || !businessId) return true;
 
@@ -5076,6 +5086,7 @@ function bindEvents() {
     input.addEventListener("change", async (event) => {
       const file = event.currentTarget.files?.[0];
       if (!file) return;
+      const targetKey = event.currentTarget.dataset.businessLogoInput || "create";
       const extension = archiveExtension(file.name);
       const validLogoType = /^image\/(png|jpeg|jpg|webp)$/i.test(file.type || "") || ["png", "jpg", "jpeg", "webp"].includes(extension);
       if (!validLogoType) {
@@ -5090,7 +5101,6 @@ function bindEvents() {
         reader.readAsDataURL(file);
       }).catch(() => "");
       if (!src) return;
-      const targetKey = event.currentTarget.dataset.businessLogoInput || "create";
       app.superAdminPendingLogos = {
         ...app.superAdminPendingLogos,
         [targetKey]: src,
@@ -5099,6 +5109,30 @@ function bindEvents() {
         ...app.superAdminPendingLogoFiles,
         [targetKey]: file,
       };
+      app.superAdminOpenBusinessId = targetKey !== "create" ? targetKey : app.superAdminOpenBusinessId;
+      if (targetKey !== "create") {
+        const business = store.businessById(targetKey);
+        if (business) {
+          app.superAdminMessage = `Subiendo logo de ${business.name}...`;
+          render();
+          try {
+            const logoUrl = await store.uploadBusinessLogo(business.id, file);
+            if (!logoUrl) {
+              throw new Error("Supabase Storage no devolvio URL publica para el logo.");
+            }
+            store.saveBusiness({ ...business, logoUrl });
+            await store.updateBusinessLogoRemote(business.id, logoUrl);
+            app.superAdminPendingLogos = { ...app.superAdminPendingLogos, [targetKey]: "" };
+            app.superAdminPendingLogoFiles = { ...app.superAdminPendingLogoFiles, [targetKey]: null };
+            app.superAdminMessage = `Logo actualizado para ${business.name}.`;
+          } catch (error) {
+            app.superAdminMessage = "No fue posible subir el logo. Verifica el bucket logos-negocios y sus politicas en Supabase Storage.";
+            console.error("Business logo upload failed", error);
+          }
+          render();
+          return;
+        }
+      }
       render();
     });
   });
@@ -5170,6 +5204,7 @@ function bindEvents() {
         const logoUrl = await store.uploadBusinessLogo(business.id, logoFile);
         if (logoUrl) {
           business = store.saveBusiness({ ...business, logoUrl });
+          await store.updateBusinessLogoRemote(business.id, logoUrl);
         }
       } catch (error) {
         store.deleteBusiness(business.id);
@@ -5288,6 +5323,10 @@ function bindEvents() {
       if (logoFile) {
         try {
           logoUrl = await store.uploadBusinessLogo(current.id, logoFile);
+          if (!logoUrl) {
+            throw new Error("Supabase Storage no devolvio URL publica para el logo.");
+          }
+          await store.updateBusinessLogoRemote(current.id, logoUrl);
         } catch (error) {
           app.superAdminMessage = "No fue posible subir el logo. Verifica el bucket logos-negocios en Supabase Storage.";
           console.error("Business logo upload failed", error);
