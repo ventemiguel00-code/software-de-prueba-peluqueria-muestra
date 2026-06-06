@@ -2449,6 +2449,45 @@ async function findBarberAccount(user, password, businessId = currentBusinessId(
   return legacyMatch;
 }
 
+async function resolveLoginBarber(backendBarber, user, password, businessId = currentBusinessId()) {
+  const localByBackendId = backendBarber?.id ? barberById(backendBarber.id, businessId) : null;
+  if (localByBackendId) return localByBackendId;
+
+  const localByPassword = await findBarberAccount(user, password, businessId);
+  if (localByPassword) return localByPassword;
+
+  if (backendBarber?.id && store?.supabase) {
+    try {
+      await store.syncFromRemote({ quiet: true });
+      const refreshed = barberById(backendBarber.id, businessId);
+      if (refreshed) return refreshed;
+    } catch (error) {
+      console.warn("Barber login refresh skipped", error);
+    }
+  }
+
+  if (!backendBarber?.id) return null;
+  const fallbackBarber = {
+    id: backendBarber.id,
+    negocioId: businessId,
+    name: backendBarber.name || user || "Barbero",
+    user: backendBarber.user || user,
+    password: "",
+    passwordHash: "",
+    whatsapp: "",
+    active: true,
+    photo: "",
+    gradient: avatarGradients[0],
+    specialty: "Servicio premium",
+  };
+  store.state.barbers = [
+    ...store.state.barbers.filter((barber) => !(barber.id === fallbackBarber.id && barber.negocioId === businessId)),
+    fallbackBarber,
+  ];
+  localStorage.setItem(APP_KEY, JSON.stringify(store.state));
+  return fallbackBarber;
+}
+
 function isPrincipalAdmin() {
   return app.adminSession?.role === PRINCIPAL_ADMIN.role;
 }
@@ -3535,6 +3574,12 @@ function renderBarber() {
   }
 
   const barber = barberById(app.barberSession.id);
+  if (!barber) {
+    app.barberSession = null;
+    app.barberLoginError = "Tu acceso de barbero no esta cargado en este negocio. Intenta iniciar sesion nuevamente.";
+    clearScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
+    return renderBarber();
+  }
   const date = todayISO();
   const rows = baseSlots.map((time) => ({ time, ...statusFor(barber.id, date, time) }));
   return appShell(`
@@ -5997,7 +6042,9 @@ function bindEvents() {
     }
     const password = String(form.get("password") || "");
     const backendAuth = await authenticateViaBackend("barber", user, password, app.currentBusinessSlug);
-    const barber = backendAuth.ok ? backendAuth.barber : await findBarberAccount(user, password, currentBusinessId());
+    const barber = backendAuth.ok
+      ? await resolveLoginBarber(backendAuth.barber, user, password, currentBusinessId())
+      : await findBarberAccount(user, password, currentBusinessId());
     if (!barber) {
       app.barberLoginError = "Usuario o contrasena incorrectos para este negocio.";
       event.currentTarget.classList.add("shake");
