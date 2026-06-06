@@ -207,6 +207,7 @@ function normalizeTenantState(state = {}) {
       selectedDate: todayISO(),
       ...state.meta,
       currentBusinessId,
+      businessSummaryById: state.meta?.businessSummaryById || {},
     },
     businesses,
     barbers: (state.barbers || []).map(attachBusiness),
@@ -217,8 +218,93 @@ function normalizeTenantState(state = {}) {
   };
 }
 
+function mergeBusinessesById(...groups) {
+  const seen = new Map();
+  groups
+    .flat()
+    .filter(Boolean)
+    .forEach((business) => {
+      const normalized = normalizeBusiness(business);
+      seen.set(normalized.id, normalized);
+    });
+  return [...seen.values()];
+}
+
+function emptyBusinessSummary(business = {}) {
+  return {
+    businessId: business.id || "",
+    businessName: business.name || "Barberia",
+    slug: business.slug || "",
+    active: business.active !== false,
+    totalBarbers: 0,
+    totalServices: 0,
+    reservationsToday: 0,
+  };
+}
+
+function buildBusinessSummaryMap(businesses = [], collections = {}) {
+  const summaryMap = Object.fromEntries(
+    businesses.map((business) => [business.id, emptyBusinessSummary(business)])
+  );
+
+  (collections.barbers || []).forEach((barber) => {
+    const businessId = barber.negocioId || barber.businessId;
+    if (!businessId || !summaryMap[businessId]) return;
+    summaryMap[businessId].totalBarbers += 1;
+  });
+
+  (collections.services || []).forEach((service) => {
+    const businessId = service.negocioId || service.businessId;
+    if (!businessId || !summaryMap[businessId]) return;
+    summaryMap[businessId].totalServices += 1;
+  });
+
+  (collections.appointments || []).forEach((appointment) => {
+    const businessId = appointment.negocioId || appointment.businessId;
+    if (!businessId || !summaryMap[businessId]) return;
+    if (appointment.date === todayISO() && COUNTABLE_STATUSES.has(appointment.status)) {
+      summaryMap[businessId].reservationsToday += 1;
+    }
+  });
+
+  return summaryMap;
+}
+
+function buildBusinessSummaryMapFromRpcRows(businesses = [], rows = []) {
+  const summaryMap = Object.fromEntries(
+    businesses.map((business) => [business.id, emptyBusinessSummary(business)])
+  );
+  (rows || []).forEach((row) => {
+    const businessId = row.business_id || row.negocio_id || row.id || "";
+    if (!businessId) return;
+    const business = businesses.find((item) => item.id === businessId) || {
+      id: businessId,
+      name: row.business_name || row.nombre_negocio || "Barberia",
+      slug: row.slug || "",
+      active: row.active !== false,
+    };
+    summaryMap[businessId] = {
+      ...emptyBusinessSummary(business),
+      businessId,
+      businessName: row.business_name || row.nombre_negocio || business.name || "Barberia",
+      slug: row.slug || business.slug || "",
+      active: row.active !== false && business.active !== false,
+      totalBarbers: Number(row.total_barbers ?? row.total_barberos ?? 0) || 0,
+      totalServices: Number(row.total_services ?? row.total_servicios ?? 0) || 0,
+      reservationsToday: Number(row.reservations_today ?? row.reservas_hoy ?? 0) || 0,
+    };
+  });
+  return summaryMap;
+}
+
 const defaultState = () => ({
-  meta: { dayKey: todayISO(), weekKey: getWeekKey(), selectedDate: todayISO(), currentBusinessId: DEFAULT_BUSINESS_ID },
+  meta: {
+    dayKey: todayISO(),
+    weekKey: getWeekKey(),
+    selectedDate: todayISO(),
+    currentBusinessId: DEFAULT_BUSINESS_ID,
+    businessSummaryById: {},
+  },
   businesses: [defaultBusiness()],
   barbers: [
     {
@@ -755,24 +841,34 @@ class StudioStore {
     try {
       const localState = this.loadLocalState();
       const route = resolveRoute(location.pathname);
-      const businessesResult = await this.supabase.from("businesses").select("*").order("created_at", { ascending: true });
+      const businessesQuery =
+        route.view === "super-admin"
+          ? this.supabase.from("businesses").select("*").order("created_at", { ascending: true })
+          : this.supabase.from("businesses").select("*").eq("slug", route.businessSlug).limit(1);
+      const businessesResult = await businessesQuery;
       if (businessesResult.error) throw businessesResult.error;
       const remoteBusinesses = (businessesResult.data || []).map(mapRowToBusiness);
-      const missingBusinesses = (localState.businesses || []).filter(
-        (business) => !remoteBusinesses.some((remoteBusiness) => remoteBusiness.id === business.id)
-      );
-      if (missingBusinesses.length) {
+      const missingBusinesses =
+        route.view === "super-admin"
+          ? (localState.businesses || []).filter(
+              (business) => !remoteBusinesses.some((remoteBusiness) => remoteBusiness.id === business.id)
+            )
+          : [];
+      if (route.view === "super-admin" && missingBusinesses.length) {
         const { error } = await this.supabase
           .from("businesses")
           .upsert(missingBusinesses.map(mapBusinessToRow), { onConflict: "id" });
         if (error) throw error;
       }
+      const mergedBusinesses =
+        route.view === "super-admin"
+          ? mergeBusinessesById(remoteBusinesses, missingBusinesses)
+          : mergeBusinessesById(this.state.businesses || [], localState.businesses || [], remoteBusinesses);
 
       const scopedBusiness =
         route.view === "super-admin"
           ? null
-          : remoteBusinesses.find((business) => business.slug === route.businessSlug) ||
-            missingBusinesses.find((business) => business.slug === route.businessSlug) ||
+          : mergedBusinesses.find((business) => business.slug === route.businessSlug) ||
             null;
       const scopedBusinessId =
         route.view === "super-admin"
@@ -780,6 +876,73 @@ class StudioStore {
           : route.businessSlug === DEFAULT_BUSINESS_SLUG
             ? DEFAULT_BUSINESS_ID
             : scopedBusiness?.id || null;
+
+      if (route.view === "super-admin") {
+        const [businessSettingsResult, summaryRpcResult] = await Promise.all([
+          this.supabase.from("business_settings").select("*").order("created_at", { ascending: true }),
+          this.supabase.rpc("business_dashboard_summary", { target_date: todayISO() }),
+        ]);
+
+        if (businessSettingsResult.error && businessSettingsResult.error.code !== "42P01") {
+          throw businessSettingsResult.error;
+        }
+
+        let businessSummaryById = {};
+        if (!summaryRpcResult.error && Array.isArray(summaryRpcResult.data)) {
+          businessSummaryById = buildBusinessSummaryMapFromRpcRows(mergedBusinesses, summaryRpcResult.data || []);
+        } else {
+          const [barbersSummaryResult, servicesSummaryResult, appointmentsSummaryResult] = await Promise.all([
+            this.supabase.from("barbers").select("id,business_id"),
+            this.supabase.from("services").select("id,business_id"),
+            this.supabase
+              .from("appointments")
+              .select("id,business_id,date,status")
+              .eq("date", todayISO()),
+          ]);
+          if (barbersSummaryResult.error) throw barbersSummaryResult.error;
+          if (servicesSummaryResult.error && servicesSummaryResult.error.code !== "42P01") throw servicesSummaryResult.error;
+          if (appointmentsSummaryResult.error) throw appointmentsSummaryResult.error;
+          businessSummaryById = buildBusinessSummaryMap(mergedBusinesses, {
+            barbers: (barbersSummaryResult.data || []).map((row) => ({ negocioId: row.business_id })),
+            services: (servicesSummaryResult.data || []).map((row) => ({ negocioId: row.business_id })),
+            appointments: (appointmentsSummaryResult.data || []).map((row) => ({
+              negocioId: row.business_id,
+              date: row.date,
+              status: row.status,
+            })),
+          });
+        }
+
+        this.syncBusinessSettingsToLocal((businessSettingsResult.data || []), null);
+        const nextState = {
+          meta: {
+            ...this.state.meta,
+            dayKey: todayISO(),
+            weekKey: getWeekKey(),
+            selectedDate: this.state.meta.selectedDate || todayISO(),
+            businessSummaryById,
+          },
+          businesses: mergedBusinesses.length ? mergedBusinesses : defaultState().businesses,
+          barbers: [],
+          appointments: [],
+          blockedDays: [],
+          services: [],
+          barberServices: [],
+        };
+
+        await this.syncAdminAccountsFromRemote(null, nextState.businesses);
+
+        this.applyingRemote = true;
+        this.state = nextState;
+        localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+        this.remoteReady = true;
+
+        if (!quiet) {
+          this.emit({ type: "SYNC", table: "remote" });
+          this.channel?.postMessage({ type: "SYNC", table: "remote" });
+        }
+        return;
+      }
 
       const queryScoped = (table, orderColumn, ascending = true) => {
         if (route.view !== "super-admin" && !scopedBusinessId) {
@@ -826,11 +989,9 @@ class StudioStore {
           dayKey: todayISO(),
           weekKey: currentWeek,
           selectedDate: this.state.meta.selectedDate || todayISO(),
+          businessSummaryById: this.state.meta.businessSummaryById || {},
         },
-        businesses:
-          remoteBusinesses.length || missingBusinesses.length
-            ? [...remoteBusinesses, ...missingBusinesses.filter((business) => !remoteBusinesses.some((remoteBusiness) => remoteBusiness.id === business.id))]
-            : defaultState().businesses,
+        businesses: mergedBusinesses.length ? mergedBusinesses : defaultState().businesses,
         barbers: (barbersResult.data || []).map((row, index) => mapRowToBarber(row, index)),
         appointments: (appointmentsResult.data || [])
           .map(mapRowToAppointment)
@@ -2385,11 +2546,25 @@ function appointmentById(id, businessId = currentBusinessId()) {
   );
 }
 
+function businessSummaryById(businessId) {
+  return store.state.meta?.businessSummaryById?.[businessId] || null;
+}
+
 function businessBarberCount(businessId) {
+  const summary = businessSummaryById(businessId);
+  if (summary) return summary.totalBarbers || 0;
   return store.state.barbers.filter((barber) => barber.negocioId === businessId).length;
 }
 
+function businessServiceCount(businessId) {
+  const summary = businessSummaryById(businessId);
+  if (summary) return summary.totalServices || 0;
+  return store.state.services.filter((service) => service.negocioId === businessId).length;
+}
+
 function businessTodayReservationCount(businessId) {
+  const summary = businessSummaryById(businessId);
+  if (summary) return summary.reservationsToday || 0;
   const today = todayISO();
   return store.state.appointments.filter(
     (appointment) =>
@@ -3798,6 +3973,7 @@ function renderSuperAdminV2() {
       const urls = businessUrlSet(business);
       const isOpen = app.superAdminOpenBusinessId === business.id;
       const barberCount = businessBarberCount(business.id);
+      const serviceCount = businessServiceCount(business.id);
       const reservationCount = businessTodayReservationCount(business.id);
       const environmentAttachment = businessEnvironmentAttachment(business.id);
       const admins = loadAdminAccounts().filter(
@@ -3845,6 +4021,7 @@ function renderSuperAdminV2() {
           </div>
           <div class="super-business-summary__stats">
             <span><strong>${barberCount}</strong> barberos</span>
+            <span><strong>${serviceCount}</strong> servicios</span>
             <span><strong>${reservationCount}</strong> reservas hoy</span>
             <span><strong>${environmentAttachment?.mode === "attached_archive" ? "ZIP/RAR" : "Base"}</strong> entorno</span>
           </div>
