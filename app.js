@@ -453,12 +453,13 @@ function createSupabaseClient() {
 }
 
 function mapBarberToRow(barber) {
+  const useLegacyPassword = !barber.passwordHash && barber.password;
   return {
     id: barber.id,
     business_id: barber.negocioId || DEFAULT_BUSINESS_ID,
     name: barber.name,
     user: barber.user,
-    password: barber.password,
+    password: useLegacyPassword ? barber.password : "",
     password_hash: barber.passwordHash || "",
     whatsapp: barber.whatsapp || "",
     active: Boolean(barber.active),
@@ -5315,7 +5316,7 @@ function bindEvents() {
       id: payload.id || undefined,
       name: payload.name,
       user: payload.user,
-      password: payload.password || selected?.password || "",
+      password: payload.password ? "" : selected?.password || "",
       passwordHash,
       whatsapp: payload.whatsapp,
       specialty: payload.specialty,
