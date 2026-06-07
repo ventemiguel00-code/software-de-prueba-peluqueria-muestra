@@ -437,3 +437,164 @@ body[data-device="mobile"] .super-admin-loading-grid {
 body[data-device="mobile"] .business-component-skeleton span {
   min-height: 78px;
 }
+
+/* Estabilizacion SaaS: menos saltos visuales y mobile realmente usable. */
+#app,
+#view-root {
+  min-height: 100dvh;
+}
+
+#view-root {
+  overflow-anchor: none;
+  contain: inline-size;
+}
+
+.booking-surface,
+.admin-main,
+.barber-board,
+.super-admin-shell,
+.super-business-card,
+.admin-account-card {
+  backface-visibility: hidden;
+}
+
+body[data-device="mobile"] {
+  overflow-x: hidden;
+}
+
+body[data-device="mobile"] .workspace,
+body[data-device="mobile"] main,
+body[data-device="mobile"] .admin-layout,
+body[data-device="mobile"] .barber-board,
+body[data-device="mobile"] .super-admin-shell {
+  max-width: 100%;
+  min-width: 0;
+}
+
+body[data-device="mobile"] .week-cards,
+body[data-device="mobile"] .date-strip {
+  display: grid !important;
+  grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+  grid-auto-flow: row !important;
+  grid-auto-columns: initial !important;
+  gap: 6px !important;
+  overflow-x: visible !important;
+  padding-bottom: 0 !important;
+  scroll-snap-type: none !important;
+}
+
+body[data-device="mobile"] .week-cards button,
+body[data-device="mobile"] .date-strip button {
+  min-width: 0 !important;
+  min-height: 58px !important;
+  padding: 8px 3px !important;
+  border-radius: 14px !important;
+  line-height: 1.08 !important;
+}
+
+body[data-device="mobile"] .week-cards span,
+body[data-device="mobile"] .date-strip span {
+  font-size: clamp(9px, 2.8vw, 11px) !important;
+  white-space: nowrap;
+}
+
+body[data-device="mobile"] .week-cards strong,
+body[data-device="mobile"] .date-strip strong {
+  font-size: clamp(14px, 4.5vw, 18px) !important;
+}
+
+body[data-device="mobile"] .admin-slots,
+body[data-device="mobile"] .slot-grid,
+body[data-device="mobile"] .public-slots {
+  grid-template-columns: 1fr !important;
+  gap: 12px !important;
+}
+
+body[data-device="mobile"] .slot-row,
+body[data-device="mobile"] .readonly .slot-row {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 12px !important;
+  min-width: 0;
+}
+
+body[data-device="mobile"] .slot-row > *,
+body[data-device="mobile"] .readonly .slot-row > *,
+body[data-device="mobile"] .admin-account-card > *,
+body[data-device="mobile"] .super-business-summary > * {
+  min-width: 0;
+}
+
+body[data-device="mobile"] .row-actions,
+body[data-device="mobile"] .button-row,
+body[data-device="mobile"] .selected-admin-actions,
+body[data-device="mobile"] .super-business-summary__actions,
+body[data-device="mobile"] .super-business-summary__stats {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  width: 100%;
+}
+
+body[data-device="mobile"] .row-actions > *,
+body[data-device="mobile"] .button-row > *,
+body[data-device="mobile"] .selected-admin-actions > *,
+body[data-device="mobile"] .super-business-summary__actions > *,
+body[data-device="mobile"] .super-business-summary__stats > * {
+  flex: 1 1 100% !important;
+  min-width: 0 !important;
+}
+
+body[data-device="mobile"] .super-business-summary,
+body[data-device="mobile"] .super-business-summary__trigger,
+body[data-device="mobile"] .admin-account-card,
+body[data-device="mobile"] .admin-person-card,
+body[data-device="mobile"] .selected-admin-head {
+  grid-template-columns: 1fr !important;
+  width: 100%;
+}
+
+body[data-device="mobile"] .super-business-summary__brand,
+body[data-device="mobile"] .barber-heading,
+body[data-device="mobile"] .dashboard-head {
+  align-items: flex-start !important;
+}
+
+body[data-device="mobile"] .form-grid,
+body[data-device="mobile"] .checklist-grid,
+body[data-device="mobile"] .dashboard-cards,
+body[data-device="mobile"] .metric-row {
+  grid-template-columns: 1fr !important;
+}
+
+body[data-device="mobile"] .super-admin-logo-preview,
+body[data-device="mobile"] .super-admin-environment-preview {
+  min-height: 108px;
+  width: 100%;
+}
+
+body[data-device="mobile"] .barber-heading-copy h1,
+body[data-device="mobile"] .dashboard-head h1,
+body[data-device="mobile"] .admin-title {
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+}
+
+body[data-device="mobile"] .public-barber-card,
+body[data-device="mobile"] .barber-card,
+body[data-device="mobile"] .admin-person-card {
+  touch-action: manipulation;
+}
+
+@media (max-width: 360px) {
+  body[data-device="mobile"] .week-cards,
+  body[data-device="mobile"] .date-strip {
+    gap: 4px !important;
+  }
+
+  body[data-device="mobile"] .week-cards button,
+  body[data-device="mobile"] .date-strip button {
+    min-height: 54px !important;
+    padding-inline: 2px !important;
+    border-radius: 12px !important;
+  }
+}

@@ -5449,6 +5449,16 @@ function renderBarberV2() {
   `);
 }
 
+let renderFrame = 0;
+
+function scheduleRender() {
+  if (renderFrame) return;
+  renderFrame = requestAnimationFrame(() => {
+    renderFrame = 0;
+    render();
+  });
+}
+
 function render() {
   const perf = perfMark("render");
   const root = document.querySelector("#app");
@@ -5493,11 +5503,12 @@ function render() {
   toast?.classList.toggle("is-empty", !app.lastEvent);
   const viewRoot = document.querySelector("#view-root");
   if (!viewRoot) return;
+  let nextMarkup = "";
   try {
-    viewRoot.innerHTML = views[app.view]();
+    nextMarkup = views[app.view]();
   } catch (error) {
     console.error("Render fallback activated", error);
-    viewRoot.innerHTML = appShell(`
+    nextMarkup = appShell(`
       <section class="booking-surface">
         <div class="section-title"><span>!</span><h2>Entorno no disponible</h2></div>
         <p class="microcopy">La barberia no pudo cargarse correctamente, pero el sistema evito una pantalla en blanco.</p>
@@ -5506,8 +5517,17 @@ function render() {
       </section>
     `);
   }
+  const viewChanged = viewRoot.__lastMarkup !== nextMarkup;
+  if (viewChanged) {
+    const previousScroll = { x: window.scrollX, y: window.scrollY };
+    viewRoot.innerHTML = nextMarkup;
+    viewRoot.__lastMarkup = nextMarkup;
+    requestAnimationFrame(() => {
+      window.scrollTo(previousScroll.x, previousScroll.y);
+    });
+  }
   persistVisualRouteState();
-  bindEvents();
+  if (viewChanged) bindEvents();
   document.querySelector("#booking-confirm-dialog")?.showModal();
   requestAnimationFrame(fitPanelTitles);
   perfEnd(perf, `(${app.view}:${currentBusinessId() || "sin-negocio"})`);
@@ -5518,7 +5538,7 @@ function bindChromeEvents() {
     button.addEventListener("click", () => {
       app.view = button.dataset.view;
       history.pushState(null, "", viewPath(app.view));
-      render();
+      scheduleRender();
     });
   });
 }
@@ -7013,7 +7033,7 @@ store.subscribe((state, event) => {
     app.lastEvent = `Nueva reserva: ${event.record.clientName || "Cliente"}`;
     playReservationSound();
   }
-  if (document.visibilityState === "visible") render();
+  if (document.visibilityState === "visible") scheduleRender();
 });
 
 window.addEventListener("resize", () => {
