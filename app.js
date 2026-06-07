@@ -20,6 +20,8 @@ const VISIT_STATE_META = {
   no_show: { label: "No asistio", tone: "no-show" },
 };
 const COUNTABLE_STATUSES = new Set(["reserved", "fixed"]);
+const PERF_LOG_KEY = "barber-delux-perf-logs";
+const REMOTE_SYNC_DEBOUNCE_MS = 180;
 
 const dayNames = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
 const longDayNames = ["Domingo", "Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"];
@@ -199,6 +201,108 @@ function slotRange(time) {
   const start = parseSlotTime(time);
   const end = addMinutesToSlot(time, SLOT_MINUTES);
   return `${formatAmPm(start.hour, start.minute)} - ${formatAmPm(end.hour, end.minute)}`;
+}
+
+function perfLogsEnabled() {
+  return localStorage.getItem(PERF_LOG_KEY) === "1";
+}
+
+function perfMark(label) {
+  return { label, start: performance.now() };
+}
+
+function perfEnd(mark, extra = "") {
+  if (!perfLogsEnabled() || !mark) return;
+  const elapsed = Math.round((performance.now() - mark.start) * 10) / 10;
+  console.debug(`[perf] ${mark.label}: ${elapsed}ms${extra ? ` ${extra}` : ""}`);
+}
+
+function emptyBusinessBucket() {
+  return {
+    barbers: [],
+    activeBarbers: [],
+    services: [],
+    activeServices: [],
+    appointments: [],
+    blockedDays: [],
+    barberServices: [],
+    appointmentBySlot: new Map(),
+    blockedDayKeys: new Set(),
+    servicesById: new Map(),
+    barbersById: new Map(),
+    appointmentsById: new Map(),
+    barberServicesByBarber: new Map(),
+    barberServicesByService: new Map(),
+  };
+}
+
+const derivedBusinessCache = {
+  stateRef: null,
+  buckets: new Map(),
+};
+
+function invalidateDerivedBusinessCache() {
+  derivedBusinessCache.stateRef = null;
+  derivedBusinessCache.buckets = new Map();
+}
+
+function indexByBusiness(items = []) {
+  const map = new Map();
+  items.forEach((item) => {
+    const businessId = item.negocioId || DEFAULT_BUSINESS_ID;
+    if (!map.has(businessId)) map.set(businessId, []);
+    map.get(businessId).push(item);
+  });
+  return map;
+}
+
+function buildBusinessBucketFromState(state, businessId) {
+  const id = businessId || DEFAULT_BUSINESS_ID;
+  const barbersByBusiness = indexByBusiness(state.barbers);
+  const servicesByBusiness = indexByBusiness(state.services);
+  const appointmentsByBusiness = indexByBusiness(state.appointments);
+  const blockedDaysByBusiness = indexByBusiness(state.blockedDays);
+  const barberServicesByBusiness = indexByBusiness(state.barberServices);
+  const bucket = emptyBusinessBucket();
+  bucket.barbers = barbersByBusiness.get(id) || [];
+  bucket.activeBarbers = bucket.barbers.filter((barber) => barber.active);
+  bucket.services = servicesByBusiness.get(id) || [];
+  bucket.activeServices = bucket.services.filter((service) => service.active);
+  bucket.appointments = appointmentsByBusiness.get(id) || [];
+  bucket.blockedDays = blockedDaysByBusiness.get(id) || [];
+  bucket.barberServices = barberServicesByBusiness.get(id) || [];
+  bucket.barbersById = new Map(bucket.barbers.map((barber) => [barber.id, barber]));
+  bucket.servicesById = new Map(bucket.services.map((service) => [service.id, service]));
+  bucket.appointmentsById = new Map(bucket.appointments.map((appointment) => [appointment.id, appointment]));
+  bucket.appointments.forEach((appointment) => {
+    bucket.appointmentBySlot.set(`${appointment.barberId}|${appointment.date}|${appointment.time}`, appointment);
+  });
+  bucket.blockedDays.forEach((blockedDay) => {
+    bucket.blockedDayKeys.add(`${blockedDay.barberId}|${blockedDay.date}`);
+  });
+  bucket.barberServices.forEach((relation) => {
+    if (!bucket.barberServicesByBarber.has(relation.barberId)) {
+      bucket.barberServicesByBarber.set(relation.barberId, []);
+    }
+    if (!bucket.barberServicesByService.has(relation.serviceId)) {
+      bucket.barberServicesByService.set(relation.serviceId, []);
+    }
+    bucket.barberServicesByBarber.get(relation.barberId).push(relation);
+    bucket.barberServicesByService.get(relation.serviceId).push(relation);
+  });
+  return bucket;
+}
+
+function getBusinessBucket(businessId = currentBusinessId()) {
+  if (derivedBusinessCache.stateRef !== store.state) {
+    derivedBusinessCache.stateRef = store.state;
+    derivedBusinessCache.buckets = new Map();
+  }
+  const id = businessId || DEFAULT_BUSINESS_ID;
+  if (derivedBusinessCache.buckets.has(id)) return derivedBusinessCache.buckets.get(id);
+  const bucket = buildBusinessBucketFromState(store.state, id);
+  derivedBusinessCache.buckets.set(id, bucket);
+  return bucket;
 }
 
 function isPastDate(date) {
@@ -962,6 +1066,10 @@ class StudioStore {
     this.remoteReady = false;
     this.syncInFlight = false;
     this.syncQueued = false;
+    this.syncQueuedQuiet = false;
+    this.syncTimer = null;
+    this.bucketCacheStateRef = null;
+    this.bucketCache = new Map();
     this.applyingRemote = false;
     this.dailyResetPending = false;
     this.state = this.load();
@@ -1004,6 +1112,8 @@ class StudioStore {
   }
 
   persist(event = { type: "UPDATE" }) {
+    this.invalidateBusinessBuckets();
+    invalidateDerivedBusinessCache();
     localStorage.setItem(APP_KEY, JSON.stringify(this.state));
     this.emit(event);
     this.channel?.postMessage(event);
@@ -1023,6 +1133,11 @@ class StudioStore {
     return () => this.listeners.delete(listener);
   }
 
+  invalidateBusinessBuckets() {
+    this.bucketCacheStateRef = null;
+    this.bucketCache = new Map();
+  }
+
   async bootstrapRemote() {
     if (this.dailyResetPending) {
       await this.persistRemote({ type: "RESET", table: "demo", reason: "daily_reset" });
@@ -1039,20 +1154,25 @@ class StudioStore {
   }
 
   queueRemoteSync({ quiet = false } = {}) {
+    this.syncQueuedQuiet = this.syncQueued ? this.syncQueuedQuiet && quiet : quiet;
     if (this.syncInFlight) {
       this.syncQueued = true;
       return;
     }
     this.syncQueued = true;
-    queueMicrotask(() => {
+    window.clearTimeout(this.syncTimer);
+    this.syncTimer = window.setTimeout(() => {
       if (!this.syncQueued || this.syncInFlight) return;
+      const nextQuiet = this.syncQueuedQuiet;
       this.syncQueued = false;
-      this.syncFromRemote({ quiet }).catch((error) => console.error(error));
-    });
+      this.syncQueuedQuiet = false;
+      this.syncFromRemote({ quiet: nextQuiet }).catch((error) => console.error(error));
+    }, REMOTE_SYNC_DEBOUNCE_MS);
   }
 
   async syncFromRemote({ quiet = false } = {}) {
     if (!this.supabase || this.syncInFlight) return;
+    const perf = perfMark("syncFromRemote");
     this.syncInFlight = true;
 
     try {
@@ -1160,10 +1280,18 @@ class StudioStore {
           this.emit({ type: "SYNC", table: "remote" });
           this.channel?.postMessage({ type: "SYNC", table: "remote" });
         }
+        perfEnd(perf, "(super-admin)");
         return;
       }
 
-      const queryScoped = (table, orderColumn, ascending = true) => {
+      const rangeAnchor = /^\d{4}-\d{2}-\d{2}$/.test(this.state.meta?.selectedDate || "")
+        ? this.state.meta.selectedDate
+        : todayISO();
+      const activeWeekDates = getWeekDates(new Date(`${rangeAnchor}T00:00:00`));
+      const weekStartDate = activeWeekDates[0];
+      const weekEndDate = activeWeekDates[activeWeekDates.length - 1];
+
+      const queryScoped = (table, orderColumn, ascending = true, tune = null) => {
         if (route.view !== "super-admin" && !scopedBusinessId) {
           return Promise.resolve({ data: [], error: null });
         }
@@ -1171,12 +1299,15 @@ class StudioStore {
         if (route.view !== "super-admin") {
           query = query.eq("business_id", scopedBusinessId);
         }
+        if (typeof tune === "function") {
+          query = tune(query);
+        }
         return query.order(orderColumn, { ascending });
       };
 
       const [barbersResult, appointmentsBaseResult, blockedDaysResult, servicesResult, barberServicesResult, businessSettingsResult] = await Promise.all([
         queryScoped("barbers", "created_at", true),
-        queryScoped("appointments", "date", true),
+        queryScoped("appointments", "date", true, (query) => query.gte("date", weekStartDate).lte("date", weekEndDate)),
         queryScoped("blocked_days", "date", true),
         queryScoped("services", "created_at", true),
         queryScoped("barber_services", "created_at", true),
@@ -1245,12 +1376,14 @@ class StudioStore {
         this.emit({ type: "SYNC", table: "remote" });
         this.channel?.postMessage({ type: "SYNC", table: "remote" });
       }
+      perfEnd(perf, `(${route.view}:${scopedBusinessId || "global"})`);
     } finally {
       this.applyingRemote = false;
       this.syncInFlight = false;
       if (this.syncQueued) {
-        const queuedQuiet = quiet;
+        const queuedQuiet = this.syncQueuedQuiet || quiet;
         this.syncQueued = false;
+        this.syncQueuedQuiet = false;
         this.queueRemoteSync({ quiet: queuedQuiet });
       }
     }
@@ -1323,13 +1456,17 @@ class StudioStore {
       route.view === "super-admin"
         ? { event: "*", schema: "public", table: "business_settings" }
         : { event: "*", schema: "public", table: "business_settings", filter: `business_id=eq.${scopedBusinessId}` };
+    const businessesConfig =
+      route.view === "super-admin"
+        ? { event: "*", schema: "public", table: "businesses" }
+        : { event: "*", schema: "public", table: "businesses", filter: `id=eq.${scopedBusinessId}` };
 
     this.remoteChannel = this.supabase
       .channel(`barber-delux-realtime-${scopeKey}`)
       .on("postgres_changes", barbersConfig, () => {
         this.queueRemoteSync();
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "businesses" }, () => {
+      .on("postgres_changes", businessesConfig, () => {
         this.queueRemoteSync();
       })
       .on("postgres_changes", appointmentConfig, () => {
@@ -1554,8 +1691,20 @@ class StudioStore {
     return this.state.barbers.filter((barber) => barber.active);
   }
 
+  businessBucket(businessId) {
+    const id = businessId || DEFAULT_BUSINESS_ID;
+    if (this.bucketCacheStateRef !== this.state) {
+      this.bucketCacheStateRef = this.state;
+      this.bucketCache = new Map();
+    }
+    if (!this.bucketCache.has(id)) {
+      this.bucketCache.set(id, buildBusinessBucketFromState(this.state, id));
+    }
+    return this.bucketCache.get(id);
+  }
+
   activeBarbersByBusiness(businessId) {
-    return this.state.barbers.filter((barber) => barber.active && barber.negocioId === businessId);
+    return this.businessBucket(businessId).activeBarbers;
   }
 
   businessById(id) {
@@ -1850,26 +1999,19 @@ class StudioStore {
   }
 
   getAppointment(barberId, date, time, negocioId = currentBusinessId()) {
-    return this.state.appointments.find(
-      (item) =>
-        item.barberId === barberId &&
-        item.date === date &&
-        item.time === time &&
-        item.negocioId === negocioId
-    );
+    return this.businessBucket(negocioId).appointmentBySlot.get(`${barberId}|${date}|${time}`);
   }
 
   isDayBlocked(barberId, date, negocioId = currentBusinessId()) {
-    return this.state.blockedDays.some(
-      (item) => item.barberId === barberId && item.date === date && item.negocioId === negocioId
-    );
+    return this.businessBucket(negocioId).blockedDayKeys.has(`${barberId}|${date}`);
   }
 
   upsertAppointment(payload) {
-    const existing = this.getAppointment(payload.barberId, payload.date, payload.time);
+    const negocioId = payload.negocioId || currentBusinessId();
+    const existing = this.getAppointment(payload.barberId, payload.date, payload.time, negocioId);
     const appointment = {
       id: existing?.id || uid("apt"),
-      negocioId: payload.negocioId || currentBusinessId(),
+      negocioId,
       source: payload.source || "admin",
       weekKey: payload.status === "reserved" ? getWeekKey(new Date(`${payload.date}T00:00:00`)) : "permanent",
       blockOrigin:
@@ -1955,6 +2097,8 @@ class StudioStore {
     }
 
     this.state.appointments.push(appointment);
+    this.invalidateBusinessBuckets();
+    invalidateDerivedBusinessCache();
     localStorage.setItem(APP_KEY, JSON.stringify(this.state));
     const localEvent = { type: "INSERT", table: "appointments", record: appointment, source: "public_remote_safe" };
     this.emit(localEvent);
@@ -2657,15 +2801,15 @@ function currentAdminAccountRecord() {
 }
 
 function servicesForBusiness(businessId = currentBusinessId()) {
-  return store.state.services.filter((service) => service.negocioId === businessId);
+  return getBusinessBucket(businessId).services;
 }
 
 function activeServicesForBusiness(businessId = currentBusinessId()) {
-  return servicesForBusiness(businessId).filter((service) => service.active);
+  return getBusinessBucket(businessId).activeServices;
 }
 
 function barbersForBusiness(businessId = currentBusinessId()) {
-  return store.state.barbers.filter((barber) => barber.negocioId === businessId);
+  return getBusinessBucket(businessId).barbers;
 }
 
 async function sha256(value) {
@@ -2963,15 +3107,11 @@ const app = {
 };
 
 function barberById(id, businessId = currentBusinessId()) {
-  return store.state.barbers.find((barber) => barber.id === id && barber.negocioId === businessId);
+  return getBusinessBucket(businessId).barbersById.get(id) || null;
 }
 
 function appointmentById(id, businessId = currentBusinessId()) {
-  return (
-    store.state.appointments.find(
-      (appointment) => appointment.id === id && appointment.negocioId === businessId
-    ) || null
-  );
+  return getBusinessBucket(businessId).appointmentsById.get(id) || null;
 }
 
 function businessSummaryById(businessId) {
@@ -2981,22 +3121,22 @@ function businessSummaryById(businessId) {
 function businessBarberCount(businessId) {
   const summary = businessSummaryById(businessId);
   if (summary) return summary.totalBarbers || 0;
-  return store.state.barbers.filter((barber) => barber.negocioId === businessId).length;
+  return getBusinessBucket(businessId).barbers.length;
 }
 
 function businessServiceCount(businessId) {
   const summary = businessSummaryById(businessId);
   if (summary) return summary.totalServices || 0;
-  return store.state.services.filter((service) => service.negocioId === businessId).length;
+  return getBusinessBucket(businessId).services.length;
 }
 
 function businessTodayReservationCount(businessId) {
   const summary = businessSummaryById(businessId);
   if (summary) return summary.reservationsToday || 0;
   const today = todayISO();
-  return store.state.appointments.filter(
+  return getBusinessBucket(businessId).appointments.filter(
     (appointment) =>
-      appointment.negocioId === businessId && appointment.date === today && COUNTABLE_STATUSES.has(appointment.status)
+      appointment.date === today && COUNTABLE_STATUSES.has(appointment.status)
   ).length;
 }
 
@@ -3033,7 +3173,7 @@ function isCountableAppointment(item) {
 
 function buildCounterSummary(anchorDate) {
   const activeWeekDates = new Set(getWeekDates(dateAnchor(anchorDate)));
-  return store.state.appointments.reduce(
+  return getBusinessBucket(currentBusinessId()).appointments.reduce(
     (summary, appointment) => {
       if (!isCountableAppointment(appointment) || !activeWeekDates.has(appointment.date)) return summary;
       summary.weeklyByBarber[appointment.barberId] =
@@ -3270,7 +3410,7 @@ function publicFlowCard({ step, title, state = "locked", summary = "", actions =
 }
 
 function serviceById(id, businessId = currentBusinessId()) {
-  return store.state.services.find((service) => service.id === id && service.negocioId === businessId) || null;
+  return getBusinessBucket(businessId).servicesById.get(id) || null;
 }
 
 function serviceNameForAppointment(appointment) {
@@ -3282,22 +3422,15 @@ function serviceValueForAppointment(appointment) {
   if (!appointment) return 0;
   const byId = serviceById(appointment.serviceId, appointment.negocioId || currentBusinessId());
   if (byId) return Number(byId.value) || 0;
-  const byName = store.state.services.find(
-    (service) =>
-      service.negocioId === (appointment.negocioId || currentBusinessId()) &&
-      service.name === appointment.serviceName
-  );
+  const byName = getBusinessBucket(appointment.negocioId || currentBusinessId()).services.find((service) => service.name === appointment.serviceName);
   return Number(byName?.value) || 0;
 }
 
 function serviceShareForAppointment(appointment) {
+  const businessId = appointment?.negocioId || currentBusinessId();
   const service =
-    serviceById(appointment?.serviceId, appointment?.negocioId || currentBusinessId()) ||
-    store.state.services.find(
-      (item) =>
-        item.negocioId === (appointment?.negocioId || currentBusinessId()) &&
-        item.name === appointment?.serviceName
-    );
+    serviceById(appointment?.serviceId, businessId) ||
+    getBusinessBucket(businessId).services.find((item) => item.name === appointment?.serviceName);
   return {
     adminPercentage: Number(service?.adminPercentage) || 0,
     barberPercentage: Number(service?.barberPercentage) || 0,
@@ -3350,18 +3483,17 @@ function calculateAppointmentIncome(appointment) {
 }
 
 function buildBarberSummary(barberId, anchorDate) {
-  const todayReservations = store.state.appointments.filter(
+  const appointments = getBusinessBucket(currentBusinessId()).appointments;
+  const todayReservations = appointments.filter(
     (item) =>
-      item.negocioId === currentBusinessId() &&
       item.barberId === barberId &&
       item.date === anchorDate &&
       COUNTABLE_STATUSES.has(item.status)
   );
   const realizedToday = todayReservations.filter(isRealizedAppointment);
   const weekDates = new Set(getWeekDates(new Date(`${anchorDate}T00:00:00`)).filter((date) => date <= anchorDate));
-  const weekAppointments = store.state.appointments.filter(
+  const weekAppointments = appointments.filter(
     (item) =>
-      item.negocioId === currentBusinessId() &&
       item.barberId === barberId &&
       weekDates.has(item.date) &&
       COUNTABLE_STATUSES.has(item.status)
@@ -3388,10 +3520,9 @@ function buildBarberSummary(barberId, anchorDate) {
 
 function barberOffersService(barberId, serviceId) {
   if (!serviceId) return true;
-  const allRelations = store.state.barberServices || [];
-  const barberRelations = allRelations.filter(
-    (item) => item.barberId === barberId && item.active && item.negocioId === currentBusinessId()
-  );
+  const bucket = getBusinessBucket(currentBusinessId());
+  const allRelations = bucket.barberServices || [];
+  const barberRelations = (bucket.barberServicesByBarber.get(barberId) || []).filter((item) => item.active);
   if (!allRelations.length || !barberRelations.length) return true;
   return barberRelations.some((item) => item.serviceId === serviceId);
 }
@@ -5158,6 +5289,7 @@ function renderBarberV2() {
 }
 
 function render() {
+  const perf = perfMark("render");
   const root = document.querySelector("#app");
   app.route = resolveRoute(location.pathname);
   app.view = app.route.view;
@@ -5216,6 +5348,7 @@ function render() {
   bindEvents();
   document.querySelector("#booking-confirm-dialog")?.showModal();
   requestAnimationFrame(fitPanelTitles);
+  perfEnd(perf, `(${app.view}:${currentBusinessId() || "sin-negocio"})`);
 }
 
 function bindChromeEvents() {
