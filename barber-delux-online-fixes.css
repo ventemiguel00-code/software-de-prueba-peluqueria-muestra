@@ -353,3 +353,22 @@ body[data-device="desktop"] .admin-barber-grid {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Ajuste final solicitado: foto del panel barbero en cuadro, sin rectangulo ni espacios laterales. */
+body .dashboard-head > .barber-heading .avatar.lg,
+body[data-device="mobile"] .dashboard-head > .barber-heading .avatar.lg,
+body[data-device="tablet"] .dashboard-head > .barber-heading .avatar.lg,
+body[data-device="desktop"] .dashboard-head > .barber-heading .avatar.lg {
+  width: 82px !important;
+  height: 82px !important;
+  min-width: 82px !important;
+  min-height: 82px !important;
+  max-width: 82px !important;
+  max-height: 82px !important;
+  aspect-ratio: 1 / 1 !important;
+  border-radius: 4px !important;
+  background-size: cover !important;
+  background-position: center top !important;
+  background-repeat: no-repeat !important;
+  background-color: color-mix(in srgb, var(--color-card) 72%, #ffffff) !important;
+}
