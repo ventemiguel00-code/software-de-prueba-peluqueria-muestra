@@ -1115,6 +1115,10 @@ class StudioStore {
     if (this.channel) {
       this.channel.onmessage = (event) => {
         if (!event.data?.type) return;
+        if (this.shouldIgnoreCrossScopeLocalSync()) {
+          this.queueRemoteSync();
+          return;
+        }
         this.state = this.loadLocalState();
         this.emit(event.data);
       };
@@ -1122,6 +1126,10 @@ class StudioStore {
 
     window.addEventListener("storage", (event) => {
       if (event.key === APP_KEY) {
+        if (this.shouldIgnoreCrossScopeLocalSync()) {
+          this.queueRemoteSync();
+          return;
+        }
         this.state = this.loadLocalState();
         this.emit({ type: "SYNC" });
       }
@@ -1168,6 +1176,11 @@ class StudioStore {
   subscribe(listener) {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  shouldIgnoreCrossScopeLocalSync() {
+    const route = resolveRoute(location.pathname);
+    return Boolean(this.supabase && route.view === "super-admin");
   }
 
   invalidateBusinessBuckets() {
@@ -4687,6 +4700,9 @@ function renderSuperAdminV2() {
   }
 
   const businesses = [...store.state.businesses].sort((a, b) => a.name.localeCompare(b.name, "es"));
+  if (app.superAdminSession && store.supabase && businesses.length <= 1 && !store.syncInFlight) {
+    store.queueRemoteSync();
+  }
   const credentialReveal = app.superAdminCredentialReveal
     ? `<div class="editor-card credential-reveal-card">
         <p class="eyebrow">Credenciales temporales</p>
