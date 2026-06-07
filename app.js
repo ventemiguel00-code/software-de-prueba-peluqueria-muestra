@@ -41,15 +41,82 @@ const avatarGradients = [
   "linear-gradient(145deg, #324044, #f1f5f4)",
   "linear-gradient(145deg, #0b1519, #8ca2a7)",
 ];
+const DEFAULT_BUSINESS_THEME_KEY = "gold-prestige";
+const BUSINESS_THEME_ALIASES = {
+  gold_black: "gold-prestige",
+  blue_black: "urban-neon",
+  red_black: "royal-red",
+  green_black: "emerald-luxury",
+  purple_black: "urban-neon",
+  white_black: "gold-prestige",
+  gray_black: "gold-prestige",
+  orange_black: "gold-prestige",
+};
 const BUSINESS_THEMES = {
-  gold_black: { label: "Dorado + Negro", primary: "#d4af37", secondary: "#111111", background: "#050505", text: "#ffffff", button: "#f5d76e" },
-  blue_black: { label: "Azul + Negro", primary: "#3f7cff", secondary: "#111111", background: "#07111f", text: "#f4f8ff", button: "#70a5ff" },
-  red_black: { label: "Rojo + Negro", primary: "#d14b4b", secondary: "#111111", background: "#160809", text: "#fff5f5", button: "#ff7575" },
-  green_black: { label: "Verde + Negro", primary: "#2ea36f", secondary: "#111111", background: "#06140e", text: "#effff7", button: "#66d99f" },
-  purple_black: { label: "Morado + Negro", primary: "#7b4bd1", secondary: "#111111", background: "#10091c", text: "#fbf7ff", button: "#a77cff" },
-  white_black: { label: "Blanco + Negro", primary: "#f4f7f6", secondary: "#111111", background: "#060607", text: "#ffffff", button: "#ffffff" },
-  gray_black: { label: "Gris + Negro", primary: "#8f969b", secondary: "#111111", background: "#090b0c", text: "#f5f7f8", button: "#c5cbd0" },
-  orange_black: { label: "Naranja + Negro", primary: "#e28a2d", secondary: "#111111", background: "#170d04", text: "#fff8ef", button: "#ffad55" },
+  "gold-prestige": {
+    label: "Gold Prestige",
+    primary: "#D4AF37",
+    secondary: "#111111",
+    background: "#0A0A0A",
+    card: "#1A1A1A",
+    text: "#FFFFFF",
+    textSecondary: "#BDBDBD",
+    title: "#D4AF37",
+    subtitle: "#FFFFFF",
+    button: "#D4AF37",
+    buttonHover: "#E5C158",
+    border: "#D4AF37",
+    icon: "#D4AF37",
+    badge: "#D4AF37",
+  },
+  "urban-neon": {
+    label: "Urban Neon",
+    primary: "#00BFFF",
+    secondary: "#111111",
+    background: "#0B0B0B",
+    card: "#171717",
+    text: "#FFFFFF",
+    textSecondary: "#B0BEC5",
+    title: "#00BFFF",
+    subtitle: "#FFFFFF",
+    button: "#00BFFF",
+    buttonHover: "#35CFFF",
+    border: "#00BFFF",
+    icon: "#00BFFF",
+    badge: "#00BFFF",
+  },
+  "royal-red": {
+    label: "Royal Red",
+    primary: "#E53935",
+    secondary: "#111111",
+    background: "#0A0A0A",
+    card: "#1C1C1C",
+    text: "#FFFFFF",
+    textSecondary: "#CFCFCF",
+    title: "#E53935",
+    subtitle: "#FFFFFF",
+    button: "#E53935",
+    buttonHover: "#F44336",
+    border: "#E53935",
+    icon: "#E53935",
+    badge: "#E53935",
+  },
+  "emerald-luxury": {
+    label: "Emerald Luxury",
+    primary: "#00A86B",
+    secondary: "#111111",
+    background: "#0A0A0A",
+    card: "#161616",
+    text: "#FFFFFF",
+    textSecondary: "#C0C0C0",
+    title: "#00A86B",
+    subtitle: "#FFFFFF",
+    button: "#00A86B",
+    buttonHover: "#00C57D",
+    border: "#00A86B",
+    icon: "#00A86B",
+    badge: "#00A86B",
+  },
 };
 
 function uid(prefix = "id") {
@@ -168,7 +235,7 @@ function defaultBusiness() {
     name: "Vision Barber",
     slug: DEFAULT_BUSINESS_SLUG,
     logoUrl: "/assets/vision-barber-logo.avif",
-    theme: "gold_black",
+    theme: DEFAULT_BUSINESS_THEME_KEY,
     primaryColor: "#d4af37",
     secondaryColor: "#111111",
     backgroundUrl: "",
@@ -178,10 +245,15 @@ function defaultBusiness() {
   };
 }
 
+function normalizeThemeKey(themeKey = DEFAULT_BUSINESS_THEME_KEY) {
+  const key = String(themeKey || DEFAULT_BUSINESS_THEME_KEY).trim();
+  return BUSINESS_THEMES[key] ? key : BUSINESS_THEME_ALIASES[key] || DEFAULT_BUSINESS_THEME_KEY;
+}
+
 function normalizeBusiness(record = {}) {
   const base = defaultBusiness();
-  const theme = record.theme || base.theme || "gold_black";
-  const palette = BUSINESS_THEMES[theme] || BUSINESS_THEMES.gold_black;
+  const theme = normalizeThemeKey(record.theme || base.theme);
+  const palette = BUSINESS_THEMES[theme] || BUSINESS_THEMES[DEFAULT_BUSINESS_THEME_KEY];
   return {
     ...base,
     ...record,
@@ -191,8 +263,16 @@ function normalizeBusiness(record = {}) {
     primaryColor: record.primaryColor || palette.primary,
     secondaryColor: record.secondaryColor || palette.secondary,
     backgroundColor: record.backgroundColor || palette.background,
+    cardColor: record.cardColor || palette.card,
     textColor: record.textColor || palette.text,
+    textSecondaryColor: record.textSecondaryColor || palette.textSecondary,
+    titleColor: record.titleColor || palette.title,
+    subtitleColor: record.subtitleColor || palette.subtitle,
     buttonColor: record.buttonColor || palette.button,
+    buttonHoverColor: record.buttonHoverColor || palette.buttonHover,
+    borderColor: record.borderColor || palette.border,
+    iconColor: record.iconColor || palette.icon,
+    badgeColor: record.badgeColor || palette.badge,
     updatedAt: record.updatedAt || todayISO(),
   };
 }
@@ -233,30 +313,47 @@ function mergeBusinessesById(...groups) {
   return [...seen.values()];
 }
 
-function paletteForTheme(themeKey = "gold_black") {
-  return BUSINESS_THEMES[themeKey] || BUSINESS_THEMES.gold_black;
+function paletteForTheme(themeKey = DEFAULT_BUSINESS_THEME_KEY) {
+  return BUSINESS_THEMES[normalizeThemeKey(themeKey)] || BUSINESS_THEMES[DEFAULT_BUSINESS_THEME_KEY];
 }
 
 function colorsForBusiness(business = currentBusiness()) {
-  const palette = paletteForTheme(business?.theme || "gold_black");
+  const palette = paletteForTheme(business?.theme || DEFAULT_BUSINESS_THEME_KEY);
   return {
     primary: business?.primaryColor || palette.primary,
     secondary: business?.secondaryColor || palette.secondary,
     background: business?.backgroundColor || palette.background,
+    card: business?.cardColor || palette.card,
     text: business?.textColor || palette.text,
+    textSecondary: business?.textSecondaryColor || palette.textSecondary,
+    title: business?.titleColor || palette.title,
+    subtitle: business?.subtitleColor || palette.subtitle,
     button: business?.buttonColor || palette.button,
+    buttonHover: business?.buttonHoverColor || palette.buttonHover,
+    border: business?.borderColor || palette.border,
+    icon: business?.iconColor || palette.icon,
+    badge: business?.badgeColor || palette.badge,
   };
 }
 
-function businessThemePatch(themeKey = "gold_black") {
+function businessThemePatch(themeKey = DEFAULT_BUSINESS_THEME_KEY) {
+  const normalizedTheme = normalizeThemeKey(themeKey);
   const palette = paletteForTheme(themeKey);
   return {
-    theme: themeKey,
+    theme: normalizedTheme,
     primaryColor: palette.primary,
     secondaryColor: palette.secondary,
     backgroundColor: palette.background,
+    cardColor: palette.card,
     textColor: palette.text,
+    textSecondaryColor: palette.textSecondary,
+    titleColor: palette.title,
+    subtitleColor: palette.subtitle,
     buttonColor: palette.button,
+    buttonHoverColor: palette.buttonHover,
+    borderColor: palette.border,
+    iconColor: palette.icon,
+    badgeColor: palette.badge,
   };
 }
 
@@ -266,8 +363,16 @@ function businessThemePatchFromMeta(themeColors = {}) {
     ...(themeColors.primary ? { primaryColor: themeColors.primary } : {}),
     ...(themeColors.secondary ? { secondaryColor: themeColors.secondary } : {}),
     ...(themeColors.background ? { backgroundColor: themeColors.background } : {}),
+    ...(themeColors.card ? { cardColor: themeColors.card } : {}),
     ...(themeColors.text ? { textColor: themeColors.text } : {}),
+    ...(themeColors.textSecondary ? { textSecondaryColor: themeColors.textSecondary } : {}),
+    ...(themeColors.title ? { titleColor: themeColors.title } : {}),
+    ...(themeColors.subtitle ? { subtitleColor: themeColors.subtitle } : {}),
     ...(themeColors.button ? { buttonColor: themeColors.button } : {}),
+    ...(themeColors.buttonHover ? { buttonHoverColor: themeColors.buttonHover } : {}),
+    ...(themeColors.border ? { borderColor: themeColors.border } : {}),
+    ...(themeColors.icon ? { iconColor: themeColors.icon } : {}),
+    ...(themeColors.badge ? { badgeColor: themeColors.badge } : {}),
   };
 }
 
@@ -559,7 +664,7 @@ function mapBusinessToRow(record) {
     business_name: record.name,
     slug: record.slug,
     logo_url: record.logoUrl || "",
-    theme: record.theme || "gold_black",
+    theme: normalizeThemeKey(record.theme),
     primary_color: record.primaryColor || "#d4af37",
     secondary_color: record.secondaryColor || "#111111",
     background_url: record.backgroundUrl || "",
@@ -575,7 +680,7 @@ function mapRowToBusiness(row) {
     name: row.business_name || row.name,
     slug: row.slug,
     logoUrl: row.logo_url || "",
-    theme: row.theme || "gold_black",
+    theme: normalizeThemeKey(row.theme),
     primaryColor: row.primary_color || "#d4af37",
     secondaryColor: row.secondary_color || "#111111",
     backgroundColor: row.color_fondo || "",
@@ -2442,9 +2547,9 @@ function currentBusiness() {
         name: "Barberia",
         slug: app.currentBusinessSlug,
         logoUrl: "",
-        theme: "gold_black",
-        primaryColor: BUSINESS_THEMES.gold_black.primary,
-        secondaryColor: BUSINESS_THEMES.gold_black.secondary,
+        theme: DEFAULT_BUSINESS_THEME_KEY,
+        primaryColor: BUSINESS_THEMES[DEFAULT_BUSINESS_THEME_KEY].primary,
+        secondaryColor: BUSINESS_THEMES[DEFAULT_BUSINESS_THEME_KEY].secondary,
         backgroundUrl: "",
         active: false,
         createdAt: todayISO(),
@@ -2993,15 +3098,30 @@ function renderLayoutShell() {
 function businessThemeStyle(business = currentBusiness()) {
   const colors = colorsForBusiness(business);
   return [
+    `--color-primary:${colors.primary}`,
+    `--color-secondary:${colors.secondary}`,
+    `--color-background:${colors.background}`,
+    `--color-card:${colors.card}`,
+    `--color-text:${colors.text}`,
+    `--color-text-secondary:${colors.textSecondary}`,
+    `--color-title:${colors.title}`,
+    `--color-subtitle:${colors.subtitle}`,
+    `--color-button:${colors.button}`,
+    `--color-button-hover:${colors.buttonHover}`,
+    `--color-border:${colors.border}`,
+    `--color-icon:${colors.icon}`,
+    `--color-badge:${colors.badge}`,
     `--petrol:${colors.primary}`,
-    `--petrol-bright:${colors.button}`,
+    `--petrol-bright:${colors.buttonHover}`,
     `--black:${colors.background}`,
     `--matte:${colors.secondary}`,
-    `--graphite:${colors.secondary}`,
+    `--graphite:${colors.card}`,
+    `--graphite-2:${colors.card}`,
     `--white:${colors.text}`,
-    `--silver:${colors.text}`,
-    `--line:${colors.primary}59`,
-    `--line-strong:${colors.button}82`,
+    `--muted:${colors.textSecondary}`,
+    `--silver:${colors.textSecondary}`,
+    `--line:${colors.border}59`,
+    `--line-strong:${colors.border}82`,
     `--glass:${colors.secondary}c7`,
     `--glass-soft:${colors.primary}12`,
   ].join(";");
@@ -3018,15 +3138,30 @@ function refreshPersistentShellBrand() {
   const business = currentBusiness();
   const colors = colorsForBusiness(business);
   const rootStyle = document.documentElement.style;
+  rootStyle.setProperty("--color-primary", colors.primary);
+  rootStyle.setProperty("--color-secondary", colors.secondary);
+  rootStyle.setProperty("--color-background", colors.background);
+  rootStyle.setProperty("--color-card", colors.card);
+  rootStyle.setProperty("--color-text", colors.text);
+  rootStyle.setProperty("--color-text-secondary", colors.textSecondary);
+  rootStyle.setProperty("--color-title", colors.title);
+  rootStyle.setProperty("--color-subtitle", colors.subtitle);
+  rootStyle.setProperty("--color-button", colors.button);
+  rootStyle.setProperty("--color-button-hover", colors.buttonHover);
+  rootStyle.setProperty("--color-border", colors.border);
+  rootStyle.setProperty("--color-icon", colors.icon);
+  rootStyle.setProperty("--color-badge", colors.badge);
   rootStyle.setProperty("--petrol", colors.primary);
-  rootStyle.setProperty("--petrol-bright", colors.button);
+  rootStyle.setProperty("--petrol-bright", colors.buttonHover);
   rootStyle.setProperty("--black", colors.background);
   rootStyle.setProperty("--matte", colors.secondary);
-  rootStyle.setProperty("--graphite", colors.secondary);
+  rootStyle.setProperty("--graphite", colors.card);
+  rootStyle.setProperty("--graphite-2", colors.card);
   rootStyle.setProperty("--white", colors.text);
-  rootStyle.setProperty("--silver", colors.text);
-  rootStyle.setProperty("--line", `${colors.primary}59`);
-  rootStyle.setProperty("--line-strong", `${colors.button}82`);
+  rootStyle.setProperty("--muted", colors.textSecondary);
+  rootStyle.setProperty("--silver", colors.textSecondary);
+  rootStyle.setProperty("--line", `${colors.border}59`);
+  rootStyle.setProperty("--line-strong", `${colors.border}82`);
   rootStyle.setProperty("--glass", `${colors.secondary}c7`);
   rootStyle.setProperty("--glass-soft", `${colors.primary}12`);
   const topbar = document.querySelector(".topbar");
@@ -5188,7 +5323,7 @@ function bindEvents() {
       return;
     }
 
-    const theme = String(form.get("theme") || "gold_black");
+    const theme = String(form.get("theme") || DEFAULT_BUSINESS_THEME_KEY);
     const themePatch = businessThemePatch(theme);
     const environmentAttachment = app.superAdminPendingEnvironmentArchives.create || null;
     let business = store.saveBusiness({
@@ -5316,7 +5451,7 @@ function bindEvents() {
       const current = store.businessById(businessId);
       if (!current) return;
       const slug = uniqueBusinessSlug(form.get("slug") || current.slug, current.id);
-      const theme = String(form.get("theme") || current.theme || "gold_black");
+      const theme = String(form.get("theme") || current.theme || DEFAULT_BUSINESS_THEME_KEY);
       const themePatch = businessThemePatch(theme);
       let logoUrl = current.logoUrl;
       const logoFile = app.superAdminPendingLogoFiles[current.id] || null;

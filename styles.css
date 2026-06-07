@@ -1,4 +1,17 @@
 :root {
+  --color-primary: #d4af37;
+  --color-secondary: #111111;
+  --color-background: #0a0a0a;
+  --color-card: #1a1a1a;
+  --color-text: #ffffff;
+  --color-text-secondary: #bdbdbd;
+  --color-title: #d4af37;
+  --color-subtitle: #ffffff;
+  --color-button: #d4af37;
+  --color-button-hover: #e5c158;
+  --color-border: #d4af37;
+  --color-icon: #d4af37;
+  --color-badge: #d4af37;
   --black: #050607;
   --matte: #0b0e10;
   --graphite: #151b1f;
@@ -26,9 +39,9 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(circle at 82% -12%, rgba(242, 207, 123, 0.22), transparent 30rem),
+    radial-gradient(circle at 82% -12%, color-mix(in srgb, var(--color-primary) 22%, transparent), transparent 30rem),
     radial-gradient(circle at 8% 18%, rgba(255, 244, 211, 0.11), transparent 24rem),
-    linear-gradient(135deg, #050607 0%, #17130b 44%, #080706 100%);
+    linear-gradient(135deg, var(--color-background) 0%, color-mix(in srgb, var(--color-card) 78%, #000000) 44%, var(--color-secondary) 100%);
   color: var(--white);
 }
 
@@ -66,13 +79,13 @@ body {
 .global-bg-image {
   background:
     linear-gradient(90deg, rgba(5, 5, 5, 0.94), rgba(5, 5, 5, 0.64) 42%, rgba(5, 5, 5, 0.22)),
-    radial-gradient(circle at 72% 36%, rgba(245, 215, 110, 0.22), transparent 22rem),
+    radial-gradient(circle at 72% 36%, color-mix(in srgb, var(--color-primary) 22%, transparent), transparent 22rem),
     url("./assets/atelier-luxury-hero.png") center/cover;
 }
 
 .global-bg-overlay {
   background:
-    radial-gradient(circle at 80% 0%, rgba(212, 175, 55, 0.2), transparent 28rem),
+    radial-gradient(circle at 80% 0%, color-mix(in srgb, var(--color-primary) 20%, transparent), transparent 28rem),
     linear-gradient(180deg, rgba(5, 5, 5, 0.54), rgba(5, 5, 5, 0.78));
 }
 
@@ -1999,17 +2012,17 @@ dialog::backdrop {
 
 body {
   background:
-    radial-gradient(circle at 78% -10%, rgba(245, 215, 110, 0.22), transparent 32rem),
-    radial-gradient(circle at 12% 18%, rgba(138, 106, 31, 0.18), transparent 26rem),
-    linear-gradient(135deg, #050505 0%, #10100d 42%, #090806 100%);
+    radial-gradient(circle at 78% -10%, color-mix(in srgb, var(--color-primary) 22%, transparent), transparent 32rem),
+    radial-gradient(circle at 12% 18%, color-mix(in srgb, var(--color-primary) 15%, transparent), transparent 26rem),
+    linear-gradient(135deg, var(--color-background) 0%, color-mix(in srgb, var(--color-card) 78%, #000000) 42%, var(--color-secondary) 100%);
 }
 
 .topbar {
   padding: 18px clamp(16px, 4vw, 52px);
-  border-bottom-color: rgba(212, 175, 55, 0.28);
+  border-bottom-color: color-mix(in srgb, var(--color-border) 28%, transparent);
   background:
-    linear-gradient(180deg, rgba(18, 18, 16, 0.94), rgba(5, 5, 5, 0.82)),
-    rgba(5, 5, 5, 0.92);
+    linear-gradient(180deg, color-mix(in srgb, var(--color-card) 94%, transparent), color-mix(in srgb, var(--color-background) 82%, transparent)),
+    color-mix(in srgb, var(--color-background) 92%, transparent);
   box-shadow: 0 18px 54px rgba(0, 0, 0, 0.48);
 }
 
@@ -2637,3 +2650,89 @@ dialog::backdrop {
   font-weight: 900;
 }
 
+.booking-surface,
+.admin-main,
+.editor-card,
+.login-panel,
+.dashboard-cards div,
+.admin-account-card,
+.selected-card,
+.slot-row,
+.service-card,
+.barber-card,
+.super-business-card,
+.super-business-panel {
+  background-color: color-mix(in srgb, var(--color-card) 86%, transparent);
+  border-color: color-mix(in srgb, var(--color-border) 36%, transparent);
+}
+
+.section-title span,
+.counter-badge,
+.summary-badge,
+.service-badge,
+.brand-mark,
+.visit-state-pill.arrived,
+.visit-state-pill.service,
+.visit-state-pill.done {
+  border-color: color-mix(in srgb, var(--color-border) 48%, transparent);
+  background: color-mix(in srgb, var(--color-badge) 18%, transparent);
+  color: var(--color-title);
+}
+
+.section-title h2,
+.dashboard-head h1,
+.barber-heading h1,
+.login-panel h1,
+.super-business-summary__copy h3 {
+  color: var(--color-title);
+}
+
+.microcopy,
+label,
+.super-business-summary__copy p,
+.dashboard-cards span,
+.selected-card small {
+  color: var(--color-text-secondary);
+}
+
+input,
+select,
+textarea {
+  border-color: color-mix(in srgb, var(--color-border) 34%, transparent);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0.26)),
+    var(--color-secondary);
+  color: var(--color-text);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--color-button-hover);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+
+.primary-action {
+  background: linear-gradient(180deg, var(--color-button-hover), var(--color-button));
+  color: var(--color-secondary);
+  border-color: color-mix(in srgb, var(--color-border) 62%, transparent);
+  box-shadow:
+    0 18px 38px color-mix(in srgb, var(--color-primary) 18%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.42);
+}
+
+.secondary-action,
+.icon-action {
+  border-color: color-mix(in srgb, var(--color-border) 42%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-primary) 10%, transparent), rgba(255, 255, 255, 0.025)),
+    var(--color-secondary);
+  color: var(--color-subtitle);
+}
+
+.primary-action:hover,
+.secondary-action:hover,
+.icon-action:hover {
+  border-color: var(--color-button-hover);
+  box-shadow: 0 18px 38px color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
