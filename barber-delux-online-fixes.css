@@ -51,6 +51,31 @@
   overflow-wrap: anywhere;
 }
 
+.barber-heading .avatar,
+.barber-card .avatar,
+.selected-card .avatar {
+  background-size: contain !important;
+  background-position: center center !important;
+  background-repeat: no-repeat !important;
+}
+
+.barber-heading .avatar span,
+.barber-card .avatar span,
+.selected-card .avatar span {
+  display: grid;
+  place-items: center;
+}
+
+.counter-badge,
+.header-counter,
+.day-counter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1;
+}
+
 @media (min-width: 761px) {
   .dashboard-head > div,
   .barber-heading > div {
