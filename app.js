@@ -194,6 +194,14 @@ function slugify(value) {
     .replace(/^-+|-+$/g, "");
 }
 
+function normalizeAssetUrl(value = "") {
+  const cleanValue = String(value || "").trim();
+  if (!cleanValue) return "";
+  if (cleanValue.startsWith("./assets/")) return cleanValue.replace("./assets/", "/assets/");
+  if (cleanValue.startsWith("assets/")) return `/${cleanValue}`;
+  return cleanValue;
+}
+
 function parseSlotTime(time) {
   const [hour, minute] = String(time).split(":").map(Number);
   return { hour: hour || 0, minute: minute || 0 };
@@ -411,8 +419,8 @@ function normalizeBusiness(record = {}) {
     ...base,
     ...record,
     id,
-    slug: String(record.slug || base.slug).trim().toLowerCase(),
-    logoUrl: record.logoUrl ?? (id === DEFAULT_BUSINESS_ID ? base.logoUrl : ""),
+    slug: id === DEFAULT_BUSINESS_ID ? DEFAULT_BUSINESS_SLUG : String(record.slug || base.slug).trim().toLowerCase(),
+    logoUrl: normalizeAssetUrl(record.logoUrl ?? (id === DEFAULT_BUSINESS_ID ? base.logoUrl : "")),
     theme,
     primaryColor: record.primaryColor || palette.primary,
     secondaryColor: record.secondaryColor || palette.secondary,
@@ -427,6 +435,7 @@ function normalizeBusiness(record = {}) {
     borderColor: record.borderColor || palette.border,
     iconColor: record.iconColor || palette.icon,
     badgeColor: record.badgeColor || palette.badge,
+    backgroundUrl: normalizeAssetUrl(record.backgroundUrl || ""),
     updatedAt: record.updatedAt || todayISO(),
   };
 }
@@ -858,11 +867,11 @@ function mapBusinessToRow(record) {
     id: record.id,
     business_name: record.name,
     slug: record.slug,
-    logo_url: record.logoUrl || "",
+    logo_url: normalizeAssetUrl(record.logoUrl || ""),
     theme: normalizeThemeKey(record.theme),
     primary_color: record.primaryColor || paletteForTheme(record.theme).primary,
     secondary_color: record.secondaryColor || "#111111",
-    background_url: record.backgroundUrl || "",
+    background_url: normalizeAssetUrl(record.backgroundUrl || ""),
     active: record.active !== false,
     created_at: record.createdAt || todayISO(),
     updated_at: record.updatedAt || todayISO(),
@@ -874,14 +883,14 @@ function mapRowToBusiness(row) {
     id: row.id,
     name: row.business_name || row.name,
     slug: row.slug,
-    logoUrl: row.logo_url || "",
+    logoUrl: normalizeAssetUrl(row.logo_url || ""),
     theme: normalizeThemeKey(row.theme),
     primaryColor: row.primary_color || paletteForTheme(row.theme).primary,
     secondaryColor: row.secondary_color || "#111111",
     backgroundColor: row.color_fondo || "",
     textColor: row.color_texto || "",
     buttonColor: row.color_boton || "",
-    backgroundUrl: row.background_url || "",
+    backgroundUrl: normalizeAssetUrl(row.background_url || ""),
     active: row.active !== false,
     createdAt: row.created_at || todayISO(),
     updatedAt: row.updated_at || todayISO(),
@@ -1110,27 +1119,32 @@ class StudioStore {
     this.applyingRemote = false;
     this.dailyResetPending = false;
     this.state = this.load();
+    if (this.shouldIgnoreCrossScopeLocalSync(this.state)) {
+      this.state = normalizeTenantState(defaultState());
+    }
     this.applyDemoMaintenance();
 
     if (this.channel) {
       this.channel.onmessage = (event) => {
         if (!event.data?.type) return;
-        if (this.shouldIgnoreCrossScopeLocalSync()) {
+        const incomingState = this.loadLocalState();
+        if (this.shouldIgnoreCrossScopeLocalSync(incomingState)) {
           this.queueRemoteSync();
           return;
         }
-        this.state = this.loadLocalState();
+        this.state = incomingState;
         this.emit(event.data);
       };
     }
 
     window.addEventListener("storage", (event) => {
       if (event.key === APP_KEY) {
-        if (this.shouldIgnoreCrossScopeLocalSync()) {
+        const incomingState = this.loadLocalState();
+        if (this.shouldIgnoreCrossScopeLocalSync(incomingState)) {
           this.queueRemoteSync();
           return;
         }
-        this.state = this.loadLocalState();
+        this.state = incomingState;
         this.emit({ type: "SYNC" });
       }
     });
@@ -1159,6 +1173,7 @@ class StudioStore {
   persist(event = { type: "UPDATE" }) {
     this.invalidateBusinessBuckets();
     invalidateDerivedBusinessCache();
+    this.state = this.stateWithRuntimeScope(this.state);
     localStorage.setItem(APP_KEY, JSON.stringify(this.state));
     this.emit(event);
     this.channel?.postMessage(event);
@@ -1178,9 +1193,38 @@ class StudioStore {
     return () => this.listeners.delete(listener);
   }
 
-  shouldIgnoreCrossScopeLocalSync() {
+  currentRuntimeScopeKey(route = resolveRoute(location.pathname)) {
+    if (route.view === "super-admin") {
+      return `${route.view}:global:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
+    }
+    const scopedBusiness = this.businessBySlug(route.businessSlug) || null;
+    const scopedBusinessId =
+      route.businessSlug === DEFAULT_BUSINESS_SLUG
+        ? DEFAULT_BUSINESS_ID
+        : scopedBusiness?.id || null;
+    return `${route.view}:${scopedBusinessId || "global"}:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
+  }
+
+  stateWithRuntimeScope(state = this.state, route = resolveRoute(location.pathname)) {
+    return normalizeTenantState({
+      ...state,
+      meta: {
+        ...(state.meta || {}),
+        remoteScopeKey: this.currentRuntimeScopeKey(route),
+        remoteView: route.view,
+        remoteBusinessSlug: route.businessSlug || DEFAULT_BUSINESS_SLUG,
+      },
+    });
+  }
+
+  shouldIgnoreCrossScopeLocalSync(incomingState = null) {
+    if (!this.supabase) return false;
     const route = resolveRoute(location.pathname);
-    return Boolean(this.supabase && route.view === "super-admin");
+    const incomingScopeKey = incomingState?.meta?.remoteScopeKey || "";
+    if (!incomingScopeKey) {
+      return route.view === "super-admin";
+    }
+    return incomingScopeKey !== this.currentRuntimeScopeKey(route);
   }
 
   invalidateBusinessBuckets() {
@@ -1315,13 +1359,16 @@ class StudioStore {
             weekKey: getWeekKey(),
             selectedDate: this.state.meta.selectedDate || todayISO(),
             businessSummaryById,
+            remoteScopeKey: syncScopeKey,
+            remoteView: route.view,
+            remoteBusinessSlug: route.businessSlug || DEFAULT_BUSINESS_SLUG,
           },
           businesses: themedBusinesses.length ? themedBusinesses : defaultState().businesses,
-          barbers: [],
-          appointments: [],
-          blockedDays: [],
-          services: [],
-          barberServices: [],
+          barbers: localState.barbers || this.state.barbers || [],
+          appointments: localState.appointments || this.state.appointments || [],
+          blockedDays: localState.blockedDays || this.state.blockedDays || [],
+          services: localState.services || this.state.services || [],
+          barberServices: localState.barberServices || this.state.barberServices || [],
         };
 
         await this.syncAdminAccountsFromRemote(null, nextState.businesses);
@@ -1407,6 +1454,9 @@ class StudioStore {
           weekKey: currentWeek,
           selectedDate: this.state.meta.selectedDate || todayISO(),
           businessSummaryById: this.state.meta.businessSummaryById || {},
+          remoteScopeKey: syncScopeKey,
+          remoteView: route.view,
+          remoteBusinessSlug: route.businessSlug || DEFAULT_BUSINESS_SLUG,
         },
         businesses: scopedThemedBusinesses.length ? scopedThemedBusinesses : [scopedBusiness],
         barbers: (barbersResult.data || []).map((row, index) => mapRowToBarber(row, index)),
@@ -2018,6 +2068,7 @@ class StudioStore {
     this.state.appointments = this.state.appointments.filter((appointment) => appointment.negocioId !== businessId);
     this.state.blockedDays = this.state.blockedDays.filter((blockedDay) => blockedDay.negocioId !== businessId);
     this.state.barberServices = this.state.barberServices.filter((relation) => relation.negocioId !== businessId);
+    this.state = this.stateWithRuntimeScope(this.state);
     localStorage.setItem(APP_KEY, JSON.stringify(this.state));
     return true;
   }
@@ -2170,6 +2221,7 @@ class StudioStore {
     this.state.appointments.push(appointment);
     this.invalidateBusinessBuckets();
     invalidateDerivedBusinessCache();
+    this.state = this.stateWithRuntimeScope(this.state);
     localStorage.setItem(APP_KEY, JSON.stringify(this.state));
     const localEvent = { type: "INSERT", table: "appointments", record: appointment, source: "public_remote_safe" };
     this.emit(localEvent);
@@ -2933,6 +2985,13 @@ async function authenticateViaBackend(role, user, password, businessSlug = app.c
 
 function businessUrlSet(business) {
   const slug = business?.slug || DEFAULT_BUSINESS_SLUG;
+  if (business?.id === DEFAULT_BUSINESS_ID) {
+    return {
+      public: PRODUCTION_BASE_URL,
+      admin: `${PRODUCTION_BASE_URL}/admin-vip`,
+      barber: `${PRODUCTION_BASE_URL}/gestion-equipo`,
+    };
+  }
   return {
     public: `${PRODUCTION_BASE_URL}/barberia/${slug}`,
     admin: `${PRODUCTION_BASE_URL}/admin/${slug}`,
@@ -3071,6 +3130,7 @@ async function resolveLoginBarber(backendBarber, user, password, businessId = cu
     ...store.state.barbers.filter((barber) => !(barber.id === fallbackBarber.id && barber.negocioId === businessId)),
     fallbackBarber,
   ];
+  store.state = store.stateWithRuntimeScope(store.state);
   localStorage.setItem(APP_KEY, JSON.stringify(store.state));
   return fallbackBarber;
 }
@@ -3784,11 +3844,10 @@ function renderBusinessPublicTest() {
 function renderPublic() {
   const business = currentBusiness();
   const requested = requestedBusiness();
+  const expectedPublicScope = `public:${business?.id || DEFAULT_BUSINESS_ID}:${app.currentBusinessSlug || DEFAULT_BUSINESS_SLUG}`;
   const businessDataLoading =
-    app.currentBusinessSlug &&
-    app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG &&
-    !requested &&
-    !store.remoteReady;
+    Boolean(store.supabase && store.remoteLoadedScopeKey !== expectedPublicScope && !store.remoteReady) ||
+    Boolean(app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && !store.remoteReady);
   if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && !businessDataLoading) {
     return appShell(`
       <section class="booking-surface">
