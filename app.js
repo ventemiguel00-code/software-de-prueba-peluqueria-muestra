@@ -230,14 +230,26 @@ function escapeHTML(value) {
 }
 
 function defaultBusiness() {
+  const palette = BUSINESS_THEMES[DEFAULT_BUSINESS_THEME_KEY];
   return {
     id: DEFAULT_BUSINESS_ID,
     name: "Vision Barber",
     slug: DEFAULT_BUSINESS_SLUG,
     logoUrl: "/assets/vision-barber-logo.avif",
     theme: DEFAULT_BUSINESS_THEME_KEY,
-    primaryColor: "#d4af37",
-    secondaryColor: "#111111",
+    primaryColor: palette.primary,
+    secondaryColor: palette.secondary,
+    backgroundColor: palette.background,
+    cardColor: palette.card,
+    textColor: palette.text,
+    textSecondaryColor: palette.textSecondary,
+    titleColor: palette.title,
+    subtitleColor: palette.subtitle,
+    buttonColor: palette.button,
+    buttonHoverColor: palette.buttonHover,
+    borderColor: palette.border,
+    iconColor: palette.icon,
+    badgeColor: palette.badge,
     backgroundUrl: "",
     active: true,
     createdAt: todayISO(),
@@ -252,13 +264,15 @@ function normalizeThemeKey(themeKey = DEFAULT_BUSINESS_THEME_KEY) {
 
 function normalizeBusiness(record = {}) {
   const base = defaultBusiness();
+  const id = record.id || base.id;
   const theme = normalizeThemeKey(record.theme || base.theme);
   const palette = BUSINESS_THEMES[theme] || BUSINESS_THEMES[DEFAULT_BUSINESS_THEME_KEY];
   return {
     ...base,
     ...record,
-    id: record.id || base.id,
+    id,
     slug: String(record.slug || base.slug).trim().toLowerCase(),
+    logoUrl: record.logoUrl ?? (id === DEFAULT_BUSINESS_ID ? base.logoUrl : ""),
     theme,
     primaryColor: record.primaryColor || palette.primary,
     secondaryColor: record.secondaryColor || palette.secondary,
@@ -665,7 +679,7 @@ function mapBusinessToRow(record) {
     slug: record.slug,
     logo_url: record.logoUrl || "",
     theme: normalizeThemeKey(record.theme),
-    primary_color: record.primaryColor || "#d4af37",
+    primary_color: record.primaryColor || paletteForTheme(record.theme).primary,
     secondary_color: record.secondaryColor || "#111111",
     background_url: record.backgroundUrl || "",
     active: record.active !== false,
@@ -681,7 +695,7 @@ function mapRowToBusiness(row) {
     slug: row.slug,
     logoUrl: row.logo_url || "",
     theme: normalizeThemeKey(row.theme),
-    primaryColor: row.primary_color || "#d4af37",
+    primaryColor: row.primary_color || paletteForTheme(row.theme).primary,
     secondaryColor: row.secondary_color || "#111111",
     backgroundColor: row.color_fondo || "",
     textColor: row.color_texto || "",
@@ -3036,7 +3050,8 @@ function renderGlobalBackground() {
 function ensurePersistentBackground() {
   const existing = document.querySelector(".global-bg");
   const backgroundMedia = currentBackgroundMedia();
-  const signature = `${app.view}|${currentBusinessId()}|${backgroundMedia?.type || "image"}|${backgroundMedia?.src || ""}`;
+  const backgroundScope = app.view === "super-admin" ? "super-admin" : currentBusinessId();
+  const signature = `${backgroundScope}|${backgroundMedia?.type || "image"}|${backgroundMedia?.src || ""}`;
   if (!existing) {
     document.body.insertAdjacentHTML("afterbegin", renderGlobalBackground());
     document.body.dataset.backgroundSignature = signature;
