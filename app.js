@@ -36,6 +36,20 @@ const SUPER_ADMIN_PASSWORD_HASH = "9c92c00e241ec0c78798834456113f123762afcb4ef84
 const baseSlots = Array.from({ length: CLOSE_HOUR - OPEN_HOUR }, (_, index) =>
   `${String(OPEN_HOUR + index).padStart(2, "0")}:00`
 );
+const BUSINESS_SELECT_COLUMNS =
+  "id,business_name,slug,logo_url,theme,primary_color,secondary_color,background_url,active,created_at,updated_at";
+const BUSINESS_SETTINGS_SELECT_COLUMNS =
+  "business_id,environment_archive_meta,theme_override,environment_archive_url,environment_archive_name,public_path,custom_domain,notes,created_at";
+const BARBER_SELECT_COLUMNS =
+  "id,business_id,name,user,password,password_hash,whatsapp,active,photo,gradient,specialty,created_at";
+const APPOINTMENT_SELECT_COLUMNS =
+  "id,business_id,barber_id,date,time,status,client_name,whatsapp,source,week_key,block_origin,visit_state,notes";
+const BLOCKED_DAY_SELECT_COLUMNS = "id,business_id,barber_id,date";
+const SERVICE_SELECT_COLUMNS =
+  "id,business_id,service_name,service_value,admin_percentage,barber_percentage,active,created_at";
+const BARBER_SERVICE_SELECT_COLUMNS = "id,business_id,barber_id,service_id,active,created_at";
+const ADMIN_ACCOUNT_SELECT_COLUMNS =
+  "id,business_id,admin_name,admin_user,password_hash,role,active,created_at,updated_at";
 
 const avatarGradients = [
   "linear-gradient(145deg, #0f2f38, #c7d0d2)",
@@ -359,6 +373,28 @@ function defaultBusiness() {
     createdAt: todayISO(),
     updatedAt: todayISO(),
   };
+}
+
+function placeholderBusinessForSlug(slug = "") {
+  const cleanSlug = slugify(slug) || "barberia";
+  const palette = BUSINESS_THEMES[DEFAULT_BUSINESS_THEME_KEY];
+  return normalizeBusiness({
+    id: `missing_${cleanSlug}`,
+    name: cleanSlug
+      .split("-")
+      .filter(Boolean)
+      .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+      .join(" ") || "Barberia",
+    slug: cleanSlug,
+    logoUrl: "",
+    theme: DEFAULT_BUSINESS_THEME_KEY,
+    primaryColor: palette.primary,
+    secondaryColor: palette.secondary,
+    backgroundUrl: "",
+    active: false,
+    createdAt: todayISO(),
+    updatedAt: todayISO(),
+  });
 }
 
 function normalizeThemeKey(themeKey = DEFAULT_BUSINESS_THEME_KEY) {
@@ -1180,8 +1216,8 @@ class StudioStore {
       const route = resolveRoute(location.pathname);
       const businessesQuery =
         route.view === "super-admin"
-          ? this.supabase.from("businesses").select("*").order("created_at", { ascending: true })
-          : this.supabase.from("businesses").select("*").eq("slug", route.businessSlug).limit(1);
+          ? this.supabase.from("businesses").select(BUSINESS_SELECT_COLUMNS).order("created_at", { ascending: true })
+          : this.supabase.from("businesses").select(BUSINESS_SELECT_COLUMNS).eq("slug", route.businessSlug).limit(1);
       const businessesResult = await businessesQuery;
       if (businessesResult.error) throw businessesResult.error;
       const remoteBusinesses = (businessesResult.data || []).map(mapRowToBusiness);
@@ -1200,13 +1236,17 @@ class StudioStore {
       const mergedBusinesses =
         route.view === "super-admin"
           ? mergeBusinessesById(remoteBusinesses, missingBusinesses)
-          : mergeBusinessesById(this.state.businesses || [], localState.businesses || [], remoteBusinesses);
+          : mergeBusinessesById(
+              (this.state.businesses || []).filter((business) => business.slug === route.businessSlug),
+              (localState.businesses || []).filter((business) => business.slug === route.businessSlug),
+              remoteBusinesses
+            );
 
       const scopedBusiness =
         route.view === "super-admin"
           ? null
           : mergedBusinesses.find((business) => business.slug === route.businessSlug) ||
-            null;
+            (route.businessSlug === DEFAULT_BUSINESS_SLUG ? defaultBusiness() : placeholderBusinessForSlug(route.businessSlug));
       const scopedBusinessId =
         route.view === "super-admin"
           ? null
@@ -1216,7 +1256,7 @@ class StudioStore {
 
       if (route.view === "super-admin") {
         const [businessSettingsResult, summaryRpcResult] = await Promise.all([
-          this.supabase.from("business_settings").select("*").order("created_at", { ascending: true }),
+          this.supabase.from("business_settings").select(BUSINESS_SETTINGS_SELECT_COLUMNS).order("created_at", { ascending: true }),
           this.supabase.rpc("business_dashboard_summary", { target_date: todayISO() }),
         ]);
 
@@ -1295,7 +1335,15 @@ class StudioStore {
         if (route.view !== "super-admin" && !scopedBusinessId) {
           return Promise.resolve({ data: [], error: null });
         }
-        let query = this.supabase.from(table).select("*");
+        const columnMap = {
+          barbers: BARBER_SELECT_COLUMNS,
+          appointments: APPOINTMENT_SELECT_COLUMNS,
+          blocked_days: BLOCKED_DAY_SELECT_COLUMNS,
+          services: SERVICE_SELECT_COLUMNS,
+          barber_services: BARBER_SERVICE_SELECT_COLUMNS,
+          business_settings: BUSINESS_SETTINGS_SELECT_COLUMNS,
+        };
+        let query = this.supabase.from(table).select(columnMap[table] || "*");
         if (route.view !== "super-admin") {
           query = query.eq("business_id", scopedBusinessId);
         }
@@ -1331,7 +1379,8 @@ class StudioStore {
       const servicesData = servicesResult.error ? [] : (servicesResult.data || []).map(mapRowToService);
       const barberServicesData = barberServicesResult.error ? [] : (barberServicesResult.data || []).map(mapRowToBarberService);
       const scopedBusinessSettingsRows = businessSettingsResult.data || [];
-      const scopedThemedBusinesses = applyBusinessSettingsThemeColors(mergedBusinesses, scopedBusinessSettingsRows);
+      const scopedBusinessList = mergedBusinesses.length ? mergedBusinesses : [scopedBusiness];
+      const scopedThemedBusinesses = applyBusinessSettingsThemeColors(scopedBusinessList, scopedBusinessSettingsRows);
       this.syncBusinessSettingsToLocal(scopedBusinessSettingsRows, route.view === "super-admin" ? null : scopedBusinessId);
 
       const currentWeek = getWeekKey();
@@ -1343,7 +1392,7 @@ class StudioStore {
           selectedDate: this.state.meta.selectedDate || todayISO(),
           businessSummaryById: this.state.meta.businessSummaryById || {},
         },
-        businesses: scopedThemedBusinesses.length ? scopedThemedBusinesses : defaultState().businesses,
+        businesses: scopedThemedBusinesses.length ? scopedThemedBusinesses : [scopedBusiness],
         barbers: (barbersResult.data || []).map((row, index) => mapRowToBarber(row, index)),
         appointments: (appointmentsResult.data || [])
           .map(mapRowToAppointment)
@@ -1774,7 +1823,7 @@ class StudioStore {
 
   async syncAdminAccountsFromRemote(businessId = null, businesses = this.state.businesses) {
     if (!this.supabase) return true;
-    let query = this.supabase.from("admin_accounts").select("*").order("created_at", { ascending: true });
+    let query = this.supabase.from("admin_accounts").select(ADMIN_ACCOUNT_SELECT_COLUMNS).order("created_at", { ascending: true });
     if (businessId) {
       query = query.eq("business_id", businessId);
     }
@@ -1882,7 +1931,7 @@ class StudioStore {
 
     const existingResult = await this.supabase
       .from("business_settings")
-      .select("*")
+      .select(BUSINESS_SETTINGS_SELECT_COLUMNS)
       .eq("business_id", businessId)
       .maybeSingle();
 
@@ -2758,21 +2807,7 @@ async function validateEnvironmentArchive(file) {
 
 function currentBusiness() {
   if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG) {
-    return (
-      requestedBusiness() || {
-        id: `missing_${app.currentBusinessSlug}`,
-        name: "Barberia",
-        slug: app.currentBusinessSlug,
-        logoUrl: "",
-        theme: DEFAULT_BUSINESS_THEME_KEY,
-        primaryColor: BUSINESS_THEMES[DEFAULT_BUSINESS_THEME_KEY].primary,
-        secondaryColor: BUSINESS_THEMES[DEFAULT_BUSINESS_THEME_KEY].secondary,
-        backgroundUrl: "",
-        active: false,
-        createdAt: todayISO(),
-        updatedAt: todayISO(),
-      }
-    );
+    return requestedBusiness() || placeholderBusinessForSlug(app.currentBusinessSlug);
   }
   return store.businessById(DEFAULT_BUSINESS_ID) || defaultBusiness();
 }
