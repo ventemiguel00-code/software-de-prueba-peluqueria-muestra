@@ -2536,6 +2536,24 @@ function persistVisualRouteState() {
   }
 }
 
+function detectDeviceProfile() {
+  const width = window.innerWidth || document.documentElement.clientWidth || 1024;
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)")?.matches || false;
+  if (width <= 760) return { type: "mobile", touch: coarsePointer };
+  if (width <= 1100 || coarsePointer) return { type: "tablet", touch: coarsePointer };
+  return { type: "desktop", touch: coarsePointer };
+}
+
+function applyDeviceProfile() {
+  const profile = detectDeviceProfile();
+  if (document.body.dataset.device === profile.type && document.body.dataset.touch === String(profile.touch)) {
+    return false;
+  }
+  document.body.dataset.device = profile.type;
+  document.body.dataset.touch = String(profile.touch);
+  return true;
+}
+
 function loadScopedBusinessSession(baseKey, businessSlug, legacyKey = baseKey) {
   const scoped = readStoredJSON(sessionStorage, businessScopedSessionKey(baseKey, businessSlug));
   if (scoped) return scoped;
@@ -5335,6 +5353,7 @@ function render() {
   if (app.view === "barber" && (!app.barberSession || app.barberSession.businessSlug !== app.currentBusinessSlug)) {
     app.barberSession = loadScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
   }
+  applyDeviceProfile();
   applyVisualRouteState();
   store.subscribeRemote();
   const views = {
@@ -6890,6 +6909,7 @@ store.subscribe((state, event) => {
 });
 
 window.addEventListener("resize", () => {
+  applyDeviceProfile();
   cancelAnimationFrame(titleFitFrame);
   titleFitFrame = requestAnimationFrame(fitPanelTitles);
 });

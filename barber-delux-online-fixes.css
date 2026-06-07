@@ -141,3 +141,184 @@
     width: 100%;
   }
 }
+
+/* Experiencia adaptativa por dispositivo. La deteccion solo agrega data-device/data-touch al body. */
+body[data-device="mobile"] {
+  --adaptive-panel-gap: 14px;
+  --adaptive-touch-size: 50px;
+}
+
+body[data-device="tablet"] {
+  --adaptive-panel-gap: 18px;
+  --adaptive-touch-size: 48px;
+}
+
+body[data-device="desktop"] {
+  --adaptive-panel-gap: 22px;
+  --adaptive-touch-size: 42px;
+}
+
+body[data-touch="true"] button,
+body[data-touch="true"] input,
+body[data-touch="true"] select,
+body[data-touch="true"] textarea,
+body[data-touch="true"] .primary-action,
+body[data-touch="true"] .secondary-action,
+body[data-touch="true"] .icon-action {
+  min-height: var(--adaptive-touch-size);
+}
+
+body[data-device="mobile"] .topbar {
+  position: sticky;
+  gap: 12px;
+  padding: 12px;
+}
+
+body[data-device="mobile"] .brand {
+  width: 100%;
+}
+
+body[data-device="mobile"] .brand-mark {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+}
+
+body[data-device="mobile"] .nav-tabs {
+  width: 100%;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+body[data-device="mobile"] .nav-tabs button {
+  min-width: 0;
+  padding: 0 8px;
+  border-radius: 16px;
+}
+
+body[data-device="mobile"] main,
+body[data-device="mobile"] .workspace,
+body[data-device="mobile"] .admin-layout,
+body[data-device="mobile"] .super-admin-shell {
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: clip;
+}
+
+body[data-device="mobile"] .booking-surface,
+body[data-device="mobile"] .admin-main,
+body[data-device="mobile"] .login-panel,
+body[data-device="mobile"] .super-business-card,
+body[data-device="mobile"] .super-business-panel {
+  border-radius: 20px;
+  padding: 16px;
+}
+
+body[data-device="mobile"] .public-barber-grid,
+body[data-device="mobile"] .public-slots,
+body[data-device="mobile"] .dashboard-cards,
+body[data-device="mobile"] .metric-row,
+body[data-device="mobile"] .admin-barber-grid,
+body[data-device="mobile"] .super-business-grid {
+  grid-template-columns: 1fr !important;
+  gap: var(--adaptive-panel-gap);
+}
+
+body[data-device="mobile"] .date-strip,
+body[data-device="mobile"] .week-cards {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(72px, 1fr);
+  grid-template-columns: none;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: x proximity;
+  padding-bottom: 4px;
+}
+
+body[data-device="mobile"] .date-strip button,
+body[data-device="mobile"] .week-cards button {
+  scroll-snap-align: start;
+  min-height: 70px;
+}
+
+body[data-device="mobile"] .slot-row,
+body[data-device="mobile"] .readonly .slot-row,
+body[data-device="mobile"] .selected-admin-head,
+body[data-device="mobile"] .barber-heading {
+  grid-template-columns: 1fr;
+  align-items: start;
+}
+
+body[data-device="mobile"] .barber-heading {
+  display: grid;
+  justify-items: start;
+  gap: 14px;
+}
+
+body[data-device="mobile"] .barber-heading .avatar.lg {
+  width: 104px;
+  height: 104px;
+}
+
+body[data-device="mobile"] .public-barber-card {
+  min-height: 172px;
+}
+
+body[data-device="mobile"] .public-barber-card .avatar.lg {
+  width: 104px;
+  height: 104px;
+}
+
+body[data-device="mobile"] .step-toolbar,
+body[data-device="mobile"] .button-row,
+body[data-device="mobile"] .row-actions {
+  gap: 10px;
+}
+
+body[data-device="mobile"] .step-toolbar > *,
+body[data-device="mobile"] .button-row > *,
+body[data-device="mobile"] .row-actions > * {
+  flex: 1 1 100%;
+}
+
+body[data-device="mobile"] input,
+body[data-device="mobile"] select,
+body[data-device="mobile"] textarea {
+  font-size: 16px;
+}
+
+body[data-device="tablet"] .public-barber-grid,
+body[data-device="tablet"] .public-slots,
+body[data-device="tablet"] .admin-barber-grid,
+body[data-device="tablet"] .dashboard-cards,
+body[data-device="tablet"] .super-business-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body[data-device="tablet"] .booking-surface,
+body[data-device="tablet"] .admin-main,
+body[data-device="tablet"] .super-business-panel {
+  padding: 22px;
+}
+
+body[data-device="tablet"] .nav-tabs button {
+  min-height: var(--adaptive-touch-size);
+}
+
+body[data-device="desktop"] .dashboard-cards,
+body[data-device="desktop"] .public-barber-grid,
+body[data-device="desktop"] .admin-barber-grid {
+  gap: var(--adaptive-panel-gap);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
