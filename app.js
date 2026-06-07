@@ -350,6 +350,36 @@ function colorsForBusiness(business = currentBusiness()) {
   };
 }
 
+function applyThemeColorsToRoot(colors) {
+  const rootStyle = document.documentElement.style;
+  rootStyle.setProperty("--color-primary", colors.primary);
+  rootStyle.setProperty("--color-secondary", colors.secondary);
+  rootStyle.setProperty("--color-background", colors.background);
+  rootStyle.setProperty("--color-card", colors.card);
+  rootStyle.setProperty("--color-text", colors.text);
+  rootStyle.setProperty("--color-text-secondary", colors.textSecondary);
+  rootStyle.setProperty("--color-title", colors.title);
+  rootStyle.setProperty("--color-subtitle", colors.subtitle);
+  rootStyle.setProperty("--color-button", colors.button);
+  rootStyle.setProperty("--color-button-hover", colors.buttonHover);
+  rootStyle.setProperty("--color-border", colors.border);
+  rootStyle.setProperty("--color-icon", colors.icon);
+  rootStyle.setProperty("--color-badge", colors.badge);
+  rootStyle.setProperty("--petrol", colors.primary);
+  rootStyle.setProperty("--petrol-bright", colors.buttonHover);
+  rootStyle.setProperty("--black", colors.background);
+  rootStyle.setProperty("--matte", colors.secondary);
+  rootStyle.setProperty("--graphite", colors.card);
+  rootStyle.setProperty("--graphite-2", colors.card);
+  rootStyle.setProperty("--white", colors.text);
+  rootStyle.setProperty("--muted", colors.textSecondary);
+  rootStyle.setProperty("--silver", colors.textSecondary);
+  rootStyle.setProperty("--line", `${colors.border}59`);
+  rootStyle.setProperty("--line-strong", `${colors.border}82`);
+  rootStyle.setProperty("--glass", `${colors.secondary}c7`);
+  rootStyle.setProperty("--glass-soft", `${colors.primary}12`);
+}
+
 function businessThemePatch(themeKey = DEFAULT_BUSINESS_THEME_KEY) {
   const normalizedTheme = normalizeThemeKey(themeKey);
   const palette = paletteForTheme(themeKey);
@@ -390,15 +420,26 @@ function businessThemePatchFromMeta(themeColors = {}) {
   };
 }
 
+function businessBrandingPatchFromMeta(meta = {}) {
+  const logoUrl = meta?.logoUrl || meta?.logo_url || meta?.businessLogoUrl || "";
+  return {
+    ...(logoUrl ? { logoUrl } : {}),
+  };
+}
+
 function applyBusinessSettingsThemeColors(businesses = [], settingsRows = []) {
-  const themeByBusiness = new Map(
+  const settingsByBusiness = new Map(
     (settingsRows || [])
-      .filter((row) => row?.business_id && row?.environment_archive_meta?.themeColors)
-      .map((row) => [row.business_id, businessThemePatchFromMeta(row.environment_archive_meta.themeColors)])
+      .filter((row) => row?.business_id)
+      .map((row) => [row.business_id, row.environment_archive_meta || {}])
   );
   return (businesses || []).map((business) =>
-    themeByBusiness.has(business.id)
-      ? normalizeBusiness({ ...business, ...themeByBusiness.get(business.id) })
+    settingsByBusiness.has(business.id)
+      ? normalizeBusiness({
+          ...business,
+          ...businessBrandingPatchFromMeta(settingsByBusiness.get(business.id)),
+          ...businessThemePatchFromMeta(settingsByBusiness.get(business.id).themeColors),
+        })
       : business
   );
 }
@@ -1622,7 +1663,13 @@ class StudioStore {
       if (meta?.themeColors && businessesById.has(scopedBusinessId)) {
         businessesById.set(scopedBusinessId, normalizeBusiness({
           ...businessesById.get(scopedBusinessId),
+          ...businessBrandingPatchFromMeta(meta),
           ...businessThemePatchFromMeta(meta.themeColors),
+        }));
+      } else if (businessesById.has(scopedBusinessId)) {
+        businessesById.set(scopedBusinessId, normalizeBusiness({
+          ...businessesById.get(scopedBusinessId),
+          ...businessBrandingPatchFromMeta(meta),
         }));
       }
     } else {
@@ -1638,7 +1685,13 @@ class StudioStore {
         if (meta?.themeColors) {
           businessesById.set(business.id, normalizeBusiness({
             ...business,
+            ...businessBrandingPatchFromMeta(meta),
             ...businessThemePatchFromMeta(meta.themeColors),
+          }));
+        } else if (businessBrandingPatchFromMeta(meta).logoUrl) {
+          businessesById.set(business.id, normalizeBusiness({
+            ...business,
+            ...businessBrandingPatchFromMeta(meta),
           }));
         }
       });
@@ -2222,6 +2275,7 @@ function stateFromCurrentUrl() {
   const params = new URLSearchParams(location.search);
   return {
     superBusinessId: params.get("negocio") || "",
+    superCreateOpen: params.get("crear") || "",
     adminView: params.get("section") || "",
     adminOpenPanel: params.get("panel") || "",
     adminBarberId: params.get("barbero") || "",
@@ -2242,6 +2296,9 @@ function applyVisualRouteState() {
   if (app.view === "super-admin" && state.superBusinessId) {
     app.superAdminOpenBusinessId = state.superBusinessId;
   }
+  if (app.view === "super-admin" && state.superCreateOpen) {
+    app.superAdminCreateOpen = state.superCreateOpen === "1";
+  }
   if (app.view === "admin") {
     if (state.adminView) app.adminView = state.adminView;
     if (state.adminOpenPanel) app.adminOpenPanel = state.adminOpenPanel;
@@ -2257,6 +2314,7 @@ function persistVisualRouteState() {
   const routeKey = visualRouteKey();
   const state = {
     superBusinessId: app.superAdminOpenBusinessId || "",
+    superCreateOpen: app.superAdminCreateOpen ? "1" : "",
     adminView: app.adminView || "",
     adminOpenPanel: app.adminOpenPanel || "",
     adminBarberId: app.adminBarberId || "",
@@ -2268,6 +2326,7 @@ function persistVisualRouteState() {
 
   const params = new URLSearchParams();
   if (app.view === "super-admin" && state.superBusinessId) params.set("negocio", state.superBusinessId);
+  if (app.view === "super-admin" && state.superCreateOpen) params.set("crear", "1");
   if (app.view === "admin") {
     if (state.adminView && state.adminView !== "home") params.set("section", state.adminView);
     if (state.adminOpenPanel) params.set("panel", state.adminOpenPanel);
@@ -2885,6 +2944,7 @@ const app = {
   superAdminPendingLogoFiles: {},
   superAdminPendingEnvironmentArchives: {},
   superAdminOpenBusinessId: "",
+  superAdminCreateOpen: false,
   adminLoginError: "",
   adminAccountMessage: "",
   adminActionMessage: "",
@@ -3144,41 +3204,18 @@ function businessThemeStyle(business = currentBusiness()) {
 
 function businessLogoMarkup(business = currentBusiness()) {
   return business?.logoUrl
-    ? `<span class="brand-mark business-logo-mark" style="background-image:url('${escapeHTML(business.logoUrl)}')"></span>`
+    ? `<span class="brand-mark business-logo-mark has-logo"><img src="${escapeHTML(business.logoUrl)}" alt="Logo ${escapeHTML(business.name || "barberia")}" loading="eager" /></span>`
     : `<span class="brand-mark business-logo-mark empty-logo">${escapeHTML((business?.name || "B").slice(0, 1).toUpperCase())}</span>`;
 }
 
 function refreshPersistentShellBrand() {
-  if (app.view === "super-admin") return;
+  if (app.view === "super-admin") {
+    applyThemeColorsToRoot(colorsForBusiness(defaultBusiness()));
+    return;
+  }
   const business = currentBusiness();
   const colors = colorsForBusiness(business);
-  const rootStyle = document.documentElement.style;
-  rootStyle.setProperty("--color-primary", colors.primary);
-  rootStyle.setProperty("--color-secondary", colors.secondary);
-  rootStyle.setProperty("--color-background", colors.background);
-  rootStyle.setProperty("--color-card", colors.card);
-  rootStyle.setProperty("--color-text", colors.text);
-  rootStyle.setProperty("--color-text-secondary", colors.textSecondary);
-  rootStyle.setProperty("--color-title", colors.title);
-  rootStyle.setProperty("--color-subtitle", colors.subtitle);
-  rootStyle.setProperty("--color-button", colors.button);
-  rootStyle.setProperty("--color-button-hover", colors.buttonHover);
-  rootStyle.setProperty("--color-border", colors.border);
-  rootStyle.setProperty("--color-icon", colors.icon);
-  rootStyle.setProperty("--color-badge", colors.badge);
-  rootStyle.setProperty("--petrol", colors.primary);
-  rootStyle.setProperty("--petrol-bright", colors.buttonHover);
-  rootStyle.setProperty("--black", colors.background);
-  rootStyle.setProperty("--matte", colors.secondary);
-  rootStyle.setProperty("--graphite", colors.card);
-  rootStyle.setProperty("--graphite-2", colors.card);
-  rootStyle.setProperty("--white", colors.text);
-  rootStyle.setProperty("--muted", colors.textSecondary);
-  rootStyle.setProperty("--silver", colors.textSecondary);
-  rootStyle.setProperty("--line", `${colors.border}59`);
-  rootStyle.setProperty("--line-strong", `${colors.border}82`);
-  rootStyle.setProperty("--glass", `${colors.secondary}c7`);
-  rootStyle.setProperty("--glass-soft", `${colors.primary}12`);
+  applyThemeColorsToRoot(colors);
   const topbar = document.querySelector(".topbar");
   const brand = document.querySelector(".brand");
   if (topbar) topbar.setAttribute("style", businessThemeStyle(business));
@@ -4324,6 +4361,52 @@ function renderSuperAdmin() {
       </article>`;
     })
     .join("");
+  const createBusinessPanel = `<article class="admin-account-card super-business-card ${app.superAdminCreateOpen ? "is-open" : ""}">
+    <div class="super-business-summary">
+      <button class="super-business-summary__trigger" type="button" data-toggle-super-create aria-expanded="${app.superAdminCreateOpen ? "true" : "false"}">
+        <div class="super-business-summary__brand">
+          <div class="super-business-summary__logo"><span>+</span></div>
+          <div class="super-business-summary__copy">
+            <h3>Crear barberia</h3>
+            <p>Nuevo entorno independiente con plantilla base dinamica</p>
+          </div>
+        </div>
+        <div class="super-business-summary__stats">
+          <span><strong>Nuevo</strong> negocio</span>
+          <span><strong>Usuario</strong> Desarrollo</span>
+          <span><strong>URL</strong> automatica</span>
+        </div>
+      </button>
+      <div class="super-business-summary__actions">
+        <span class="super-business-summary__toggle">${app.superAdminCreateOpen ? "-" : "+"}</span>
+      </div>
+    </div>
+    <div class="super-business-panel" ${app.superAdminCreateOpen ? "" : "hidden"}>
+      ${app.superAdminMessage ? `<p class="form-note">${escapeHTML(app.superAdminMessage)}</p>` : ""}
+      ${credentialReveal}
+      <form id="super-business-create" class="editor-card">
+        <div class="form-grid">
+          <label>Nombre del negocio<input name="name" required placeholder="Barberia Elite" /></label>
+          <label>Slug URL<input name="slug" placeholder="Se genera automaticamente desde el nombre" /></label>
+          <label>Tema
+            <select name="theme">
+              ${Object.entries(BUSINESS_THEMES).map(([key, theme]) => `<option value="${key}">${escapeHTML(theme.label)}</option>`).join("")}
+            </select>
+          </label>
+          <label class="file-control">Subir logo<input name="logo" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" data-business-logo-input="create" /></label>
+          <label class="file-control">Adjuntar Entorno<input name="environmentArchive" type="file" accept=".zip,.rar,application/zip,application/vnd.rar,application/x-rar-compressed" data-business-environment-input="create" /></label>
+          <label>Administrador principal<input name="adminName" required placeholder="Nombre administrador" /></label>
+        </div>
+        <div class="super-admin-logo-preview">${app.superAdminPendingLogos.create ? `<img src="${escapeHTML(app.superAdminPendingLogos.create)}" alt="Vista previa logo" />` : `<span>Vista previa del logo</span>`}</div>
+        <div class="super-admin-environment-preview">${app.superAdminPendingEnvironmentArchives.create ? `<strong>${escapeHTML(app.superAdminPendingEnvironmentArchives.create.fileName)}</strong><span>${escapeHTML(summarizeEnvironmentAttachment(app.superAdminPendingEnvironmentArchives.create))}</span>` : `<span>Si no adjuntas entorno, la barberia usara la plantilla base dinamica.</span>`}</div>
+        <p class="microcopy">El usuario administrador inicial se crea automaticamente como <strong>Desarrollo</strong> y el sistema genera una clave temporal segura.</p>
+        <label class="toggle-line"><input name="active" type="checkbox" checked /> Negocio activo</label>
+        <div class="button-row">
+          <button class="primary-action">Crear barberia</button>
+        </div>
+      </form>
+    </div>
+  </article>`;
 
   if (!app.superAdminSession) {
     return appShell(`
@@ -4360,30 +4443,8 @@ function renderSuperAdmin() {
         </div>
       </section>
       <section class="admin-main">
-        <div class="section-title"><span>+</span><h2>Crear barberia</h2></div>
-        ${app.superAdminMessage ? `<p class="form-note">${escapeHTML(app.superAdminMessage)}</p>` : ""}
-        ${credentialReveal}
-        <form id="super-business-create" class="editor-card">
-          <div class="form-grid">
-            <label>Nombre del negocio<input name="name" required placeholder="Barberia Elite" /></label>
-            <label>Slug URL<input name="slug" placeholder="Se genera automaticamente desde el nombre" /></label>
-            <label>Tema
-              <select name="theme">
-                ${Object.entries(BUSINESS_THEMES).map(([key, theme]) => `<option value="${key}">${escapeHTML(theme.label)}</option>`).join("")}
-              </select>
-            </label>
-            <label class="file-control">Subir logo<input name="logo" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" data-business-logo-input="create" /></label>
-            <label class="file-control">Adjuntar Entorno<input name="environmentArchive" type="file" accept=".zip,.rar,application/zip,application/vnd.rar,application/x-rar-compressed" data-business-environment-input="create" /></label>
-            <label>Administrador principal<input name="adminName" required placeholder="Nombre administrador" /></label>
-          </div>
-          <div class="super-admin-logo-preview">${app.superAdminPendingLogos.create ? `<img src="${escapeHTML(app.superAdminPendingLogos.create)}" alt="Vista previa logo" />` : `<span>Vista previa del logo</span>`}</div>
-          <div class="super-admin-environment-preview">${app.superAdminPendingEnvironmentArchives.create ? `<strong>${escapeHTML(app.superAdminPendingEnvironmentArchives.create.fileName)}</strong><span>${escapeHTML(summarizeEnvironmentAttachment(app.superAdminPendingEnvironmentArchives.create))}</span>` : `<span>Si no adjuntas entorno, la barberia usara la plantilla base dinamica.</span>`}</div>
-          <p class="microcopy">El usuario administrador inicial se crea automaticamente como <strong>Desarrollo</strong> y el sistema genera una clave temporal segura.</p>
-          <label class="toggle-line"><input name="active" type="checkbox" checked /> Negocio activo</label>
-          <div class="button-row">
-            <button class="primary-action">Crear barberia</button>
-          </div>
-        </form>
+        <div class="section-title"><span>+</span><h2>Nuevo negocio</h2></div>
+        ${createBusinessPanel}
       </section>
       <section class="admin-main">
         <div class="section-title"><span>L</span><h2>Listado de negocios</h2></div>
@@ -4532,6 +4593,52 @@ function renderSuperAdminV2() {
       </article>`;
     })
     .join("");
+  const createBusinessPanel = `<article class="admin-account-card super-business-card ${app.superAdminCreateOpen ? "is-open" : ""}">
+    <div class="super-business-summary">
+      <button class="super-business-summary__trigger" type="button" data-toggle-super-create aria-expanded="${app.superAdminCreateOpen ? "true" : "false"}">
+        <div class="super-business-summary__brand">
+          <div class="super-business-summary__logo"><span>+</span></div>
+          <div class="super-business-summary__copy">
+            <h3>Crear barberia</h3>
+            <p>Nuevo entorno independiente con plantilla base dinamica</p>
+          </div>
+        </div>
+        <div class="super-business-summary__stats">
+          <span><strong>Nuevo</strong> negocio</span>
+          <span><strong>Usuario</strong> Desarrollo</span>
+          <span><strong>URL</strong> automatica</span>
+        </div>
+      </button>
+      <div class="super-business-summary__actions">
+        <span class="super-business-summary__toggle">${app.superAdminCreateOpen ? "-" : "+"}</span>
+      </div>
+    </div>
+    <div class="super-business-panel" ${app.superAdminCreateOpen ? "" : "hidden"}>
+      ${app.superAdminMessage ? `<p class="form-note">${escapeHTML(app.superAdminMessage)}</p>` : ""}
+      ${credentialReveal}
+      <form id="super-business-create" class="editor-card">
+        <div class="form-grid">
+          <label>Nombre del negocio<input name="name" required placeholder="Barberia Elite" /></label>
+          <label>Slug URL<input name="slug" placeholder="Se genera automaticamente desde el nombre" /></label>
+          <label>Tema
+            <select name="theme">
+              ${Object.entries(BUSINESS_THEMES).map(([key, theme]) => `<option value="${key}">${escapeHTML(theme.label)}</option>`).join("")}
+            </select>
+          </label>
+          <label class="file-control">Subir logo<input name="logo" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" data-business-logo-input="create" /></label>
+          <label class="file-control">Adjuntar Entorno<input name="environmentArchive" type="file" accept=".zip,.rar,application/zip,application/vnd.rar,application/x-rar-compressed" data-business-environment-input="create" /></label>
+          <label>Administrador principal<input name="adminName" required placeholder="Nombre administrador" /></label>
+        </div>
+        <div class="super-admin-logo-preview">${app.superAdminPendingLogos.create ? `<img src="${escapeHTML(app.superAdminPendingLogos.create)}" alt="Vista previa logo" />` : `<span>Vista previa del logo</span>`}</div>
+        <div class="super-admin-environment-preview">${app.superAdminPendingEnvironmentArchives.create ? `<strong>${escapeHTML(app.superAdminPendingEnvironmentArchives.create.fileName)}</strong><span>${escapeHTML(summarizeEnvironmentAttachment(app.superAdminPendingEnvironmentArchives.create))}</span>` : `<span>Si no adjuntas entorno, la barberia usara la plantilla base dinamica.</span>`}</div>
+        <p class="microcopy">El usuario administrador inicial se crea automaticamente como <strong>Desarrollo</strong> y el sistema genera una clave temporal segura.</p>
+        <label class="toggle-line"><input name="active" type="checkbox" checked /> Negocio activo</label>
+        <div class="button-row">
+          <button class="primary-action">Crear barberia</button>
+        </div>
+      </form>
+    </div>
+  </article>`;
 
   if (!app.superAdminSession) {
     return appShell(`
@@ -4568,30 +4675,8 @@ function renderSuperAdminV2() {
         </div>
       </section>
       <section class="admin-main">
-        <div class="section-title"><span>+</span><h2>Crear barberia</h2></div>
-        ${app.superAdminMessage ? `<p class="form-note">${escapeHTML(app.superAdminMessage)}</p>` : ""}
-        ${credentialReveal}
-        <form id="super-business-create" class="editor-card">
-          <div class="form-grid">
-            <label>Nombre del negocio<input name="name" required placeholder="Barberia Elite" /></label>
-            <label>Slug URL<input name="slug" placeholder="Se genera automaticamente desde el nombre" /></label>
-            <label>Tema
-              <select name="theme">
-                ${Object.entries(BUSINESS_THEMES).map(([key, theme]) => `<option value="${key}">${escapeHTML(theme.label)}</option>`).join("")}
-              </select>
-            </label>
-            <label class="file-control">Subir logo<input name="logo" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" data-business-logo-input="create" /></label>
-            <label class="file-control">Adjuntar Entorno<input name="environmentArchive" type="file" accept=".zip,.rar,application/zip,application/vnd.rar,application/x-rar-compressed" data-business-environment-input="create" /></label>
-            <label>Administrador principal<input name="adminName" required placeholder="Nombre administrador" /></label>
-          </div>
-          <div class="super-admin-logo-preview">${app.superAdminPendingLogos.create ? `<img src="${escapeHTML(app.superAdminPendingLogos.create)}" alt="Vista previa logo" />` : `<span>Vista previa del logo</span>`}</div>
-          <div class="super-admin-environment-preview">${app.superAdminPendingEnvironmentArchives.create ? `<strong>${escapeHTML(app.superAdminPendingEnvironmentArchives.create.fileName)}</strong><span>${escapeHTML(summarizeEnvironmentAttachment(app.superAdminPendingEnvironmentArchives.create))}</span>` : `<span>Si no adjuntas entorno, la barberia usara la plantilla base dinamica.</span>`}</div>
-          <p class="microcopy">El usuario administrador inicial se crea automaticamente como <strong>Desarrollo</strong> y el sistema genera una clave temporal segura.</p>
-          <label class="toggle-line"><input name="active" type="checkbox" checked /> Negocio activo</label>
-          <div class="button-row">
-            <button class="primary-action">Crear barberia</button>
-          </div>
-        </form>
+        <div class="section-title"><span>+</span><h2>Nuevo negocio</h2></div>
+        ${createBusinessPanel}
       </section>
       <section class="admin-main">
         <div class="section-title"><span>L</span><h2>Listado de negocios</h2></div>
@@ -5232,6 +5317,11 @@ function bindEvents() {
     });
   });
 
+  document.querySelector("[data-toggle-super-create]")?.addEventListener("click", () => {
+    app.superAdminCreateOpen = !app.superAdminCreateOpen;
+    render();
+  });
+
   document.querySelectorAll("[data-business-logo-input]").forEach((input) => {
     input.addEventListener("change", async (event) => {
       const file = event.currentTarget.files?.[0];
@@ -5260,6 +5350,7 @@ function bindEvents() {
         [targetKey]: file,
       };
       app.superAdminOpenBusinessId = targetKey !== "create" ? targetKey : app.superAdminOpenBusinessId;
+      app.superAdminCreateOpen = targetKey === "create" ? true : app.superAdminCreateOpen;
       if (targetKey !== "create") {
         const business = store.businessById(targetKey);
         if (business) {
@@ -5272,6 +5363,9 @@ function bindEvents() {
             }
             store.saveBusiness({ ...business, logoUrl });
             await store.updateBusinessLogoRemote(business.id, logoUrl);
+            await store.upsertBusinessSettingsRemote(business.id, {
+              environment_archive_meta: { logoUrl },
+            });
             app.superAdminPendingLogos = { ...app.superAdminPendingLogos, [targetKey]: "" };
             app.superAdminPendingLogoFiles = { ...app.superAdminPendingLogoFiles, [targetKey]: null };
             app.superAdminMessage = `Logo actualizado para ${business.name}.`;
@@ -5291,6 +5385,9 @@ function bindEvents() {
     input.addEventListener("change", async (event) => {
       const file = event.currentTarget.files?.[0];
       const targetKey = event.currentTarget.dataset.businessEnvironmentInput || "create";
+      if (targetKey === "create") {
+        app.superAdminCreateOpen = true;
+      }
       if (!file) {
         app.superAdminPendingEnvironmentArchives = {
           ...app.superAdminPendingEnvironmentArchives,
@@ -5355,6 +5452,9 @@ function bindEvents() {
         if (logoUrl) {
           business = store.saveBusiness({ ...business, logoUrl });
           await store.updateBusinessLogoRemote(business.id, logoUrl);
+          await store.upsertBusinessSettingsRemote(business.id, {
+            environment_archive_meta: { logoUrl },
+          });
         }
       } catch (error) {
         store.deleteBusiness(business.id);
@@ -5452,6 +5552,7 @@ function bindEvents() {
       create: null,
     };
     app.superAdminOpenBusinessId = business.id;
+    app.superAdminCreateOpen = false;
     app.superAdminMessage = environmentAttachment
       ? `Barberia creada: ${business.name}. El entorno adjunto quedo asociado y el negocio inicia sin datos operativos.`
       : `Barberia creada: ${business.name}. Se usara la plantilla base dinamica del sistema y el negocio inicia sin datos operativos.`;
@@ -5477,6 +5578,9 @@ function bindEvents() {
             throw new Error("Supabase Storage no devolvio URL publica para el logo.");
           }
           await store.updateBusinessLogoRemote(current.id, logoUrl);
+          await store.upsertBusinessSettingsRemote(current.id, {
+            environment_archive_meta: { logoUrl },
+          });
         } catch (error) {
           app.superAdminMessage = "No fue posible subir el logo. Verifica el bucket logos-negocios en Supabase Storage.";
           console.error("Business logo upload failed", error);
