@@ -1099,6 +1099,7 @@ class StudioStore {
     this.supabase = createSupabaseClient();
     this.remoteChannel = null;
     this.remoteScopeKey = "";
+    this.remoteLoadedScopeKey = "";
     this.remoteReady = false;
     this.syncInFlight = false;
     this.syncQueued = false;
@@ -1253,6 +1254,7 @@ class StudioStore {
           : route.businessSlug === DEFAULT_BUSINESS_SLUG
             ? DEFAULT_BUSINESS_ID
             : scopedBusiness?.id || null;
+      const syncScopeKey = `${route.view}:${scopedBusinessId || "global"}:${route.businessSlug || ""}`;
 
       if (route.view === "super-admin") {
         const [businessSettingsResult, summaryRpcResult] = await Promise.all([
@@ -1314,6 +1316,7 @@ class StudioStore {
         this.applyingRemote = true;
         this.state = nextState;
         localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+        this.remoteLoadedScopeKey = syncScopeKey;
         this.remoteReady = true;
 
         if (!quiet) {
@@ -1409,6 +1412,7 @@ class StudioStore {
       this.applyingRemote = true;
       this.state = nextState;
       localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+      this.remoteLoadedScopeKey = syncScopeKey;
       this.remoteReady = true;
 
       if (replicatedBusinessIds.length) {
@@ -1481,6 +1485,8 @@ class StudioStore {
       this.remoteChannel = null;
     }
     this.remoteScopeKey = scopeKey;
+    const scopeWasLoaded = this.remoteLoadedScopeKey === scopeKey;
+    this.remoteReady = scopeWasLoaded;
     const appointmentConfig =
       route.view === "super-admin"
         ? { event: "*", schema: "public", table: "appointments" }
@@ -1534,6 +1540,9 @@ class StudioStore {
         this.queueRemoteSync();
       })
       .subscribe();
+    if (!scopeWasLoaded) {
+      this.queueRemoteSync();
+    }
   }
 
   async persistRemote(event) {
@@ -4652,6 +4661,28 @@ function renderSuperAdminV2() {
     app.superAdminSession,
     { role: "super_admin", businessSlug: DEFAULT_BUSINESS_SLUG }
   );
+
+  const expectedSuperAdminScope = `super-admin:global:${DEFAULT_BUSINESS_SLUG}`;
+  if (app.superAdminSession && store.supabase && (!store.remoteReady || store.remoteLoadedScopeKey !== expectedSuperAdminScope)) {
+    return appShell(`
+      <section class="dashboard-head">
+        <div>
+          <p class="eyebrow">Control SaaS</p>
+          <h1>SUPER ADMINISTRADOR</h1>
+        </div>
+        <button class="secondary-action" data-super-logout>Cerrar sesion</button>
+      </section>
+      <section class="admin-stack">
+        <section class="admin-main super-admin-loading">
+          <div class="section-title"><span>S</span><h2>Sincronizando barberias</h2></div>
+          <p class="microcopy">Cargando la informacion completa de tus negocios desde Supabase...</p>
+          <div class="super-admin-loading-grid" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+        </section>
+      </section>
+    `);
+  }
 
   const businesses = [...store.state.businesses].sort((a, b) => a.name.localeCompare(b.name, "es"));
   const credentialReveal = app.superAdminCredentialReveal

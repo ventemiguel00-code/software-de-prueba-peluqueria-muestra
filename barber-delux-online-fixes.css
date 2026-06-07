@@ -372,3 +372,38 @@ body[data-device="desktop"] .dashboard-head > .barber-heading .avatar.lg {
   background-repeat: no-repeat !important;
   background-color: color-mix(in srgb, var(--color-card) 72%, #ffffff) !important;
 }
+
+.super-admin-loading {
+  display: grid;
+  gap: 18px;
+}
+
+.super-admin-loading-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.super-admin-loading-grid span {
+  min-height: 92px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 28%, transparent);
+  border-radius: 20px;
+  background:
+    linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-primary) 12%, transparent), transparent),
+    color-mix(in srgb, var(--color-card) 78%, transparent);
+  background-size: 240% 100%;
+  animation: superAdminLoadingPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes superAdminLoadingPulse {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+body[data-device="mobile"] .super-admin-loading-grid {
+  grid-template-columns: 1fr;
+}
