@@ -68,6 +68,21 @@ const BUSINESS_THEME_ALIASES = {
   gray_black: "gold-prestige",
   orange_black: "gold-prestige",
 };
+const LOADING_BUSINESS_PALETTE = {
+  primary: "#7DD3FC",
+  secondary: "#101418",
+  background: "#070A0D",
+  card: "#141A20",
+  text: "#F8FAFC",
+  textSecondary: "#B6C2CC",
+  title: "#F8FAFC",
+  subtitle: "#D8E2EA",
+  button: "#24313B",
+  buttonHover: "#314454",
+  border: "#334452",
+  icon: "#9EDDFB",
+  badge: "#9EDDFB",
+};
 const BUSINESS_THEMES = {
   "gold-prestige": {
     label: "Gold Prestige",
@@ -385,7 +400,7 @@ function defaultBusiness() {
 
 function placeholderBusinessForSlug(slug = "") {
   const cleanSlug = slugify(slug) || "barberia";
-  const palette = BUSINESS_THEMES[DEFAULT_BUSINESS_THEME_KEY];
+  const palette = LOADING_BUSINESS_PALETTE;
   return normalizeBusiness({
     id: `missing_${cleanSlug}`,
     name: cleanSlug
@@ -395,10 +410,21 @@ function placeholderBusinessForSlug(slug = "") {
       .join(" ") || "Barberia",
     slug: cleanSlug,
     logoUrl: "",
-    theme: DEFAULT_BUSINESS_THEME_KEY,
+    theme: "loading-neutral",
     primaryColor: palette.primary,
     secondaryColor: palette.secondary,
+    backgroundColor: palette.background,
+    cardColor: palette.card,
+    textColor: palette.text,
+    textSecondaryColor: palette.textSecondary,
+    titleColor: palette.title,
+    subtitleColor: palette.subtitle,
+    buttonColor: palette.button,
+    buttonHoverColor: palette.buttonHover,
     backgroundUrl: "",
+    borderColor: palette.border,
+    iconColor: palette.icon,
+    badgeColor: palette.badge,
     active: false,
     createdAt: todayISO(),
     updatedAt: todayISO(),
@@ -407,6 +433,7 @@ function placeholderBusinessForSlug(slug = "") {
 
 function normalizeThemeKey(themeKey = DEFAULT_BUSINESS_THEME_KEY) {
   const key = String(themeKey || DEFAULT_BUSINESS_THEME_KEY).trim();
+  if (key === "loading-neutral") return key;
   return BUSINESS_THEMES[key] ? key : BUSINESS_THEME_ALIASES[key] || DEFAULT_BUSINESS_THEME_KEY;
 }
 
@@ -414,7 +441,7 @@ function normalizeBusiness(record = {}) {
   const base = defaultBusiness();
   const id = record.id || base.id;
   const theme = normalizeThemeKey(record.theme || base.theme);
-  const palette = BUSINESS_THEMES[theme] || BUSINESS_THEMES[DEFAULT_BUSINESS_THEME_KEY];
+  const palette = theme === "loading-neutral" ? LOADING_BUSINESS_PALETTE : BUSINESS_THEMES[theme] || BUSINESS_THEMES[DEFAULT_BUSINESS_THEME_KEY];
   return {
     ...base,
     ...record,
@@ -2912,6 +2939,32 @@ function currentBusinessId() {
   return currentBusiness()?.id || null;
 }
 
+function expectedScopeForCurrentRoute() {
+  const route = resolveRoute(location.pathname);
+  if (route.view === "super-admin") return `super-admin:global:${DEFAULT_BUSINESS_SLUG}`;
+  const business = requestedBusiness() || currentBusiness();
+  return `${route.view}:${business?.id || "global"}:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
+}
+
+function isCurrentBusinessLoading() {
+  if (!store.supabase) return false;
+  if (app.view === "super-admin") return store.remoteLoadedScopeKey !== expectedScopeForCurrentRoute() && !store.remoteReady;
+  if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requestedBusiness()) {
+    return !store.remoteReady;
+  }
+  return store.remoteLoadedScopeKey !== expectedScopeForCurrentRoute() && !store.remoteReady;
+}
+
+function businessLoadingShell(title = "Preparando entorno") {
+  return appShell(`
+    <section class="admin-main business-component-loading">
+      <div class="section-title"><span>S</span><h2>${escapeHTML(title)}</h2></div>
+      <p class="microcopy">Sincronizando tema, logo, servicios, barberos y agenda del negocio...</p>
+      <div class="business-component-skeleton"><span></span><span></span><span></span></div>
+    </section>
+  `);
+}
+
 function currentAdminAccountRecord() {
   if (!app.adminSession) return null;
   if (app.adminSession.id === PRINCIPAL_ADMIN.id) {
@@ -3844,9 +3897,8 @@ function renderBusinessPublicTest() {
 function renderPublic() {
   const business = currentBusiness();
   const requested = requestedBusiness();
-  const expectedPublicScope = `public:${business?.id || DEFAULT_BUSINESS_ID}:${app.currentBusinessSlug || DEFAULT_BUSINESS_SLUG}`;
   const businessDataLoading =
-    Boolean(store.supabase && store.remoteLoadedScopeKey !== expectedPublicScope && !store.remoteReady) ||
+    isCurrentBusinessLoading() ||
     Boolean(app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && !store.remoteReady);
   if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && !businessDataLoading) {
     return appShell(`
@@ -5064,6 +5116,10 @@ function clientHistorySummary(record) {
 }
 
 function renderAdminV2() {
+  if (isCurrentBusinessLoading()) {
+    return businessLoadingShell("Preparando panel administrador");
+  }
+
   if (isSessionExpired(app.adminSession, { role: "admin", businessSlug: app.currentBusinessSlug, businessId: currentBusinessId() })) {
     app.adminSession = null;
     clearScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug);
@@ -5345,6 +5401,10 @@ function adminHoursView(barber) {
 }
 
 function renderBarberV2() {
+  if (isCurrentBusinessLoading()) {
+    return businessLoadingShell("Preparando panel barbero");
+  }
+
   if (isSessionExpired(app.barberSession, { role: "barber", businessSlug: app.currentBusinessSlug, businessId: currentBusinessId() })) {
     app.barberSession = null;
     app.barberLoginError = "La sesion del barbero expiro. Inicia sesion nuevamente.";
