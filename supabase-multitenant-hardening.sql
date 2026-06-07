@@ -140,39 +140,27 @@ update public.admin_accounts set business_id = 'business_principal' where busine
 do $$
 begin
   if not exists (select 1 from pg_constraint where conname = 'barbers_business_id_fkey') then
-    alter table public.barbers
-      add constraint barbers_business_id_fkey
-      foreign key (business_id) references public.businesses(id) on delete cascade;
+    execute 'alter table public.barbers add constraint barbers_business_id_fkey foreign key (business_id) references public.businesses(id) on delete cascade';
   end if;
 
   if not exists (select 1 from pg_constraint where conname = 'services_business_id_fkey') then
-    alter table public.services
-      add constraint services_business_id_fkey
-      foreign key (business_id) references public.businesses(id) on delete cascade;
+    execute 'alter table public.services add constraint services_business_id_fkey foreign key (business_id) references public.businesses(id) on delete cascade';
   end if;
 
   if not exists (select 1 from pg_constraint where conname = 'appointments_business_id_fkey') then
-    alter table public.appointments
-      add constraint appointments_business_id_fkey
-      foreign key (business_id) references public.businesses(id) on delete cascade;
+    execute 'alter table public.appointments add constraint appointments_business_id_fkey foreign key (business_id) references public.businesses(id) on delete cascade';
   end if;
 
   if not exists (select 1 from pg_constraint where conname = 'blocked_days_business_id_fkey') then
-    alter table public.blocked_days
-      add constraint blocked_days_business_id_fkey
-      foreign key (business_id) references public.businesses(id) on delete cascade;
+    execute 'alter table public.blocked_days add constraint blocked_days_business_id_fkey foreign key (business_id) references public.businesses(id) on delete cascade';
   end if;
 
   if not exists (select 1 from pg_constraint where conname = 'barber_services_business_id_fkey') then
-    alter table public.barber_services
-      add constraint barber_services_business_id_fkey
-      foreign key (business_id) references public.businesses(id) on delete cascade;
+    execute 'alter table public.barber_services add constraint barber_services_business_id_fkey foreign key (business_id) references public.businesses(id) on delete cascade';
   end if;
 
   if not exists (select 1 from pg_constraint where conname = 'admin_accounts_business_id_fkey') then
-    alter table public.admin_accounts
-      add constraint admin_accounts_business_id_fkey
-      foreign key (business_id) references public.businesses(id) on delete cascade;
+    execute 'alter table public.admin_accounts add constraint admin_accounts_business_id_fkey foreign key (business_id) references public.businesses(id) on delete cascade';
   end if;
 end $$;
 
