@@ -407,3 +407,33 @@ body[data-device="desktop"] .dashboard-head > .barber-heading .avatar.lg {
 body[data-device="mobile"] .super-admin-loading-grid {
   grid-template-columns: 1fr;
 }
+
+.business-component-loading {
+  display: grid;
+  gap: 16px;
+}
+
+.business-component-skeleton {
+  display: grid;
+  gap: 12px;
+}
+
+.public-component-skeleton {
+  width: 100%;
+}
+
+.business-component-skeleton span {
+  min-height: 72px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 24%, transparent);
+  border-radius: 18px;
+  background:
+    linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-primary) 10%, transparent), transparent),
+    color-mix(in srgb, var(--color-card) 80%, transparent);
+  background-size: 220% 100%;
+  box-shadow: var(--inner-light);
+  animation: superAdminLoadingPulse 1.15s ease-in-out infinite;
+}
+
+body[data-device="mobile"] .business-component-skeleton span {
+  min-height: 78px;
+}

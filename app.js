@@ -3684,9 +3684,10 @@ function renderBusinessPublicTest() {
   const requested = requestedBusiness();
   if (app.currentBusinessSlug && !requested && !store.remoteReady) {
     return appShell(`
-      <section class="booking-surface">
-        <div class="section-title"><span>...</span><h2>Cargando negocio</h2></div>
-        <p class="microcopy">Estamos consultando el slug solicitado.</p>
+      <section class="admin-main business-component-loading">
+        <div class="section-title"><span>S</span><h2>Preparando vista del negocio</h2></div>
+        <p class="microcopy">Sincronizando configuracion, servicios y barberos...</p>
+        <div class="business-component-skeleton"><span></span><span></span><span></span></div>
       </section>
     `);
   }
@@ -3770,15 +3771,12 @@ function renderBusinessPublicTest() {
 function renderPublic() {
   const business = currentBusiness();
   const requested = requestedBusiness();
-  if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && !store.remoteReady) {
-    return appShell(`
-      <section class="booking-surface">
-        <div class="section-title"><span>...</span><h2>Cargando entorno</h2></div>
-        <p class="microcopy">Estamos cargando la barberia solicitada.</p>
-      </section>
-    `);
-  }
-  if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested) {
+  const businessDataLoading =
+    app.currentBusinessSlug &&
+    app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG &&
+    !requested &&
+    !store.remoteReady;
+  if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && !businessDataLoading) {
     return appShell(`
       <section class="booking-surface">
         <div class="section-title"><span>!</span><h2>Entorno no disponible</h2></div>
@@ -3802,8 +3800,8 @@ function renderPublic() {
   const businessId = business.id;
   const publicServices = activeServicesForBusiness(businessId);
   const activeBarbers = app.selectedServiceId ? barbersForService(app.selectedServiceId) : store.activeBarbersByBusiness(businessId);
-  const businessHasNoServices = publicServices.length === 0;
-  const businessHasNoBarbers = store.activeBarbersByBusiness(businessId).length === 0;
+  const businessHasNoServices = !businessDataLoading && publicServices.length === 0;
+  const businessHasNoBarbers = !businessDataLoading && store.activeBarbersByBusiness(businessId).length === 0;
   const selected = activeBarbers.find((barber) => barber.id === app.selectedBarberId) || null;
   const hasSelectedBarber = Boolean(selected);
   const selectedService = publicServices.find((service) => service.id === app.selectedServiceId) || null;
@@ -3840,10 +3838,14 @@ function renderPublic() {
 
   if (currentStep === "services") {
     bookingCardTitle = "Seleccionar servicio";
-    bookingCardMicrocopy = "Elige el servicio que deseas reservar.";
+    bookingCardMicrocopy = businessDataLoading
+      ? "Preparando servicios, barberos y agenda del negocio."
+      : "Elige el servicio que deseas reservar.";
     bookingCardBody = `<div class="barber-list">
       ${
-        publicServices.length
+        businessDataLoading
+          ? `<div class="business-component-skeleton public-component-skeleton"><span></span><span></span><span></span></div>`
+          : publicServices.length
           ? publicServices
         .map(
           (service) => `
