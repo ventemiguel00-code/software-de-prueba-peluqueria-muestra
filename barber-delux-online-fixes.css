@@ -54,8 +54,8 @@
 .barber-heading .avatar,
 .barber-card .avatar,
 .selected-card .avatar {
-  background-size: contain !important;
-  background-position: center center !important;
+  background-size: cover !important;
+  background-position: center top !important;
   background-repeat: no-repeat !important;
 }
 
@@ -74,6 +74,36 @@
   justify-content: center;
   text-align: center;
   line-height: 1;
+  padding: 0;
+  margin: 0;
+  transform: none;
+  position: static;
+}
+
+.counter-badge,
+.header-counter {
+  width: 42px;
+  height: 42px;
+}
+
+.day-counter {
+  width: 38px;
+  height: 38px;
+}
+
+.avatar.has-photo span {
+  background: transparent;
+}
+
+.barber-heading .avatar.lg {
+  width: 96px;
+  height: 96px;
+}
+
+.barber-card .avatar.md,
+.selected-card .avatar.md {
+  width: 66px;
+  height: 66px;
 }
 
 @media (min-width: 761px) {

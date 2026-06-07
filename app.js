@@ -3254,16 +3254,16 @@ function viewPath(view) {
 }
 
 function avatar(barber, size = "lg") {
+  const hasPhoto = Boolean(barber.photo);
   const style = barber.photo
     ? `background-image:url('${barber.photo}')`
     : `background:${barber.gradient}`;
-  return `<div class="avatar ${size}" style="${style}"><span>${escapeHTML(
-    barber.name
-      .split(" ")
-      .map((item) => item[0])
-      .join("")
-      .slice(0, 2)
-  )}</span></div>`;
+  const initials = barber.name
+    .split(" ")
+    .map((item) => item[0])
+    .join("")
+    .slice(0, 2);
+  return `<div class="avatar ${size} ${hasPhoto ? "has-photo" : ""}" style="${style}"><span>${hasPhoto ? "" : escapeHTML(initials)}</span></div>`;
 }
 
 function renderGlobalBackground() {
