@@ -255,6 +255,12 @@ function perfEnd(mark, extra = "") {
   console.debug(`[perf] ${mark.label}: ${elapsed}ms${extra ? ` ${extra}` : ""}`);
 }
 
+function perfStep(label, mark, extra = "") {
+  if (!perfLogsEnabled() || !mark) return;
+  const elapsed = Math.round((performance.now() - mark.start) * 10) / 10;
+  console.debug(`[perf] ${label}: ${elapsed}ms${extra ? ` ${extra}` : ""}`);
+}
+
 function emptyBusinessBucket() {
   return {
     barbers: [],
@@ -1335,12 +1341,14 @@ class StudioStore {
     try {
       const localState = this.loadLocalState();
       const route = resolveRoute(location.pathname);
+      const businessPerf = perfMark("business");
       const businessesQuery =
         route.view === "super-admin"
           ? this.supabase.from("businesses").select(BUSINESS_SELECT_COLUMNS).order("created_at", { ascending: true })
           : this.supabase.from("businesses").select(BUSINESS_SELECT_COLUMNS).eq("slug", route.businessSlug).limit(1);
       const businessesResult = await businessesQuery;
       if (businessesResult.error) throw businessesResult.error;
+      perfStep("business", businessPerf, `(${route.view}:${route.businessSlug || "global"})`);
       const remoteBusinesses = (businessesResult.data || []).map(mapRowToBusiness);
       const missingBusinesses =
         route.view === "super-admin"
@@ -1378,10 +1386,12 @@ class StudioStore {
       const syncScopeKey = `${syncScopeView}:${scopedBusinessId || "global"}:${route.businessSlug || ""}`;
 
       if (route.view === "super-admin") {
+        const settingsPerf = perfMark("super-admin settings+summary");
         const [businessSettingsResult, summaryRpcResult] = await Promise.all([
           this.supabase.from("business_settings").select(BUSINESS_SETTINGS_SELECT_COLUMNS).order("created_at", { ascending: true }),
           this.supabase.rpc("business_dashboard_summary", { target_date: todayISO() }),
         ]);
+        perfStep("super-admin settings+summary", settingsPerf);
 
         if (businessSettingsResult.error && businessSettingsResult.error.code !== "42P01") {
           throw businessSettingsResult.error;
@@ -1484,7 +1494,9 @@ class StudioStore {
         return query.order(orderColumn, { ascending });
       };
 
+      const scopedDataPerf = perfMark("business scoped data");
       const [barbersResult, appointmentsBaseResult, blockedDaysResult, servicesResult, barberServicesResult, businessSettingsResult] = await Promise.all([
+        // These scoped reads intentionally stay parallel and filtered by business_id to keep each tenant isolated.
         queryScoped("barbers", "created_at", true, (query) =>
           isPublicRoute || route.view === "barber" ? query.eq("active", true) : query
         ),
@@ -1504,6 +1516,7 @@ class StudioStore {
         queryScoped("barber_services", "created_at", true),
         queryScoped("business_settings", "created_at", true),
       ]);
+      perfStep("business scoped data", scopedDataPerf, `(${route.view}:${route.businessSlug || scopedBusinessId || "global"})`);
 
       if (barbersResult.error) throw barbersResult.error;
       if (appointmentsBaseResult.error) throw appointmentsBaseResult.error;
@@ -1771,20 +1784,7 @@ class StudioStore {
       if (event.type === "CASCADE_DELETE") {
         const businessId = event.id;
         if (!businessId) return;
-        const [appointmentsDelete, blockedDaysDelete, barberServicesDelete, servicesDelete, barbersDelete, businessDelete] = await Promise.all([
-          this.supabase.from("appointments").delete().eq("business_id", businessId),
-          this.supabase.from("blocked_days").delete().eq("business_id", businessId),
-          this.supabase.from("barber_services").delete().eq("business_id", businessId),
-          this.supabase.from("services").delete().eq("business_id", businessId),
-          this.supabase.from("barbers").delete().eq("business_id", businessId),
-          this.supabase.from("businesses").delete().eq("id", businessId),
-        ]);
-        if (appointmentsDelete.error) throw appointmentsDelete.error;
-        if (blockedDaysDelete.error) throw blockedDaysDelete.error;
-        if (barberServicesDelete.error) throw barberServicesDelete.error;
-        if (servicesDelete.error) throw servicesDelete.error;
-        if (barbersDelete.error) throw barbersDelete.error;
-        if (businessDelete.error) throw businessDelete.error;
+        await this.deleteBusinessRemoteCascade(businessId);
         return;
       }
       if (event.type === "DELETE") {
@@ -2145,6 +2145,70 @@ class StudioStore {
     return true;
   }
 
+  async deleteRowsByBusinessId(table, businessId) {
+    if (!this.supabase || !table || !businessId) return true;
+    const { error } = await this.supabase.from(table).delete().eq("business_id", businessId);
+    if (error) {
+      if (error.code === "42P01" || error.code === "42703") return false;
+      throw error;
+    }
+    return true;
+  }
+
+  async removeStoragePrefix(bucket, prefix) {
+    if (!this.supabase || !bucket || !prefix) return true;
+    const storage = this.supabase.storage.from(bucket);
+    const collectFiles = async (path) => {
+      const { data, error } = await storage.list(path, { limit: 1000 });
+      if (error) return [];
+      const paths = [];
+      for (const item of data || []) {
+        const itemPath = `${path}/${item.name}`.replace(/^\/+/, "");
+        if (item.metadata === null) {
+          paths.push(...(await collectFiles(itemPath)));
+        } else {
+          paths.push(itemPath);
+        }
+      }
+      return paths;
+    };
+    const files = await collectFiles(prefix.replace(/\/+$/, ""));
+    if (!files.length) return true;
+    const { error } = await storage.remove(files);
+    if (error) console.warn(`No fue posible limpiar Storage ${bucket}/${prefix}`, error);
+    return !error;
+  }
+
+  async deleteBusinessRemoteCascade(businessId) {
+    if (!this.supabase || !businessId || businessId === DEFAULT_BUSINESS_ID) return true;
+    const childTables = [
+      "appointments",
+      "blocked_days",
+      "barber_services",
+      "services",
+      "barbers",
+      "admin_accounts",
+      "clients",
+      "customers",
+      "schedules",
+      "horarios",
+      "business_settings",
+    ];
+    for (const table of childTables) {
+      await this.deleteRowsByBusinessId(table, businessId);
+    }
+    await Promise.all([
+      this.removeStoragePrefix("logos-negocios", businessId),
+      this.removeStoragePrefix("fondos-negocios", businessId),
+      this.removeStoragePrefix("videos-negocios", businessId),
+      this.removeStoragePrefix("barberos", businessId),
+      this.removeStoragePrefix("entornos", businessId),
+    ]);
+    const { error } = await this.supabase.from("businesses").delete().eq("id", businessId);
+    if (error) throw error;
+    return true;
+  }
+
   clearBusinessOperationalDataLocal(businessId) {
     if (!businessId || businessId === DEFAULT_BUSINESS_ID) return false;
     this.state.barbers = this.state.barbers.filter((barber) => barber.negocioId !== businessId);
@@ -2202,6 +2266,26 @@ class StudioStore {
     this.state.barberServices = this.state.barberServices.filter((relation) => relation.negocioId !== businessId);
     this.persist({ type: "CASCADE_DELETE", table: "businesses", id: businessId });
     return true;
+  }
+
+  deleteBusinessLocalOnly(businessId) {
+    if (!businessId || businessId === DEFAULT_BUSINESS_ID) return false;
+    this.state.businesses = this.state.businesses.filter((business) => business.id !== businessId);
+    this.state.barbers = this.state.barbers.filter((barber) => barber.negocioId !== businessId);
+    this.state.services = this.state.services.filter((service) => service.negocioId !== businessId);
+    this.state.appointments = this.state.appointments.filter((appointment) => appointment.negocioId !== businessId);
+    this.state.blockedDays = this.state.blockedDays.filter((blockedDay) => blockedDay.negocioId !== businessId);
+    this.state.barberServices = this.state.barberServices.filter((relation) => relation.negocioId !== businessId);
+    this.state = this.stateWithRuntimeScope(this.state);
+    localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+    this.emit({ type: "SYNC", table: "businesses", reason: "business_delete_local" });
+    return true;
+  }
+
+  async deleteBusinessCompletely(businessId) {
+    if (!businessId || businessId === DEFAULT_BUSINESS_ID) return false;
+    await this.deleteBusinessRemoteCascade(businessId);
+    return this.deleteBusinessLocalOnly(businessId);
   }
 
   getAppointment(barberId, date, time, negocioId = currentBusinessId()) {
@@ -3342,6 +3426,8 @@ const app = {
   superAdminPendingLogoFiles: {},
   superAdminPendingEnvironmentArchives: {},
   superAdminOpenBusinessId: "",
+  superAdminDeleteTarget: null,
+  superAdminDeleting: false,
   superAdminCreateOpen: false,
   adminLoginError: "",
   adminAccountMessage: "",
@@ -4796,6 +4882,30 @@ function renderSuperAdmin() {
     </div>
   </article>`;
 
+  const deleteTarget = app.superAdminDeleteTarget
+    ? store.businessById(app.superAdminDeleteTarget.id) || app.superAdminDeleteTarget
+    : null;
+  const deleteBusinessDialog = deleteTarget
+    ? `<dialog class="modal-dialog destructive-dialog" open>
+        <form id="delete-business-form" class="form-stack">
+          <div class="section-title"><span>!</span><h2>Eliminar barberia</h2></div>
+          <p class="microcopy">¿Seguro que deseas eliminar esta barberia? Esta accion eliminara todo su entorno, datos y archivos asociados. No se podra deshacer.</p>
+          <div class="empty-state-card">
+            <strong>${escapeHTML(deleteTarget.name || "Barberia")}</strong>
+            <p class="microcopy">Para confirmar, escribe exactamente el nombre o slug:</p>
+            <code>${escapeHTML(deleteTarget.slug || deleteTarget.name || "")}</code>
+          </div>
+          <label>Confirmacion
+            <input name="confirmation" required autocomplete="off" placeholder="${escapeHTML(deleteTarget.slug || deleteTarget.name || "")}" />
+          </label>
+          <div class="button-row">
+            <button class="secondary-action" type="button" data-cancel-delete-business ${app.superAdminDeleting ? "disabled" : ""}>Cancelar</button>
+            <button class="secondary-action danger" ${app.superAdminDeleting ? "disabled" : ""}>${app.superAdminDeleting ? "Eliminando..." : "Eliminar definitivamente"}</button>
+          </div>
+        </form>
+      </dialog>`
+    : "";
+
   if (!app.superAdminSession) {
     return appShell(`
       <section class="login-view">
@@ -4840,6 +4950,7 @@ function renderSuperAdmin() {
           ${businessCards || `<p class="microcopy">Aun no hay negocios registrados.</p>`}
         </div>
       </section>
+      ${deleteBusinessDialog}
     </section>
   `);
 }
@@ -5056,6 +5167,30 @@ function renderSuperAdminV2() {
     </div>
   </article>`;
 
+  const deleteTarget = app.superAdminDeleteTarget
+    ? store.businessById(app.superAdminDeleteTarget.id) || app.superAdminDeleteTarget
+    : null;
+  const deleteBusinessDialog = deleteTarget
+    ? `<dialog class="modal-dialog destructive-dialog" open>
+        <form id="delete-business-form" class="form-stack">
+          <div class="section-title"><span>!</span><h2>Eliminar barberia</h2></div>
+          <p class="microcopy">¿Seguro que deseas eliminar esta barberia? Esta accion eliminara todo su entorno, datos y archivos asociados. No se podra deshacer.</p>
+          <div class="empty-state-card">
+            <strong>${escapeHTML(deleteTarget.name || "Barberia")}</strong>
+            <p class="microcopy">Para confirmar, escribe exactamente el nombre o slug:</p>
+            <code>${escapeHTML(deleteTarget.slug || deleteTarget.name || "")}</code>
+          </div>
+          <label>Confirmacion
+            <input name="confirmation" required autocomplete="off" placeholder="${escapeHTML(deleteTarget.slug || deleteTarget.name || "")}" />
+          </label>
+          <div class="button-row">
+            <button class="secondary-action" type="button" data-cancel-delete-business ${app.superAdminDeleting ? "disabled" : ""}>Cancelar</button>
+            <button class="secondary-action danger" ${app.superAdminDeleting ? "disabled" : ""}>${app.superAdminDeleting ? "Eliminando..." : "Eliminar definitivamente"}</button>
+          </div>
+        </form>
+      </dialog>`
+    : "";
+
   if (!app.superAdminSession) {
     return appShell(`
       <section class="login-view">
@@ -5100,6 +5235,7 @@ function renderSuperAdminV2() {
           ${businessCards || `<p class="microcopy">Aun no hay negocios registrados.</p>`}
         </div>
       </section>
+      ${deleteBusinessDialog}
     </section>
   `);
 }
@@ -6074,40 +6210,71 @@ function bindEvents() {
   });
 
   document.querySelectorAll("[data-delete-business]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
       const businessId = button.dataset.deleteBusiness;
       const slug = button.dataset.deleteBusinessSlug || "";
       const name = button.dataset.deleteBusinessName || "";
-      const confirmation = window.prompt(`¿Seguro que deseas eliminar esta barberia? Esta accion eliminara todo su entorno y no se podra deshacer.\n\nPara confirmar, escribe:\n${slug}`);
-      if (confirmation !== slug) {
-        app.superAdminMessage = "La confirmacion no coincide. No se elimino la barberia.";
-        render();
-        return;
-      }
-      const removed = store.deleteBusiness(businessId);
-      if (!removed) {
-        app.superAdminMessage = "No fue posible eliminar la barberia seleccionada.";
-        render();
-        return;
-      }
-      saveAdminAccounts(loadAdminAccounts().filter((account) => account.businessId !== businessId));
+      app.superAdminDeleteTarget = { id: businessId, slug, name };
+      app.superAdminMessage = "";
+      render();
+    }, { capture: true });
+  });
+
+  document.querySelector("[data-cancel-delete-business]")?.addEventListener("click", () => {
+    app.superAdminDeleteTarget = null;
+    app.superAdminDeleting = false;
+    render();
+  });
+
+  document.querySelector("#delete-business-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const target = app.superAdminDeleteTarget;
+    if (!target?.id || target.id === DEFAULT_BUSINESS_ID) {
+      app.superAdminMessage = "No es posible eliminar esta barberia.";
+      app.superAdminDeleteTarget = null;
+      render();
+      return;
+    }
+    const confirmation = String(new FormData(event.currentTarget).get("confirmation") || "").trim();
+    if (confirmation !== target.slug && confirmation !== target.name) {
+      app.superAdminMessage = "La confirmacion no coincide. No se elimino la barberia.";
+      render();
+      return;
+    }
+    app.superAdminDeleting = true;
+    app.superAdminMessage = `Eliminando ${target.name || target.slug}...`;
+    render();
+    try {
+      const removed = await store.deleteBusinessCompletely(target.id);
+      if (!removed) throw new Error("No se pudo eliminar el negocio seleccionado.");
+      saveAdminAccounts(loadAdminAccounts().filter((account) => account.businessId !== target.id));
       const visiblePasswords = loadVisibleAdminPasswords();
       Object.keys(visiblePasswords).forEach((accountId) => {
-        if (visiblePasswords[accountId]?.businessId === businessId) {
+        if (visiblePasswords[accountId]?.businessId === target.id) {
           delete visiblePasswords[accountId];
         }
       });
       saveVisibleAdminPasswords(visiblePasswords);
       const environmentAttachments = loadBusinessEnvironmentAttachments();
-      delete environmentAttachments[businessId];
+      delete environmentAttachments[target.id];
       saveBusinessEnvironmentAttachments(environmentAttachments);
-      delete app.superAdminPendingLogos[businessId];
-      if (app.superAdminOpenBusinessId === businessId) {
-        app.superAdminOpenBusinessId = "";
-      }
-      app.superAdminMessage = `Barberia eliminada: ${name}`;
+      delete app.superAdminPendingLogos[target.id];
+      delete app.superAdminPendingLogoFiles[target.id];
+      delete app.superAdminPendingEnvironmentArchives[target.id];
+      if (app.superAdminOpenBusinessId === target.id) app.superAdminOpenBusinessId = "";
+      app.superAdminDeleteTarget = null;
+      app.superAdminDeleting = false;
+      app.superAdminMessage = "Barberia eliminada correctamente.";
+      store.queueRemoteSync({ quiet: true });
       render();
-    });
+    } catch (error) {
+      console.error("Business delete failed", error);
+      app.superAdminDeleting = false;
+      app.superAdminMessage = `No fue posible eliminar la barberia: ${error.message || "error desconocido"}`;
+      render();
+    }
   });
 
   document.querySelectorAll(".super-admin-account-create").forEach((formEl) => {

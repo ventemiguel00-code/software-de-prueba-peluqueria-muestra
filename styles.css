@@ -2281,6 +2281,23 @@ dialog::backdrop {
   backdrop-filter: blur(7px);
 }
 
+.destructive-dialog {
+  padding: 20px;
+  border-color: rgba(255, 102, 102, 0.55);
+}
+
+.destructive-dialog code {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 102, 102, 0.35);
+  border-radius: 12px;
+  color: #ffd7d7;
+  background: rgba(255, 102, 102, 0.08);
+  overflow-wrap: anywhere;
+}
+
 .date-strip button,
 .week-cards button {
   border-radius: 16px;
