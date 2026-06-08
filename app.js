@@ -21,6 +21,7 @@ const VISIT_STATE_META = {
 };
 const COUNTABLE_STATUSES = new Set(["reserved", "fixed"]);
 const PERF_LOG_KEY = "barber-delux-perf-logs";
+const THEME_CACHE_PREFIX = "theme_cache_";
 const REMOTE_SYNC_DEBOUNCE_MS = 180;
 
 const dayNames = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
@@ -398,9 +399,23 @@ function defaultBusiness() {
   };
 }
 
+function cachedThemeForSlug(slug = "") {
+  const cleanSlug = slugify(slug) || DEFAULT_BUSINESS_SLUG;
+  try {
+    const cached = JSON.parse(localStorage.getItem(`${THEME_CACHE_PREFIX}${cleanSlug}`) || "null");
+    const theme = cached?.theme && BUSINESS_THEMES[cached.theme] ? cached.theme : "";
+    const colors = cached?.colors && typeof cached.colors === "object" ? cached.colors : null;
+    if (!theme || !colors) return null;
+    return { theme, colors };
+  } catch {
+    return null;
+  }
+}
+
 function placeholderBusinessForSlug(slug = "") {
   const cleanSlug = slugify(slug) || "barberia";
-  const palette = LOADING_BUSINESS_PALETTE;
+  const cachedTheme = cachedThemeForSlug(cleanSlug);
+  const palette = cachedTheme?.colors || LOADING_BUSINESS_PALETTE;
   return normalizeBusiness({
     id: `missing_${cleanSlug}`,
     name: cleanSlug
@@ -410,7 +425,7 @@ function placeholderBusinessForSlug(slug = "") {
       .join(" ") || "Barberia",
     slug: cleanSlug,
     logoUrl: "",
-    theme: "loading-neutral",
+    theme: cachedTheme?.theme || "loading-neutral",
     primaryColor: palette.primary,
     secondaryColor: palette.secondary,
     backgroundColor: palette.background,
@@ -504,6 +519,7 @@ function mergeBusinessesById(...groups) {
 }
 
 function paletteForTheme(themeKey = DEFAULT_BUSINESS_THEME_KEY) {
+  if (normalizeThemeKey(themeKey) === "loading-neutral") return LOADING_BUSINESS_PALETTE;
   return BUSINESS_THEMES[normalizeThemeKey(themeKey)] || BUSINESS_THEMES[DEFAULT_BUSINESS_THEME_KEY];
 }
 
@@ -554,6 +570,25 @@ function applyThemeColorsToRoot(colors) {
   rootStyle.setProperty("--line-strong", `${colors.border}82`);
   rootStyle.setProperty("--glass", `${colors.secondary}c7`);
   rootStyle.setProperty("--glass-soft", `${colors.primary}12`);
+}
+
+function cacheBusinessTheme(business) {
+  if (!business?.slug) return;
+  const theme = normalizeThemeKey(business.theme || "loading-neutral");
+  if (theme === "loading-neutral") return;
+  const colors = colorsForBusiness(business);
+  try {
+    localStorage.setItem(
+      `${THEME_CACHE_PREFIX}${business.slug}`,
+      JSON.stringify({ theme, colors, businessId: business.id || "", updatedAt: new Date().toISOString() })
+    );
+  } catch {
+    // Cache visual solamente; si falla, la app sigue usando Supabase/local state.
+  }
+}
+
+function cacheBusinessThemes(businesses = []) {
+  businesses.forEach(cacheBusinessTheme);
 }
 
 function businessThemePatch(themeKey = DEFAULT_BUSINESS_THEME_KEY) {
@@ -1380,6 +1415,7 @@ class StudioStore {
 
         const businessSettingsRows = businessSettingsResult.data || [];
         const themedBusinesses = applyBusinessSettingsThemeColors(mergedBusinesses, businessSettingsRows);
+        cacheBusinessThemes(themedBusinesses);
         this.syncBusinessSettingsToLocal(businessSettingsRows, null);
         const nextState = {
           meta: {
@@ -1473,6 +1509,7 @@ class StudioStore {
       const scopedBusinessSettingsRows = businessSettingsResult.data || [];
       const scopedBusinessList = mergedBusinesses.length ? mergedBusinesses : [scopedBusiness];
       const scopedThemedBusinesses = applyBusinessSettingsThemeColors(scopedBusinessList, scopedBusinessSettingsRows);
+      cacheBusinessThemes(scopedThemedBusinesses);
       this.syncBusinessSettingsToLocal(scopedBusinessSettingsRows, route.view === "super-admin" ? null : scopedBusinessId);
 
       const currentWeek = getWeekKey();
@@ -1872,6 +1909,7 @@ class StudioStore {
       this.state.businesses = this.state.businesses.map((business) =>
         business.id === payload.id ? normalizeBusiness({ ...business, ...payload, updatedAt: todayISO() }) : business
       );
+      cacheBusinessTheme(this.businessById(payload.id));
       this.persist({ type: "UPDATE", table: "businesses", record: this.businessById(payload.id) });
       return this.businessById(payload.id);
     }
@@ -1884,6 +1922,7 @@ class StudioStore {
       updatedAt: todayISO(),
     });
     this.state.businesses.push(created);
+    cacheBusinessTheme(created);
     this.persist({ type: "INSERT", table: "businesses", record: created });
     return created;
   }

@@ -8,6 +8,62 @@
       content="Vision Barber, plataforma premium para reservas y gestion de barberias modernas."
     />
     <title>Vision Barber | Plataforma premium para barberias</title>
+    <script>
+      (function () {
+        var themes = {
+          "gold-prestige": {
+            primary: "#D4AF37", secondary: "#111111", background: "#0A0A0A", card: "#1A1A1A",
+            text: "#FFFFFF", textSecondary: "#BDBDBD", title: "#D4AF37", subtitle: "#FFFFFF",
+            button: "#D4AF37", buttonHover: "#E5C158", border: "#D4AF37", icon: "#D4AF37", badge: "#D4AF37"
+          },
+          "urban-neon": {
+            primary: "#00BFFF", secondary: "#111111", background: "#0B0B0B", card: "#171717",
+            text: "#FFFFFF", textSecondary: "#B0BEC5", title: "#00BFFF", subtitle: "#FFFFFF",
+            button: "#00BFFF", buttonHover: "#35CFFF", border: "#00BFFF", icon: "#00BFFF", badge: "#00BFFF"
+          },
+          "royal-red": {
+            primary: "#E53935", secondary: "#111111", background: "#0A0A0A", card: "#1C1C1C",
+            text: "#FFFFFF", textSecondary: "#CFCFCF", title: "#E53935", subtitle: "#FFFFFF",
+            button: "#E53935", buttonHover: "#F44336", border: "#E53935", icon: "#E53935", badge: "#E53935"
+          },
+          "emerald-luxury": {
+            primary: "#00A86B", secondary: "#111111", background: "#0A0A0A", card: "#161616",
+            text: "#FFFFFF", textSecondary: "#C0C0C0", title: "#00A86B", subtitle: "#FFFFFF",
+            button: "#00A86B", buttonHover: "#00C57D", border: "#00A86B", icon: "#00A86B", badge: "#00A86B"
+          },
+          neutral: {
+            primary: "#7DD3FC", secondary: "#101418", background: "#070A0D", card: "#141A20",
+            text: "#F8FAFC", textSecondary: "#B6C2CC", title: "#F8FAFC", subtitle: "#D8E2EA",
+            button: "#24313B", buttonHover: "#314454", border: "#334452", icon: "#9EDDFB", badge: "#9EDDFB"
+          }
+        };
+        var parts = location.pathname.split("/").filter(Boolean);
+        var slug = (parts[0] === "barberia" || parts[0] === "negocio" || parts[0] === "panel" || parts[0] === "admin" || parts[0] === "barbero") && parts[1]
+          ? parts[1]
+          : "barberia-principal";
+        var cached = null;
+        try {
+          cached = JSON.parse(localStorage.getItem("theme_cache_" + slug) || "null");
+        } catch (error) {
+          cached = null;
+        }
+        var colors = cached && cached.colors ? cached.colors : themes[cached && cached.theme] || themes.neutral;
+        var root = document.documentElement;
+        var pairs = {
+          "--color-primary": colors.primary, "--color-secondary": colors.secondary, "--color-background": colors.background,
+          "--color-card": colors.card, "--color-text": colors.text, "--color-text-secondary": colors.textSecondary,
+          "--color-title": colors.title, "--color-subtitle": colors.subtitle, "--color-button": colors.button,
+          "--color-button-hover": colors.buttonHover, "--color-border": colors.border, "--color-icon": colors.icon,
+          "--color-badge": colors.badge, "--petrol": colors.primary, "--petrol-bright": colors.buttonHover,
+          "--black": colors.background, "--matte": colors.secondary, "--graphite": colors.card, "--graphite-2": colors.card,
+          "--white": colors.text, "--muted": colors.textSecondary, "--silver": colors.textSecondary,
+          "--line": colors.border + "59", "--line-strong": colors.border + "82", "--glass": colors.secondary + "c7",
+          "--glass-soft": colors.primary + "12"
+        };
+        Object.keys(pairs).forEach(function (key) { root.style.setProperty(key, pairs[key]); });
+        root.dataset.themeBoot = cached && cached.theme ? cached.theme : "neutral";
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
