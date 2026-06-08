@@ -1460,6 +1460,7 @@ class StudioStore {
       const weekStartDate = activeWeekDates[0];
       const weekEndDate = activeWeekDates[activeWeekDates.length - 1];
       const isPublicRoute = route.view === "public" || route.view === "business-test";
+      const isInternalRoute = route.view === "admin" || route.view === "barber";
 
       const queryScoped = (table, orderColumn, ascending = true, tune = null) => {
         if (route.view !== "super-admin" && !scopedBusinessId) {
@@ -1484,12 +1485,22 @@ class StudioStore {
       };
 
       const [barbersResult, appointmentsBaseResult, blockedDaysResult, servicesResult, barberServicesResult, businessSettingsResult] = await Promise.all([
-        queryScoped("barbers", "created_at", true, (query) => (isPublicRoute ? query.eq("active", true) : query)),
+        queryScoped("barbers", "created_at", true, (query) =>
+          isPublicRoute || route.view === "barber" ? query.eq("active", true) : query
+        ),
         queryScoped("appointments", "date", true, (query) =>
           isPublicRoute ? query.eq("date", publicDate) : query.gte("date", weekStartDate).lte("date", weekEndDate)
         ),
-        queryScoped("blocked_days", "date", true, (query) => (isPublicRoute ? query.eq("date", publicDate) : query)),
-        queryScoped("services", "created_at", true, (query) => (isPublicRoute ? query.eq("active", true) : query)),
+        queryScoped("blocked_days", "date", true, (query) =>
+          isPublicRoute
+            ? query.eq("date", publicDate)
+            : isInternalRoute
+              ? query.gte("date", weekStartDate).lte("date", weekEndDate)
+              : query
+        ),
+        queryScoped("services", "created_at", true, (query) =>
+          isPublicRoute || route.view === "barber" ? query.eq("active", true) : query
+        ),
         queryScoped("barber_services", "created_at", true),
         queryScoped("business_settings", "created_at", true),
       ]);
@@ -3546,7 +3557,7 @@ function renderLayoutShell() {
     <header class="topbar" style="${businessThemeStyle(business)}">
       <button class="brand" data-public-link aria-label="Ir a agenda publica">
         ${businessLogoMarkup(business)}
-        <span><strong>${escapeHTML(business?.name || "Vision")}</strong>${shellType === "internal" ? `<small>${escapeHTML(business?.slug || "Barber")}</small>` : ""}</span>
+        <span><strong>${escapeHTML(business?.name || "Vision")}</strong></span>
       </button>
       ${tabs.length ? `<nav class="nav-tabs internal-nav-tabs" aria-label="Navegacion interna">
         ${tabs.map(([id, label]) => `<button class="${app.view === id ? "active" : ""}" data-view="${id}">${label}</button>`).join("")}
@@ -3612,7 +3623,7 @@ function refreshPersistentShellBrand() {
   if (!brand) return;
   brand.innerHTML = `
     ${businessLogoMarkup(business)}
-    <span><strong>${escapeHTML(business?.name || "Barberia")}</strong>${routeShellType() === "internal" ? `<small>${escapeHTML(business?.slug || "entorno")}</small>` : ""}</span>
+    <span><strong>${escapeHTML(business?.name || "Barberia")}</strong></span>
   `;
 }
 
@@ -6724,7 +6735,9 @@ function bindEvents() {
       app.adminView = "agenda";
       app.adminScheduleView = "hours";
       app.selectedDate = todayISO();
+      store.state.meta.selectedDate = app.selectedDate;
       app.adminSelectedSlots = [];
+      store.queueRemoteSync({ quiet: true });
       render();
     });
   });
@@ -6732,8 +6745,10 @@ function bindEvents() {
   document.querySelectorAll("[data-admin-date]").forEach((button) => {
     button.addEventListener("click", () => {
       app.selectedDate = button.dataset.adminDate;
+      store.state.meta.selectedDate = app.selectedDate;
       app.adminScheduleView = "hours";
       app.adminSelectedSlots = [];
+      store.queueRemoteSync({ quiet: true });
       render();
     });
   });
@@ -7037,7 +7052,9 @@ function bindEvents() {
   document.querySelectorAll("[data-barber-date]").forEach((button) => {
     button.addEventListener("click", () => {
       app.barberDate = button.dataset.barberDate;
+      store.state.meta.selectedDate = app.barberDate;
       app.barberScheduleView = "hours";
+      store.queueRemoteSync({ quiet: true });
       render();
     });
   });
@@ -7078,6 +7095,7 @@ function bindEvents() {
     };
     clearAuthAttemptState("barber", app.currentBusinessSlug, user);
     app.barberDate = todayISO();
+    store.state.meta.selectedDate = app.barberDate;
     app.barberScheduleView = "hours";
     saveScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug, app.barberSession);
     render();
