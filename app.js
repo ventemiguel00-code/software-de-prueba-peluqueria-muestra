@@ -5618,12 +5618,14 @@ function render() {
   document.querySelectorAll(".nav-tabs [data-view]").forEach((button) => {
     button.classList.toggle("active", button.dataset.view === app.view);
   });
-  const toastLabel = document.querySelector(".realtime-toast strong");
   const toast = document.querySelector(".realtime-toast");
-  if (toastLabel) {
-    toastLabel.textContent = app.lastEvent;
+  if (toast && getComputedStyle(toast).display !== "none") {
+    const toastLabel = toast.querySelector("strong");
+    if (toastLabel) {
+      toastLabel.textContent = app.lastEvent;
+    }
+    toast.classList.toggle("is-empty", !app.lastEvent);
   }
-  toast?.classList.toggle("is-empty", !app.lastEvent);
   const viewRoot = document.querySelector("#view-root");
   if (!viewRoot) return;
   let nextMarkup = "";

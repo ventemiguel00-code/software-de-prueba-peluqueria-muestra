@@ -607,3 +607,10 @@ body[data-device="mobile"] .admin-person-card {
     border-radius: 12px !important;
   }
 }
+
+/* Oculta estados tecnicos como "Actualizado: remote" sin desactivar Supabase Realtime. */
+.realtime-toast {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
