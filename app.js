@@ -1455,9 +1455,11 @@ class StudioStore {
       const rangeAnchor = /^\d{4}-\d{2}-\d{2}$/.test(this.state.meta?.selectedDate || "")
         ? this.state.meta.selectedDate
         : todayISO();
+      const publicDate = rangeAnchor;
       const activeWeekDates = getWeekDates(new Date(`${rangeAnchor}T00:00:00`));
       const weekStartDate = activeWeekDates[0];
       const weekEndDate = activeWeekDates[activeWeekDates.length - 1];
+      const isPublicRoute = route.view === "public" || route.view === "business-test";
 
       const queryScoped = (table, orderColumn, ascending = true, tune = null) => {
         if (route.view !== "super-admin" && !scopedBusinessId) {
@@ -1482,10 +1484,12 @@ class StudioStore {
       };
 
       const [barbersResult, appointmentsBaseResult, blockedDaysResult, servicesResult, barberServicesResult, businessSettingsResult] = await Promise.all([
-        queryScoped("barbers", "created_at", true),
-        queryScoped("appointments", "date", true, (query) => query.gte("date", weekStartDate).lte("date", weekEndDate)),
-        queryScoped("blocked_days", "date", true),
-        queryScoped("services", "created_at", true),
+        queryScoped("barbers", "created_at", true, (query) => (isPublicRoute ? query.eq("active", true) : query)),
+        queryScoped("appointments", "date", true, (query) =>
+          isPublicRoute ? query.eq("date", publicDate) : query.gte("date", weekStartDate).lte("date", weekEndDate)
+        ),
+        queryScoped("blocked_days", "date", true, (query) => (isPublicRoute ? query.eq("date", publicDate) : query)),
+        queryScoped("services", "created_at", true, (query) => (isPublicRoute ? query.eq("active", true) : query)),
         queryScoped("barber_services", "created_at", true),
         queryScoped("business_settings", "created_at", true),
       ]);
@@ -3542,7 +3546,7 @@ function renderLayoutShell() {
     <header class="topbar" style="${businessThemeStyle(business)}">
       <button class="brand" data-public-link aria-label="Ir a agenda publica">
         ${businessLogoMarkup(business)}
-        <span><strong>${escapeHTML(business?.name || "Vision")}</strong><small>${escapeHTML(business?.slug || "Barber")}</small></span>
+        <span><strong>${escapeHTML(business?.name || "Vision")}</strong>${shellType === "internal" ? `<small>${escapeHTML(business?.slug || "Barber")}</small>` : ""}</span>
       </button>
       ${tabs.length ? `<nav class="nav-tabs internal-nav-tabs" aria-label="Navegacion interna">
         ${tabs.map(([id, label]) => `<button class="${app.view === id ? "active" : ""}" data-view="${id}">${label}</button>`).join("")}
@@ -3608,7 +3612,7 @@ function refreshPersistentShellBrand() {
   if (!brand) return;
   brand.innerHTML = `
     ${businessLogoMarkup(business)}
-    <span><strong>${escapeHTML(business?.name || "Barberia")}</strong><small>${escapeHTML(business?.slug || "entorno")}</small></span>
+    <span><strong>${escapeHTML(business?.name || "Barberia")}</strong>${routeShellType() === "internal" ? `<small>${escapeHTML(business?.slug || "entorno")}</small>` : ""}</span>
   `;
 }
 
@@ -3802,12 +3806,10 @@ function BusinessPublicTemplate({
 }) {
   const backgroundMedia = currentBackgroundMedia();
   return appShell(`
-    <section class="hero">
+    <section class="hero public-reservation-hero">
       <div class="hero-bg ${backgroundMedia?.type === "video" ? "video-backed" : ""}"></div>
       <div class="hero-copy">
-        <p class="eyebrow">Reservas premium para barberias modernas</p>
         <h1>${escapeHTML(business?.name || "Vision Barber")}</h1>
-        <p>Agenda publica, control operativo y sincronizacion en tiempo real con una experiencia rapida para clientes, administradores y barberos.</p>
       </div>
     </section>
 
@@ -4192,12 +4194,10 @@ function renderPublic() {
 
   const backgroundMedia = currentBackgroundMedia();
   return appShell(`
-    <section class="hero">
+    <section class="hero public-reservation-hero">
       <div class="hero-bg ${backgroundMedia?.type === "video" ? "video-backed" : ""}"></div>
       <div class="hero-copy">
-        <p class="eyebrow">Reservas premium para barberias modernas</p>
         <h1>${escapeHTML(business?.name || "Vision Barber")}</h1>
-        <p>Agenda publica, control operativo y sincronizacion en tiempo real con una experiencia rapida para clientes, administradores y barberos.</p>
       </div>
     </section>
 
@@ -6252,8 +6252,10 @@ function bindEvents() {
   document.querySelectorAll("[data-public-date]").forEach((button) => {
     button.addEventListener("click", () => {
       app.selectedDate = button.dataset.publicDate;
+      store.state.meta.selectedDate = app.selectedDate;
       app.publicDaySelected = true;
       app.selectedSlot = "";
+      store.queueRemoteSync({ quiet: true });
       render();
     });
   });
