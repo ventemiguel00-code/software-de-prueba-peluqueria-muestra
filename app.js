@@ -3012,10 +3012,11 @@ function expectedScopeForCurrentRoute() {
 function isCurrentBusinessLoading() {
   if (!store.supabase) return false;
   if (app.view === "super-admin") return store.remoteLoadedScopeKey !== expectedScopeForCurrentRoute() && !store.remoteReady;
-  if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requestedBusiness()) {
-    return !store.remoteReady;
-  }
-  return store.remoteLoadedScopeKey !== expectedScopeForCurrentRoute() && !store.remoteReady;
+  const route = resolveRoute(location.pathname);
+  const hasResolvedBusiness = Boolean(requestedBusiness()) || app.currentBusinessSlug === DEFAULT_BUSINESS_SLUG;
+  if (route.shell === "internal") return !hasResolvedBusiness && !store.remoteReady;
+  if (hasResolvedBusiness) return false;
+  return !store.remoteReady;
 }
 
 function businessLoadingShell(title = "Preparando entorno") {
@@ -3969,7 +3970,7 @@ function renderPublic() {
   const business = currentBusiness();
   const requested = requestedBusiness();
   const businessDataLoading =
-    isCurrentBusinessLoading() ||
+    (!requested && isCurrentBusinessLoading()) ||
     Boolean(app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && !store.remoteReady);
   if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && !businessDataLoading) {
     return appShell(`
