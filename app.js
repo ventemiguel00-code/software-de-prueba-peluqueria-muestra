@@ -1224,12 +1224,13 @@ class StudioStore {
     if (route.view === "super-admin") {
       return `${route.view}:global:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
     }
+    const scopeView = route.shell === "internal" ? "internal" : route.view;
     const scopedBusiness = this.businessBySlug(route.businessSlug) || null;
     const scopedBusinessId =
       route.businessSlug === DEFAULT_BUSINESS_SLUG
         ? DEFAULT_BUSINESS_ID
         : scopedBusiness?.id || null;
-    return `${route.view}:${scopedBusinessId || "global"}:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
+    return `${scopeView}:${scopedBusinessId || "global"}:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
   }
 
   stateWithRuntimeScope(state = this.state, route = resolveRoute(location.pathname)) {
@@ -1338,7 +1339,8 @@ class StudioStore {
           : route.businessSlug === DEFAULT_BUSINESS_SLUG
             ? DEFAULT_BUSINESS_ID
             : scopedBusiness?.id || null;
-      const syncScopeKey = `${route.view}:${scopedBusinessId || "global"}:${route.businessSlug || ""}`;
+      const syncScopeView = route.shell === "internal" ? "internal" : route.view;
+      const syncScopeKey = `${syncScopeView}:${scopedBusinessId || "global"}:${route.businessSlug || ""}`;
 
       if (route.view === "super-admin") {
         const [businessSettingsResult, summaryRpcResult] = await Promise.all([
@@ -1568,7 +1570,8 @@ class StudioStore {
         : route.businessSlug === DEFAULT_BUSINESS_SLUG
           ? DEFAULT_BUSINESS_ID
           : scopedBusiness?.id || null;
-    const scopeKey = `${route.view}:${scopedBusinessId || "global"}:${route.businessSlug || ""}`;
+    const scopeView = route.shell === "internal" ? "internal" : route.view;
+    const scopeKey = `${scopeView}:${scopedBusinessId || "global"}:${route.businessSlug || ""}`;
     if (this.remoteChannel && this.remoteScopeKey === scopeKey) return;
     if (this.remoteChannel) {
       this.supabase.removeChannel(this.remoteChannel);
@@ -2463,18 +2466,22 @@ function resolveRoute(pathname = location.pathname) {
   if (parts[0] === "barberia-test" && parts[1]) {
     return { view: "business-test", businessSlug: parts[1] };
   }
+  if (parts[0] === "panel" && parts[1]) {
+    const params = new URLSearchParams(location.search);
+    return { view: params.get("modo") === "barbero" ? "barber" : "admin", businessSlug: parts[1], shell: "internal" };
+  }
   if (parts[0] === "admin" && parts[1]) {
-    return { view: "admin", businessSlug: parts[1] };
+    return { view: "admin", businessSlug: parts[1], shell: "internal" };
   }
   if (parts[0] === "barbero" && parts[1]) {
-    return { view: "barber", businessSlug: parts[1] };
+    return { view: "barber", businessSlug: parts[1], shell: "internal" };
   }
   if ((parts[0] === "barberia" || parts[0] === "negocio") && parts[1]) {
-    return { view: "public", businessSlug: parts[1] };
+    return { view: "public", businessSlug: parts[1], shell: "public" };
   }
-  if (pathname === "/admin-vip") return { view: "admin", businessSlug: DEFAULT_BUSINESS_SLUG };
-  if (pathname === "/gestion-equipo") return { view: "barber", businessSlug: DEFAULT_BUSINESS_SLUG };
-  return { view: "public", businessSlug: DEFAULT_BUSINESS_SLUG };
+  if (pathname === "/admin-vip") return { view: "admin", businessSlug: DEFAULT_BUSINESS_SLUG, shell: "internal" };
+  if (pathname === "/gestion-equipo") return { view: "barber", businessSlug: DEFAULT_BUSINESS_SLUG, shell: "internal" };
+  return { view: "public", businessSlug: DEFAULT_BUSINESS_SLUG, shell: "public" };
 }
 
 function loadAdminAccounts() {
@@ -2619,6 +2626,7 @@ function persistVisualRouteState() {
   writeVisualNavState(routeKey, state);
 
   const params = new URLSearchParams();
+  if (routeShellType() === "internal") params.set("modo", app.view === "barber" ? "barbero" : "admin");
   if (app.view === "super-admin" && state.superBusinessId) params.set("negocio", state.superBusinessId);
   if (app.view === "super-admin" && state.superCreateOpen) params.set("crear", "1");
   if (app.view === "admin") {
@@ -2943,7 +2951,8 @@ function expectedScopeForCurrentRoute() {
   const route = resolveRoute(location.pathname);
   if (route.view === "super-admin") return `super-admin:global:${DEFAULT_BUSINESS_SLUG}`;
   const business = requestedBusiness() || currentBusiness();
-  return `${route.view}:${business?.id || "global"}:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
+  const scopeView = route.shell === "internal" ? "internal" : route.view;
+  return `${scopeView}:${business?.id || "global"}:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
 }
 
 function isCurrentBusinessLoading() {
@@ -3041,14 +3050,16 @@ function businessUrlSet(business) {
   if (business?.id === DEFAULT_BUSINESS_ID) {
     return {
       public: PRODUCTION_BASE_URL,
-      admin: `${PRODUCTION_BASE_URL}/admin-vip`,
-      barber: `${PRODUCTION_BASE_URL}/gestion-equipo`,
+      panel: `${PRODUCTION_BASE_URL}/panel/${DEFAULT_BUSINESS_SLUG}`,
+      admin: `${PRODUCTION_BASE_URL}/panel/${DEFAULT_BUSINESS_SLUG}?modo=admin`,
+      barber: `${PRODUCTION_BASE_URL}/panel/${DEFAULT_BUSINESS_SLUG}?modo=barbero`,
     };
   }
   return {
     public: `${PRODUCTION_BASE_URL}/barberia/${slug}`,
-    admin: `${PRODUCTION_BASE_URL}/admin/${slug}`,
-    barber: `${PRODUCTION_BASE_URL}/barbero/${slug}`,
+    panel: `${PRODUCTION_BASE_URL}/panel/${slug}`,
+    admin: `${PRODUCTION_BASE_URL}/panel/${slug}?modo=admin`,
+    barber: `${PRODUCTION_BASE_URL}/panel/${slug}?modo=barbero`,
   };
 }
 
@@ -3401,9 +3412,15 @@ function viewPath(view) {
   const slug = app.currentBusinessSlug || DEFAULT_BUSINESS_SLUG;
   if (view === "super-admin") return "/super-admin";
   if (view === "business-test") return `/barberia-test/${slug}`;
-  if (view === "admin") return slug === DEFAULT_BUSINESS_SLUG ? "/admin-vip" : `/admin/${slug}`;
-  if (view === "barber") return slug === DEFAULT_BUSINESS_SLUG ? "/gestion-equipo" : `/barbero/${slug}`;
+  if (view === "admin") return `/panel/${slug}?modo=admin`;
+  if (view === "barber") return `/panel/${slug}?modo=barbero`;
+  if (slug === DEFAULT_BUSINESS_SLUG) return "/";
   return `/barberia/${slug}`;
+}
+
+function routeShellType() {
+  if (app.view === "super-admin") return "super-admin";
+  return app.route?.shell || (app.view === "admin" || app.view === "barber" ? "internal" : "public");
 }
 
 function avatar(barber, size = "lg") {
@@ -3475,20 +3492,22 @@ function renderLayoutShell() {
     `;
   }
   const business = currentBusiness();
-  const tabs = [
-    ["public", "Agenda"],
-    ["admin", "Admin"],
-    ["barber", "Barbero"],
-  ];
+  const shellType = routeShellType();
+  const tabs = shellType === "internal"
+    ? [
+        ["admin", "Admin"],
+        ["barber", "Barbero"],
+      ]
+    : [];
   return `
     <header class="topbar" style="${businessThemeStyle(business)}">
-      <button class="brand" data-view="public" aria-label="Ir a agenda publica">
+      <button class="brand" data-public-link aria-label="Ir a agenda publica">
         ${businessLogoMarkup(business)}
         <span><strong>${escapeHTML(business?.name || "Vision")}</strong><small>${escapeHTML(business?.slug || "Barber")}</small></span>
       </button>
-      <nav class="nav-tabs" aria-label="Navegacion principal">
+      ${tabs.length ? `<nav class="nav-tabs internal-nav-tabs" aria-label="Navegacion interna">
         ${tabs.map(([id, label]) => `<button class="${app.view === id ? "active" : ""}" data-view="${id}">${label}</button>`).join("")}
-      </nav>
+      </nav>` : ""}
     </header>
     <main><div id="view-root"></div></main>
     <div class="realtime-toast">
@@ -4658,9 +4677,8 @@ function renderSuperAdmin() {
           <div class="button-row">
             <button class="primary-action">Guardar negocio</button>
             <button class="secondary-action" type="button" data-regenerate-business-password="${escapeHTML(business.id)}">Regenerar clave admin</button>
-            <a class="secondary-action inline-action" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">Abrir barberia</a>
-            <a class="secondary-action inline-action" href="${escapeHTML(urls.admin)}" target="_blank" rel="noreferrer">Abrir admin</a>
-            <a class="secondary-action inline-action" href="${escapeHTML(urls.barber)}" target="_blank" rel="noreferrer">Abrir barbero</a>
+            <a class="secondary-action inline-action" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">Cliente / Reservas</a>
+            <a class="secondary-action inline-action" href="${escapeHTML(urls.panel)}" target="_blank" rel="noreferrer">Admin / Barbero</a>
           </div>
         </form>
         <section class="super-admin-admins">
@@ -4886,7 +4904,8 @@ function renderSuperAdminV2() {
           </div>
           </button>
           <div class="super-business-summary__actions">
-            <a class="secondary-action inline-action" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">Entorno</a>
+            <a class="secondary-action inline-action" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">Cliente / Reservas</a>
+            <a class="secondary-action inline-action" href="${escapeHTML(urls.panel)}" target="_blank" rel="noreferrer">Admin / Barbero</a>
             <span class="super-business-summary__toggle">${isOpen ? "-" : "+"}</span>
           </div>
         </div>
@@ -4895,7 +4914,8 @@ function renderSuperAdminV2() {
             <p class="eyebrow">${business.active ? "Negocio activo" : "Negocio inactivo"}</p>
             <p>Slug: ${escapeHTML(business.slug)}</p>
             <p>Admin principal: ${escapeHTML(admin?.name || "Pendiente")} · Usuario: ${escapeHTML(admin?.user || "Desarrollo")}</p>
-            <p>Entorno publico: <a class="inline-link" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">${escapeHTML(urls.public)}</a></p>
+            <p>Cliente / Reservas: <a class="inline-link" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">${escapeHTML(urls.public)}</a></p>
+            <p>Admin / Barbero: <a class="inline-link" href="${escapeHTML(urls.panel)}" target="_blank" rel="noreferrer">${escapeHTML(urls.panel)}</a></p>
             <p>Plantilla asociada: ${escapeHTML(summarizeEnvironmentAttachment(environmentAttachment))}</p>
           </div>
           <form class="super-business-edit form-stack" data-business-id="${escapeHTML(business.id)}">
@@ -4915,7 +4935,8 @@ function renderSuperAdminV2() {
             <label class="toggle-line"><input name="active" type="checkbox" ${business.active ? "checked" : ""} /> Negocio activo</label>
             <div class="button-row">
               <button class="primary-action">Guardar negocio</button>
-              <a class="secondary-action inline-action" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">Entorno</a>
+              <a class="secondary-action inline-action" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">Cliente / Reservas</a>
+              <a class="secondary-action inline-action" href="${escapeHTML(urls.panel)}" target="_blank" rel="noreferrer">Admin / Barbero</a>
               ${business.id !== DEFAULT_BUSINESS_ID ? `<button class="secondary-action danger" type="button" data-delete-business="${escapeHTML(business.id)}" data-delete-business-slug="${escapeHTML(business.slug)}" data-delete-business-name="${escapeHTML(business.name)}">Eliminar barberia</button>` : ""}
             </div>
           </form>
@@ -5543,9 +5564,12 @@ function render() {
   };
   ensurePersistentBackground();
   app.backgroundMedia = currentBackgroundMedia();
-  if (root.dataset.shellReady !== "true") {
+  const shellSignature = routeShellType();
+  if (root.dataset.shellReady !== "true" || root.dataset.shellSignature !== shellSignature) {
     root.innerHTML = renderLayoutShell();
     root.dataset.shellReady = "true";
+    root.dataset.shellSignature = shellSignature;
+    root.dataset.chromeBound = "";
   }
   if (root.dataset.chromeBound !== "true") {
     bindChromeEvents();
@@ -5600,6 +5624,11 @@ function bindChromeEvents() {
       history.pushState(null, "", viewPath(app.view));
       scheduleRender();
     });
+  });
+  document.querySelector("[data-public-link]")?.addEventListener("click", (event) => {
+    if (routeShellType() !== "internal") return;
+    event.preventDefault();
+    window.open(viewPath("public"), "_blank", "noopener,noreferrer");
   });
 }
 
@@ -5915,7 +5944,7 @@ function bindEvents() {
     app.superAdminCredentialReveal = {
       businessName: business.name,
       publicUrl: urls.public,
-      adminUrl: urls.admin,
+      adminUrl: urls.panel,
       barberUrl: urls.barber,
       user: "Desarrollo",
       password: generatedPassword,
@@ -6075,7 +6104,7 @@ function bindEvents() {
         app.superAdminCredentialReveal = {
           businessName: business.name,
           publicUrl: urls.public,
-          adminUrl: urls.admin,
+          adminUrl: urls.panel,
           barberUrl: urls.barber,
           user,
           password: generatedPassword,
@@ -6148,7 +6177,7 @@ function bindEvents() {
         app.superAdminCredentialReveal = {
           businessName: business?.name || "Barberia",
           publicUrl: urls.public,
-          adminUrl: urls.admin,
+          adminUrl: urls.panel,
           barberUrl: urls.barber,
           user: account.user,
           password: generatedPassword,
