@@ -21,8 +21,13 @@ const VISIT_STATE_META = {
 };
 const COUNTABLE_STATUSES = new Set(["reserved", "fixed"]);
 const PERF_LOG_KEY = "barber-delux-perf-logs";
+const PERF_QUERY_LOG_ENABLED_KEY = "barber-delux-query-metrics-enabled";
+const PERF_QUERY_METRICS_KEY = "barber-delux-query-metrics-v1";
 const THEME_CACHE_PREFIX = "theme_cache_";
 const REMOTE_SYNC_DEBOUNCE_MS = 180;
+const REMOTE_SCOPE_CACHE_TTL_MS = 45 * 1000;
+const SUPER_ADMIN_CACHE_TTL_MS = 60 * 1000;
+const ADMIN_ACCOUNTS_CACHE_TTL_MS = 90 * 1000;
 
 const dayNames = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
 const longDayNames = ["Domingo", "Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"];
@@ -41,13 +46,21 @@ const BUSINESS_SELECT_COLUMNS =
   "id,business_name,slug,logo_url,theme,primary_color,secondary_color,background_url,active,created_at,updated_at";
 const BUSINESS_SETTINGS_SELECT_COLUMNS =
   "business_id,environment_archive_meta,theme_override,environment_archive_url,environment_archive_name,public_path,custom_domain,notes,created_at";
+const BUSINESS_SETTINGS_LIGHT_SELECT_COLUMNS =
+  "business_id,theme_override,created_at";
 const BARBER_SELECT_COLUMNS =
   "id,business_id,name,user,password,password_hash,whatsapp,active,photo,gradient,specialty,created_at";
+const PUBLIC_BARBER_SELECT_COLUMNS =
+  "id,business_id,name,active,photo,gradient,specialty,created_at";
 const APPOINTMENT_SELECT_COLUMNS =
   "id,business_id,barber_id,date,time,status,client_name,whatsapp,source,week_key,block_origin,visit_state,notes";
+const PUBLIC_APPOINTMENT_SELECT_COLUMNS =
+  "id,business_id,barber_id,date,time,status,week_key,block_origin";
 const BLOCKED_DAY_SELECT_COLUMNS = "id,business_id,barber_id,date";
 const SERVICE_SELECT_COLUMNS =
   "id,business_id,service_name,service_value,admin_percentage,barber_percentage,active,created_at";
+const PUBLIC_SERVICE_SELECT_COLUMNS =
+  "id,business_id,service_name,service_value,active,created_at";
 const BARBER_SERVICE_SELECT_COLUMNS = "id,business_id,barber_id,service_id,active,created_at";
 const ADMIN_ACCOUNT_SELECT_COLUMNS =
   "id,business_id,admin_name,admin_user,password_hash,role,active,created_at,updated_at";
@@ -259,6 +272,54 @@ function perfStep(label, mark, extra = "") {
   if (!perfLogsEnabled() || !mark) return;
   const elapsed = Math.round((performance.now() - mark.start) * 10) / 10;
   console.debug(`[perf] ${label}: ${elapsed}ms${extra ? ` ${extra}` : ""}`);
+}
+
+function estimatePayloadKb(data) {
+  try {
+    return Math.round((new Blob([JSON.stringify(data ?? null)]).size / 1024) * 10) / 10;
+  } catch {
+    return 0;
+  }
+}
+
+function queryMetricsEnabled() {
+  return localStorage.getItem(PERF_QUERY_LOG_ENABLED_KEY) === "1" || perfLogsEnabled();
+}
+
+function loadQueryMetricRows() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PERF_QUERY_METRICS_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function recordQueryMetric(metric) {
+  if (!queryMetricsEnabled()) return;
+  const entry = {
+    ...metric,
+    at: new Date().toISOString(),
+  };
+  const current = loadQueryMetricRows();
+  current.push(entry);
+  const trimmed = current.slice(-160);
+  localStorage.setItem(PERF_QUERY_METRICS_KEY, JSON.stringify(trimmed));
+  console.debug(
+    `[egress] ${entry.scope} ${entry.label}: ${entry.kb}KB ${entry.ms}ms ${entry.rows ?? 0} filas`
+  );
+}
+
+function summarizeQueryMetrics() {
+  const rows = loadQueryMetricRows();
+  return rows.reduce((summary, row) => {
+    const key = row.scope || "global";
+    summary[key] ||= { queries: 0, kb: 0, ms: 0 };
+    summary[key].queries += 1;
+    summary[key].kb = Math.round((summary[key].kb + (Number(row.kb) || 0)) * 10) / 10;
+    summary[key].ms = Math.round((summary[key].ms + (Number(row.ms) || 0)) * 10) / 10;
+    return summary;
+  }, {});
 }
 
 function emptyBusinessBucket() {
@@ -654,15 +715,20 @@ function applyBusinessSettingsThemeColors(businesses = [], settingsRows = []) {
   const settingsByBusiness = new Map(
     (settingsRows || [])
       .filter((row) => row?.business_id)
-      .map((row) => [row.business_id, row.environment_archive_meta || {}])
+      .map((row) => [row.business_id, row])
   );
   return (businesses || []).map((business) =>
     settingsByBusiness.has(business.id)
-      ? normalizeBusiness({
-          ...business,
-          ...businessBrandingPatchFromMeta(settingsByBusiness.get(business.id)),
-          ...businessThemePatchFromMeta(settingsByBusiness.get(business.id).themeColors),
-        })
+      ? (() => {
+          const row = settingsByBusiness.get(business.id);
+          const meta = row.environment_archive_meta || {};
+          return normalizeBusiness({
+            ...business,
+            ...(row.theme_override ? { theme: row.theme_override } : {}),
+            ...businessBrandingPatchFromMeta(meta),
+            ...businessThemePatchFromMeta(meta.themeColors),
+          });
+        })()
       : business
   );
 }
@@ -1187,9 +1253,12 @@ class StudioStore {
     this.syncInFlight = false;
     this.syncQueued = false;
     this.syncQueuedQuiet = false;
+    this.syncQueuedForce = false;
     this.syncTimer = null;
     this.bucketCacheStateRef = null;
     this.bucketCache = new Map();
+    this.remoteStateCache = new Map();
+    this.adminAccountsCache = new Map();
     this.applyingRemote = false;
     this.dailyResetPending = false;
     this.state = this.load();
@@ -1247,6 +1316,13 @@ class StudioStore {
   persist(event = { type: "UPDATE" }) {
     this.invalidateBusinessBuckets();
     invalidateDerivedBusinessCache();
+    const changedBusinessId =
+      event.businessId || event.record?.negocioId || event.record?.businessId || event.record?.business_id || "";
+    if (event.table === "businesses" || !changedBusinessId) {
+      this.invalidateRemoteCache();
+    } else {
+      this.invalidateRemoteCache(changedBusinessId);
+    }
     this.state = this.stateWithRuntimeScope(this.state);
     localStorage.setItem(APP_KEY, JSON.stringify(this.state));
     this.emit(event);
@@ -1307,6 +1383,60 @@ class StudioStore {
     this.bucketCache = new Map();
   }
 
+  invalidateRemoteCache(scopePrefix = "") {
+    if (!scopePrefix) {
+      this.remoteStateCache.clear();
+      this.adminAccountsCache.clear();
+      return;
+    }
+    [...this.remoteStateCache.keys()].forEach((key) => {
+      if (key.includes(scopePrefix)) this.remoteStateCache.delete(key);
+    });
+    [...this.adminAccountsCache.keys()].forEach((key) => {
+      if (key.includes(scopePrefix)) this.adminAccountsCache.delete(key);
+    });
+  }
+
+  getCachedRemoteState(cacheKey, ttlMs) {
+    const cached = this.remoteStateCache.get(cacheKey);
+    if (!cached || Date.now() - cached.createdAt > ttlMs) return null;
+    return cached.state;
+  }
+
+  setCachedRemoteState(cacheKey, state) {
+    this.remoteStateCache.set(cacheKey, {
+      createdAt: Date.now(),
+      state,
+    });
+  }
+
+  applyRemoteState(nextState, syncScopeKey, quiet = false, reason = "remote") {
+    this.applyingRemote = true;
+    this.state = nextState;
+    localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+    this.remoteLoadedScopeKey = syncScopeKey;
+    this.remoteReady = true;
+    if (!quiet) {
+      this.emit({ type: "SYNC", table: reason });
+      this.channel?.postMessage({ type: "SYNC", table: reason });
+    }
+  }
+
+  async trackedQuery(label, scope, promise) {
+    const startedAt = performance.now();
+    const result = await promise;
+    const ms = Math.round((performance.now() - startedAt) * 10) / 10;
+    recordQueryMetric({
+      label,
+      scope,
+      ms,
+      kb: estimatePayloadKb(result?.data),
+      rows: Array.isArray(result?.data) ? result.data.length : result?.data ? 1 : 0,
+      error: result?.error?.message || "",
+    });
+    return result;
+  }
+
   async bootstrapRemote() {
     if (this.dailyResetPending) {
       await this.persistRemote({ type: "RESET", table: "demo", reason: "daily_reset" });
@@ -1317,8 +1447,9 @@ class StudioStore {
     this.subscribeRemote();
   }
 
-  queueRemoteSync({ quiet = false } = {}) {
+  queueRemoteSync({ quiet = false, force = false } = {}) {
     this.syncQueuedQuiet = this.syncQueued ? this.syncQueuedQuiet && quiet : quiet;
+    this.syncQueuedForce = this.syncQueued ? this.syncQueuedForce || force : force;
     if (this.syncInFlight) {
       this.syncQueued = true;
       return;
@@ -1328,13 +1459,15 @@ class StudioStore {
     this.syncTimer = window.setTimeout(() => {
       if (!this.syncQueued || this.syncInFlight) return;
       const nextQuiet = this.syncQueuedQuiet;
+      const nextForce = this.syncQueuedForce;
       this.syncQueued = false;
       this.syncQueuedQuiet = false;
-      this.syncFromRemote({ quiet: nextQuiet }).catch((error) => console.error(error));
+      this.syncQueuedForce = false;
+      this.syncFromRemote({ quiet: nextQuiet, force: nextForce }).catch((error) => console.error(error));
     }, REMOTE_SYNC_DEBOUNCE_MS);
   }
 
-  async syncFromRemote({ quiet = false } = {}) {
+  async syncFromRemote({ quiet = false, force = false } = {}) {
     if (!this.supabase || this.syncInFlight) return;
     const perf = perfMark("syncFromRemote");
     this.syncInFlight = true;
@@ -1342,12 +1475,13 @@ class StudioStore {
     try {
       const localState = this.loadLocalState();
       const route = resolveRoute(location.pathname);
+      const queryScope = `${route.view}:${route.businessSlug || "global"}`;
       const businessPerf = perfMark("business");
       const businessesQuery =
         route.view === "super-admin"
           ? this.supabase.from("businesses").select(BUSINESS_SELECT_COLUMNS).order("created_at", { ascending: true })
           : this.supabase.from("businesses").select(BUSINESS_SELECT_COLUMNS).eq("slug", route.businessSlug).limit(1);
-      const businessesResult = await businessesQuery;
+      const businessesResult = await this.trackedQuery("businesses", queryScope, businessesQuery);
       if (businessesResult.error) throw businessesResult.error;
       perfStep("business", businessPerf, `(${route.view}:${route.businessSlug || "global"})`);
       const deletedBusinessIds = loadDeletedBusinessIds();
@@ -1378,10 +1512,25 @@ class StudioStore {
       const syncScopeKey = `${syncScopeView}:${scopedBusinessId || "global"}:${route.businessSlug || ""}`;
 
       if (route.view === "super-admin") {
+        const cacheKey = `${syncScopeKey}:${todayISO()}`;
+        const cachedState = !force ? this.getCachedRemoteState(cacheKey, SUPER_ADMIN_CACHE_TTL_MS) : null;
+        if (cachedState) {
+          this.applyRemoteState(cachedState, syncScopeKey, quiet, "remote-cache");
+          perfEnd(perf, "(super-admin cache)");
+          return;
+        }
         const settingsPerf = perfMark("super-admin settings+summary");
         const [businessSettingsResult, summaryRpcResult] = await Promise.all([
-          this.supabase.from("business_settings").select(BUSINESS_SETTINGS_SELECT_COLUMNS).order("created_at", { ascending: true }),
-          this.supabase.rpc("business_dashboard_summary", { target_date: todayISO() }),
+          this.trackedQuery(
+            "business_settings",
+            "super-admin",
+            this.supabase.from("business_settings").select(BUSINESS_SETTINGS_LIGHT_SELECT_COLUMNS).order("created_at", { ascending: true })
+          ),
+          this.trackedQuery(
+            "rpc:business_dashboard_summary",
+            "super-admin",
+            this.supabase.rpc("business_dashboard_summary", { target_date: todayISO() })
+          ),
         ]);
         perfStep("super-admin settings+summary", settingsPerf);
 
@@ -1394,12 +1543,16 @@ class StudioStore {
           businessSummaryById = buildBusinessSummaryMapFromRpcRows(mergedBusinesses, summaryRpcResult.data || []);
         } else {
           const [barbersSummaryResult, servicesSummaryResult, appointmentsSummaryResult] = await Promise.all([
-            this.supabase.from("barbers").select("id,business_id"),
-            this.supabase.from("services").select("id,business_id"),
-            this.supabase
-              .from("appointments")
-              .select("id,business_id,date,status")
-              .eq("date", todayISO()),
+            this.trackedQuery("summary:barbers", "super-admin", this.supabase.from("barbers").select("id,business_id")),
+            this.trackedQuery("summary:services", "super-admin", this.supabase.from("services").select("id,business_id")),
+            this.trackedQuery(
+              "summary:appointments_today",
+              "super-admin",
+              this.supabase
+                .from("appointments")
+                .select("id,business_id,date,status")
+                .eq("date", todayISO())
+            ),
           ]);
           if (barbersSummaryResult.error) throw barbersSummaryResult.error;
           if (servicesSummaryResult.error && servicesSummaryResult.error.code !== "42P01") throw servicesSummaryResult.error;
@@ -1440,16 +1593,9 @@ class StudioStore {
 
         await this.syncAdminAccountsFromRemote(null, nextState.businesses);
 
-        this.applyingRemote = true;
-        this.state = nextState;
-        localStorage.setItem(APP_KEY, JSON.stringify(this.state));
-        this.remoteLoadedScopeKey = syncScopeKey;
-        this.remoteReady = true;
+        this.setCachedRemoteState(cacheKey, nextState);
+        this.applyRemoteState(nextState, syncScopeKey, quiet, "remote");
 
-        if (!quiet) {
-          this.emit({ type: "SYNC", table: "remote" });
-          this.channel?.postMessage({ type: "SYNC", table: "remote" });
-        }
         perfEnd(perf, "(super-admin)");
         return;
       }
@@ -1463,27 +1609,43 @@ class StudioStore {
       const weekEndDate = activeWeekDates[activeWeekDates.length - 1];
       const isPublicRoute = route.view === "public" || route.view === "business-test";
       const isInternalRoute = route.view === "admin" || route.view === "barber";
+      const dataRangeKey = isPublicRoute ? publicDate : `${weekStartDate}:${weekEndDate}`;
+      const cacheKey = `${syncScopeKey}:${dataRangeKey}`;
+      const cachedState = !force ? this.getCachedRemoteState(cacheKey, REMOTE_SCOPE_CACHE_TTL_MS) : null;
+      if (cachedState) {
+        this.applyRemoteState(cachedState, syncScopeKey, quiet, "remote-cache");
+        perfEnd(perf, `(${route.view}:${scopedBusinessId || "global"} cache)`);
+        return;
+      }
 
       const queryScoped = (table, orderColumn, ascending = true, tune = null) => {
         if (route.view !== "super-admin" && !scopedBusinessId) {
           return Promise.resolve({ data: [], error: null });
         }
         const columnMap = {
-          barbers: BARBER_SELECT_COLUMNS,
-          appointments: APPOINTMENT_SELECT_COLUMNS,
+          barbers: isPublicRoute ? PUBLIC_BARBER_SELECT_COLUMNS : BARBER_SELECT_COLUMNS,
+          appointments: isPublicRoute ? PUBLIC_APPOINTMENT_SELECT_COLUMNS : APPOINTMENT_SELECT_COLUMNS,
           blocked_days: BLOCKED_DAY_SELECT_COLUMNS,
-          services: SERVICE_SELECT_COLUMNS,
+          services: isPublicRoute ? PUBLIC_SERVICE_SELECT_COLUMNS : SERVICE_SELECT_COLUMNS,
           barber_services: BARBER_SERVICE_SELECT_COLUMNS,
-          business_settings: BUSINESS_SETTINGS_SELECT_COLUMNS,
+          business_settings: BUSINESS_SETTINGS_LIGHT_SELECT_COLUMNS,
         };
-        let query = this.supabase.from(table).select(columnMap[table] || "*");
+        const selectedColumns = columnMap[table];
+        if (!selectedColumns) {
+          return Promise.resolve({ data: [], error: new Error(`Columnas no definidas para ${table}`) });
+        }
+        let query = this.supabase.from(table).select(selectedColumns);
         if (route.view !== "super-admin") {
           query = query.eq("business_id", scopedBusinessId);
         }
         if (typeof tune === "function") {
           query = tune(query);
         }
-        return query.order(orderColumn, { ascending });
+        return this.trackedQuery(
+          table,
+          `${route.view}:${scopedBusinessId || "global"}:${dataRangeKey}`,
+          query.order(orderColumn, { ascending })
+        );
       };
 
       const scopedDataPerf = perfMark("business scoped data");
@@ -1556,25 +1718,20 @@ class StudioStore {
 
       await this.syncAdminAccountsFromRemote(route.view === "super-admin" ? null : scopedBusinessId, nextState.businesses);
 
-      this.applyingRemote = true;
-      this.state = nextState;
-      localStorage.setItem(APP_KEY, JSON.stringify(this.state));
-      this.remoteLoadedScopeKey = syncScopeKey;
-      this.remoteReady = true;
+      this.setCachedRemoteState(cacheKey, nextState);
+      this.applyRemoteState(nextState, syncScopeKey, quiet, "remote");
 
-      if (!quiet) {
-        this.emit({ type: "SYNC", table: "remote" });
-        this.channel?.postMessage({ type: "SYNC", table: "remote" });
-      }
       perfEnd(perf, `(${route.view}:${scopedBusinessId || "global"})`);
     } finally {
       this.applyingRemote = false;
       this.syncInFlight = false;
       if (this.syncQueued) {
         const queuedQuiet = this.syncQueuedQuiet || quiet;
+        const queuedForce = this.syncQueuedForce || force;
         this.syncQueued = false;
         this.syncQueuedQuiet = false;
-        this.queueRemoteSync({ quiet: queuedQuiet });
+        this.syncQueuedForce = false;
+        this.queueRemoteSync({ quiet: queuedQuiet, force: queuedForce });
       }
     }
   }
@@ -1654,30 +1811,23 @@ class StudioStore {
         ? { event: "*", schema: "public", table: "businesses" }
         : { event: "*", schema: "public", table: "businesses", filter: `id=eq.${scopedBusinessId}` };
 
-    this.remoteChannel = this.supabase
+    const onTenantChange = () => {
+      this.invalidateRemoteCache(scopedBusinessId || "global");
+      this.queueRemoteSync({ force: true });
+    };
+    let channel = this.supabase
       .channel(`barber-delux-realtime-${scopeKey}`)
-      .on("postgres_changes", barbersConfig, () => {
-        this.queueRemoteSync();
-      })
-      .on("postgres_changes", businessesConfig, () => {
-        this.queueRemoteSync();
-      })
-      .on("postgres_changes", appointmentConfig, () => {
-        this.queueRemoteSync();
-      })
-      .on("postgres_changes", blockedDaysConfig, () => {
-        this.queueRemoteSync();
-      })
-      .on("postgres_changes", servicesConfig, () => {
-        this.queueRemoteSync();
-      })
-      .on("postgres_changes", barberServicesConfig, () => {
-        this.queueRemoteSync();
-      })
-      .on("postgres_changes", businessSettingsConfig, () => {
-        this.queueRemoteSync();
-      })
-      .subscribe();
+      .on("postgres_changes", businessesConfig, onTenantChange)
+      .on("postgres_changes", businessSettingsConfig, onTenantChange);
+    if (route.view !== "super-admin") {
+      channel = channel
+        .on("postgres_changes", barbersConfig, onTenantChange)
+        .on("postgres_changes", appointmentConfig, onTenantChange)
+        .on("postgres_changes", blockedDaysConfig, onTenantChange)
+        .on("postgres_changes", servicesConfig, onTenantChange)
+        .on("postgres_changes", barberServicesConfig, onTenantChange);
+    }
+    this.remoteChannel = channel.subscribe();
     if (!scopeWasLoaded) {
       this.queueRemoteSync();
     }
@@ -1957,11 +2107,17 @@ class StudioStore {
 
   async syncAdminAccountsFromRemote(businessId = null, businesses = this.state.businesses) {
     if (!this.supabase) return true;
+    const cacheKey = `admin-accounts:${businessId || "global"}`;
+    const cached = this.adminAccountsCache.get(cacheKey);
+    if (cached && Date.now() - cached.createdAt < ADMIN_ACCOUNTS_CACHE_TTL_MS) {
+      saveAdminAccounts(cached.accounts);
+      return true;
+    }
     let query = this.supabase.from("admin_accounts").select(ADMIN_ACCOUNT_SELECT_COLUMNS).order("created_at", { ascending: true });
     if (businessId) {
       query = query.eq("business_id", businessId);
     }
-    const { data, error } = await query;
+    const { data, error } = await this.trackedQuery("admin_accounts", `admin-accounts:${businessId || "global"}`, query);
     if (error) {
       if (error.code === "42P01") return false;
       throw error;
@@ -1972,7 +2128,12 @@ class StudioStore {
     const preservedAccounts = businessId
       ? localAccounts.filter((account) => account.businessId !== businessId)
       : [];
-    saveAdminAccounts([...preservedAccounts, ...remoteAccounts]);
+    const nextAccounts = [...preservedAccounts, ...remoteAccounts];
+    saveAdminAccounts(nextAccounts);
+    this.adminAccountsCache.set(cacheKey, {
+      createdAt: Date.now(),
+      accounts: nextAccounts,
+    });
     return true;
   }
 
@@ -1985,11 +2146,12 @@ class StudioStore {
 
     if (scopedBusinessId) {
       const row = rowsByBusiness.get(scopedBusinessId);
+      const hasRemoteMeta = row && Object.prototype.hasOwnProperty.call(row, "environment_archive_meta");
       const meta = row?.environment_archive_meta || {};
       const backgroundMedia = meta?.backgroundMedia || null;
       if (backgroundMedia) {
         map[scopedBusinessId] = backgroundMedia;
-      } else {
+      } else if (hasRemoteMeta) {
         delete map[scopedBusinessId];
       }
       if (meta?.themeColors && businessesById.has(scopedBusinessId)) {
@@ -2007,11 +2169,12 @@ class StudioStore {
     } else {
       this.state.businesses.forEach((business) => {
         const row = rowsByBusiness.get(business.id);
+        const hasRemoteMeta = row && Object.prototype.hasOwnProperty.call(row, "environment_archive_meta");
         const meta = row?.environment_archive_meta || {};
         const backgroundMedia = meta?.backgroundMedia || null;
         if (backgroundMedia) {
           map[business.id] = backgroundMedia;
-        } else if (business.id !== DEFAULT_BUSINESS_ID) {
+        } else if (hasRemoteMeta && business.id !== DEFAULT_BUSINESS_ID) {
           delete map[business.id];
         }
         if (meta?.themeColors) {
@@ -2505,6 +2668,12 @@ class StudioStore {
 }
 
 const store = new StudioStore();
+window.__barberEgressReport = () => summarizeQueryMetrics();
+window.__barberEgressReset = () => {
+  localStorage.setItem(PERF_QUERY_LOG_ENABLED_KEY, "1");
+  localStorage.removeItem(PERF_QUERY_METRICS_KEY);
+  return "Medicion de egress reiniciada. Navega por las vistas y ejecuta window.__barberEgressReport().";
+};
 const ADMIN_SESSION_KEY = "barber-delux-admin-session";
 const BARBER_SESSION_KEY = "noxora-barber-session";
 const ADMIN_ACCOUNTS_KEY = "barber-delux-admin-accounts-v1";
@@ -3560,7 +3729,7 @@ function renderGlobalBackground() {
   const useStaticSuperAdminBg = app.view === "super-admin";
   const isVideo = backgroundMedia?.type === "video";
   const videoMarkup = !useStaticSuperAdminBg && isVideo
-    ? `<video class="global-bg-video" src="${backgroundMedia.src}" autoplay muted loop playsinline preload="auto" poster="/assets/atelier-luxury-hero.png"></video>`
+    ? `<video class="global-bg-video" src="${backgroundMedia.src}" autoplay muted loop playsinline preload="metadata" poster="/assets/atelier-luxury-hero.png"></video>`
     : "";
   return `
     <div class="global-bg ${useStaticSuperAdminBg ? "super-admin-bg" : ""}" aria-hidden="true" data-bg-kind="${useStaticSuperAdminBg ? "static" : isVideo ? "video" : "image"}">
