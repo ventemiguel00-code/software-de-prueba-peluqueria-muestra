@@ -283,7 +283,7 @@ function estimatePayloadKb(data) {
 }
 
 function queryMetricsEnabled() {
-  return localStorage.getItem(PERF_QUERY_LOG_ENABLED_KEY) === "1" || perfLogsEnabled();
+  return localStorage.getItem(PERF_QUERY_LOG_ENABLED_KEY) !== "0" || perfLogsEnabled();
 }
 
 function loadQueryMetricRows() {
@@ -320,6 +320,102 @@ function summarizeQueryMetrics() {
     summary[key].ms = Math.round((summary[key].ms + (Number(row.ms) || 0)) * 10) / 10;
     return summary;
   }, {});
+}
+
+function normalizeMetricView(scope = "") {
+  const normalized = String(scope || "").toLowerCase();
+  if (normalized.includes("super-admin")) return "Super Admin";
+  if (normalized.includes("public") || normalized.includes("business-test")) return "Agenda publica";
+  if (normalized.includes("admin-accounts")) return "Panel Admin";
+  if (normalized.startsWith("admin:") || normalized.includes("internal:")) return "Panel Admin";
+  if (normalized.startsWith("barber:")) return "Panel Barbero";
+  return "Otras vistas";
+}
+
+function metricStageFromLabel(label = "") {
+  const normalized = String(label || "").toLowerCase();
+  if (normalized.includes("businesses")) return "business";
+  if (normalized.includes("business_settings")) return "theme";
+  if (normalized.includes("services")) return "services";
+  if (normalized.includes("barbers")) return "barbers";
+  if (normalized.includes("appointments")) return "appointments";
+  if (normalized.includes("admin_accounts")) return "admins";
+  if (normalized.includes("blocked_days") || normalized.includes("barber_services")) return "agenda";
+  return "other";
+}
+
+function buildPerformanceDiagnostics() {
+  const views = ["Super Admin", "Agenda publica", "Panel Admin", "Panel Barbero"];
+  const base = Object.fromEntries(
+    views.map((view) => [
+      view,
+      {
+        view,
+        queries: 0,
+        kb: 0,
+        ms: 0,
+        businessMs: 0,
+        themeMs: 0,
+        logoMs: 0,
+        servicesMs: 0,
+        barbersMs: 0,
+        appointmentsMs: 0,
+        adminsMs: 0,
+        agendaMs: 0,
+      },
+    ])
+  );
+
+  loadQueryMetricRows().forEach((row) => {
+    const view = normalizeMetricView(row.scope);
+    if (!base[view]) return;
+    const target = base[view];
+    const ms = Number(row.ms) || 0;
+    target.queries += 1;
+    target.kb = Math.round((target.kb + (Number(row.kb) || 0)) * 10) / 10;
+    target.ms = Math.round((target.ms + ms) * 10) / 10;
+    const stage = metricStageFromLabel(row.label);
+    if (stage === "business") {
+      target.businessMs += ms;
+      target.logoMs += ms;
+    } else if (stage === "theme") {
+      target.themeMs += ms;
+    } else if (stage === "services") {
+      target.servicesMs += ms;
+    } else if (stage === "barbers") {
+      target.barbersMs += ms;
+    } else if (stage === "appointments") {
+      target.appointmentsMs += ms;
+      target.agendaMs += ms;
+    } else if (stage === "admins") {
+      target.adminsMs += ms;
+    } else if (stage === "agenda") {
+      target.agendaMs += ms;
+    }
+  });
+
+  const rows = Object.values(base).map((item) => ({
+    ...item,
+    businessMs: Math.round(item.businessMs * 10) / 10,
+    themeMs: Math.round(item.themeMs * 10) / 10,
+    logoMs: Math.round(item.logoMs * 10) / 10,
+    servicesMs: Math.round(item.servicesMs * 10) / 10,
+    barbersMs: Math.round(item.barbersMs * 10) / 10,
+    appointmentsMs: Math.round(item.appointmentsMs * 10) / 10,
+    adminsMs: Math.round(item.adminsMs * 10) / 10,
+    agendaMs: Math.round(item.agendaMs * 10) / 10,
+  }));
+
+  const pick = (field) =>
+    rows.reduce((winner, item) => ((Number(item[field]) || 0) > (Number(winner?.[field]) || 0) ? item : winner), null);
+
+  return {
+    rows,
+    slowest: pick("ms"),
+    mostQueries: pick("queries"),
+    mostKb: pick("kb"),
+    measuredAt: new Date().toLocaleString("es-CO"),
+  };
 }
 
 function emptyBusinessBucket() {
@@ -5157,6 +5253,63 @@ function renderSuperAdminV2() {
       </div>`
     : "";
 
+  const diagnostics = buildPerformanceDiagnostics();
+  const metricValue = (value, suffix = "ms") => `${Number(value || 0).toLocaleString("es-CO")}${suffix}`;
+  const diagnosticsPanel = `<section class="admin-main performance-diagnostics">
+    <div class="section-title"><span>D</span><h2>Diagnostico de rendimiento</h2></div>
+    <p class="microcopy">Medicion temporal visible solo para Super Admin. Registra consultas Supabase, KB aproximados y tiempos por vista.</p>
+    <div class="dashboard-cards diagnostics-winners">
+      <div><span>Vista mas lenta</span><strong>${escapeHTML(diagnostics.slowest?.view || "Sin datos")}</strong><small>${metricValue(diagnostics.slowest?.ms)}</small></div>
+      <div><span>Mas consultas</span><strong>${escapeHTML(diagnostics.mostQueries?.view || "Sin datos")}</strong><small>${metricValue(diagnostics.mostQueries?.queries, "")} consultas</small></div>
+      <div><span>Mas KB descargados</span><strong>${escapeHTML(diagnostics.mostKb?.view || "Sin datos")}</strong><small>${metricValue(diagnostics.mostKb?.kb, " KB")}</small></div>
+    </div>
+    <div class="diagnostics-table-wrap">
+      <table class="diagnostics-table">
+        <thead>
+          <tr>
+            <th>Vista</th>
+            <th>Consultas</th>
+            <th>KB</th>
+            <th>Total</th>
+            <th>Negocio</th>
+            <th>Tema</th>
+            <th>Logo</th>
+            <th>Servicios</th>
+            <th>Barberos</th>
+            <th>Reservas</th>
+            <th>Admins</th>
+            <th>Agenda</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${diagnostics.rows
+            .map(
+              (row) => `<tr>
+                <td>${escapeHTML(row.view)}</td>
+                <td>${row.queries}</td>
+                <td>${metricValue(row.kb, " KB")}</td>
+                <td>${metricValue(row.ms)}</td>
+                <td>${metricValue(row.businessMs)}</td>
+                <td>${metricValue(row.themeMs)}</td>
+                <td>${metricValue(row.logoMs)}</td>
+                <td>${metricValue(row.servicesMs)}</td>
+                <td>${metricValue(row.barbersMs)}</td>
+                <td>${metricValue(row.appointmentsMs)}</td>
+                <td>${metricValue(row.adminsMs)}</td>
+                <td>${metricValue(row.agendaMs)}</td>
+              </tr>`
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+    <div class="button-row">
+      <button class="secondary-action" type="button" data-refresh-performance-metrics>Actualizar metricas</button>
+      <button class="secondary-action danger" type="button" data-reset-performance-metrics>Reiniciar medicion</button>
+    </div>
+    <p class="microcopy">Ultima lectura local: ${escapeHTML(diagnostics.measuredAt)}. Los KB son estimados desde las respuestas JSON recibidas por el navegador.</p>
+  </section>`;
+
   const businessCards = businesses
     .map((business) => {
       const urls = businessUrlSet(business);
@@ -5375,6 +5528,7 @@ function renderSuperAdminV2() {
           <div><span>URL base</span><strong>/barberia/:slug</strong></div>
         </div>
       </section>
+      ${diagnosticsPanel}
       <section class="admin-main">
         <div class="section-title"><span>+</span><h2>Nuevo negocio</h2></div>
         ${createBusinessPanel}
@@ -6045,6 +6199,20 @@ function bindChromeEvents() {
         event.preventDefault();
         app.superAdminDeleteTarget = null;
         app.superAdminDeleting = false;
+        scheduleRender();
+        return;
+      }
+      if (event.target.closest?.("[data-refresh-performance-metrics]")) {
+        event.preventDefault();
+        scheduleRender();
+        return;
+      }
+      if (event.target.closest?.("[data-reset-performance-metrics]")) {
+        event.preventDefault();
+        localStorage.setItem(PERF_QUERY_LOG_ENABLED_KEY, "1");
+        localStorage.removeItem(PERF_QUERY_METRICS_KEY);
+        store.invalidateRemoteCache();
+        app.superAdminMessage = "Medicion de rendimiento reiniciada. Navega por las vistas para recolectar nuevos datos.";
         scheduleRender();
       }
     }, { capture: true });
