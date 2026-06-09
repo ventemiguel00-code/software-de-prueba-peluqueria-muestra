@@ -23,12 +23,14 @@ const COUNTABLE_STATUSES = new Set(["reserved", "fixed"]);
 const PERF_LOG_KEY = "barber-delux-perf-logs";
 const PERF_QUERY_LOG_ENABLED_KEY = "barber-delux-query-metrics-enabled";
 const PERF_QUERY_METRICS_KEY = "barber-delux-query-metrics-v1";
+const PERF_SYNC_METRICS_KEY = "barber-delux-sync-metrics-v1";
 const THEME_CACHE_PREFIX = "theme_cache_";
 const REMOTE_SYNC_DEBOUNCE_MS = 650;
 const REMOTE_SCOPE_CACHE_TTL_MS = 45 * 1000;
 const SUPER_ADMIN_CACHE_TTL_MS = 60 * 1000;
 const ADMIN_ACCOUNTS_CACHE_TTL_MS = 90 * 1000;
 const BUSINESS_IDENTITY_CACHE_TTL_MS = 5 * 60 * 1000;
+const DUPLICATE_SYNC_GUARD_MS = 8 * 1000;
 
 const dayNames = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
 const longDayNames = ["Domingo", "Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"];
@@ -297,6 +299,37 @@ function loadQueryMetricRows() {
   }
 }
 
+function loadSyncMetricRows() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PERF_SYNC_METRICS_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function simplifiedStack() {
+  try {
+    return (new Error().stack || "")
+      .split("\n")
+      .slice(3, 8)
+      .map((line) => line.trim().replace(location.origin, ""))
+      .join(" <- ");
+  } catch {
+    return "";
+  }
+}
+
+function recordSyncMetric(metric) {
+  if (!queryMetricsEnabled()) return;
+  const current = loadSyncMetricRows();
+  current.push({
+    ...metric,
+    at: new Date().toISOString(),
+  });
+  localStorage.setItem(PERF_SYNC_METRICS_KEY, JSON.stringify(current.slice(-120)));
+}
+
 function recordQueryMetric(metric) {
   if (!queryMetricsEnabled()) return;
   const entry = {
@@ -437,6 +470,7 @@ function buildPerformanceDiagnostics() {
     queryRows: [...querySummary.values()].sort((a, b) =>
       b.executions - a.executions || b.kb - a.kb || b.totalMs - a.totalMs
     ),
+    syncRows: loadSyncMetricRows().slice(-30).reverse(),
     slowest: pick("ms"),
     mostQueries: pick("queries"),
     mostKb: pick("kb"),
@@ -1382,6 +1416,7 @@ class StudioStore {
     this.remoteStateCache = new Map();
     this.businessRowsCache = new Map();
     this.adminAccountsCache = new Map();
+    this.lastRemoteSyncByKey = new Map();
     this.applyingRemote = false;
     this.dailyResetPending = false;
     this.state = this.load();
@@ -1512,6 +1547,7 @@ class StudioStore {
       this.remoteStateCache.clear();
       this.businessRowsCache.clear();
       this.adminAccountsCache.clear();
+      this.lastRemoteSyncByKey.clear();
       return;
     }
     [...this.remoteStateCache.keys()].forEach((key) => {
@@ -1522,6 +1558,9 @@ class StudioStore {
     });
     [...this.adminAccountsCache.keys()].forEach((key) => {
       if (key.includes(scopePrefix)) this.adminAccountsCache.delete(key);
+    });
+    [...this.lastRemoteSyncByKey.keys()].forEach((key) => {
+      if (key.includes(scopePrefix)) this.lastRemoteSyncByKey.delete(key);
     });
   }
 
@@ -1586,14 +1625,17 @@ class StudioStore {
       await this.persistRemote({ type: "RESET", table: "demo", reason: "daily_reset" });
       this.dailyResetPending = false;
     }
-    await this.syncFromRemote({ quiet: true });
+    await this.syncFromRemote({ quiet: true, origin: "bootstrapRemote", component: "StudioStore", hook: "bootstrapRemote" });
     this.emit({ type: "SYNC", table: "remote", reason: "remote_bootstrap" });
     this.subscribeRemote();
   }
 
-  queueRemoteSync({ quiet = false, force = false } = {}) {
+  queueRemoteSync({ quiet = false, force = false, origin = "queueRemoteSync", component = "StudioStore", hook = "queueRemoteSync" } = {}) {
     this.syncQueuedQuiet = this.syncQueued ? this.syncQueuedQuiet && quiet : quiet;
     this.syncQueuedForce = this.syncQueued ? this.syncQueuedForce || force : force;
+    this.syncQueuedOrigin = this.syncQueued ? `${this.syncQueuedOrigin || ""},${origin}` : origin;
+    this.syncQueuedComponent = component;
+    this.syncQueuedHook = hook;
     if (this.syncInFlight) {
       this.syncQueued = true;
       return;
@@ -1604,14 +1646,24 @@ class StudioStore {
       if (!this.syncQueued || this.syncInFlight) return;
       const nextQuiet = this.syncQueuedQuiet;
       const nextForce = this.syncQueuedForce;
+      const nextOrigin = this.syncQueuedOrigin || "queueRemoteSync";
+      const nextComponent = this.syncQueuedComponent || "StudioStore";
+      const nextHook = this.syncQueuedHook || "queueRemoteSync";
       this.syncQueued = false;
       this.syncQueuedQuiet = false;
       this.syncQueuedForce = false;
-      this.syncFromRemote({ quiet: nextQuiet, force: nextForce }).catch((error) => console.error(error));
+      this.syncQueuedOrigin = "";
+      this.syncFromRemote({
+        quiet: nextQuiet,
+        force: nextForce,
+        origin: nextOrigin,
+        component: nextComponent,
+        hook: nextHook,
+      }).catch((error) => console.error(error));
     }, REMOTE_SYNC_DEBOUNCE_MS);
   }
 
-  async syncFromRemote({ quiet = false, force = false } = {}) {
+  async syncFromRemote({ quiet = false, force = false, origin = "direct", component = "StudioStore", hook = "syncFromRemote" } = {}) {
     if (!this.supabase || this.syncInFlight) return;
     const perf = perfMark("syncFromRemote");
     this.syncInFlight = true;
@@ -1632,14 +1684,32 @@ class StudioStore {
             ? earlyRangeAnchor
             : `${earlyWeekDates[0]}:${earlyWeekDates[earlyWeekDates.length - 1]}`;
       const earlyScopeKey = this.currentRuntimeScopeKey(route);
+      const duplicateGuardKey = `${earlyScopeKey}:${earlyDataRangeKey}`;
+      const lastSyncAt = this.lastRemoteSyncByKey.get(duplicateGuardKey) || 0;
       const earlyCachedState = !force
         ? this.getCachedRemoteState(`${earlyScopeKey}:${earlyDataRangeKey}`, route.view === "super-admin" ? SUPER_ADMIN_CACHE_TTL_MS : REMOTE_SCOPE_CACHE_TTL_MS)
         : null;
+      recordSyncMetric({
+        scope: earlyScopeKey,
+        businessId: currentBusinessId(),
+        component,
+        hook,
+        origin,
+        force,
+        quiet,
+        cacheKey: duplicateGuardKey,
+        stack: simplifiedStack(),
+      });
       if (earlyCachedState) {
         this.applyRemoteState(earlyCachedState, earlyScopeKey, quiet, "remote-cache");
         perfEnd(perf, `(${route.view}:early-cache)`);
         return;
       }
+      if (lastSyncAt && Date.now() - lastSyncAt < DUPLICATE_SYNC_GUARD_MS) {
+        perfEnd(perf, `(${route.view}:duplicate-guard)`);
+        return;
+      }
+      this.lastRemoteSyncByKey.set(duplicateGuardKey, Date.now());
       const businessPerf = perfMark("business");
       const businessCacheKey =
         route.view === "super-admin"
@@ -1900,10 +1970,20 @@ class StudioStore {
       if (this.syncQueued) {
         const queuedQuiet = this.syncQueuedQuiet || quiet;
         const queuedForce = this.syncQueuedForce || force;
+        const queuedOrigin = this.syncQueuedOrigin || origin || "queued-during-sync";
+        const queuedComponent = this.syncQueuedComponent || component || "StudioStore";
+        const queuedHook = this.syncQueuedHook || hook || "syncFromRemote.finally";
         this.syncQueued = false;
         this.syncQueuedQuiet = false;
         this.syncQueuedForce = false;
-        this.queueRemoteSync({ quiet: queuedQuiet, force: queuedForce });
+        this.syncQueuedOrigin = "";
+        this.queueRemoteSync({
+          quiet: queuedQuiet,
+          force: queuedForce,
+          origin: queuedOrigin,
+          component: queuedComponent,
+          hook: queuedHook,
+        });
       }
     }
   }
@@ -1928,7 +2008,7 @@ class StudioStore {
     if (servicesInsert.error) console.warn("Supabase services seed skipped", servicesInsert.error);
     if (barberServicesInsert.error) console.warn("Supabase barber services seed skipped", barberServicesInsert.error);
 
-    await this.syncFromRemote();
+    await this.syncFromRemote({ origin: "seedSupabase:after_seed", component: "StudioStore", hook: "seedSupabase" });
   }
 
   subscribeRemote() {
@@ -1989,7 +2069,7 @@ class StudioStore {
       } else {
         this.invalidateRemoteCache(scopedBusinessId || "global");
       }
-      this.queueRemoteSync({ force: true });
+      this.queueRemoteSync({ force: true, origin: `realtime:${table || "unknown"}`, component: "SupabaseRealtime", hook: "postgres_changes" });
     };
     let channel = this.supabase
       .channel(`barber-delux-realtime-${scopeKey}`)
@@ -2005,7 +2085,7 @@ class StudioStore {
     }
     this.remoteChannel = channel.subscribe();
     if (!scopeWasLoaded) {
-      this.queueRemoteSync();
+      this.queueRemoteSync({ origin: "subscribeRemote:scope_not_loaded", component: "StudioStore", hook: "subscribeRemote" });
     }
   }
 
@@ -3630,7 +3710,12 @@ async function resolveLoginBarber(backendBarber, user, password, businessId = cu
 
   if (backendBarber?.id && store?.supabase) {
     try {
-      await store.syncFromRemote({ quiet: true });
+      await store.syncFromRemote({
+        quiet: true,
+        origin: "barber-login-refresh",
+        component: "resolveLoginBarber",
+        hook: "login",
+      });
       const refreshed = barberById(backendBarber.id, businessId);
       if (refreshed) return refreshed;
     } catch (error) {
@@ -5420,6 +5505,42 @@ function renderSuperAdminV2() {
         </tbody>
       </table>
     </div>
+    <div class="section-title compact-title"><span>S</span><h2>Ejecuciones de syncFromRemote</h2></div>
+    <div class="diagnostics-table-wrap">
+      <table class="diagnostics-table compact-diagnostics-table">
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Business ID</th>
+            <th>Origen</th>
+            <th>Componente</th>
+            <th>Hook</th>
+            <th>Force</th>
+            <th>Stack simplificado</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${
+            diagnostics.syncRows.length
+              ? diagnostics.syncRows
+                  .slice(0, 20)
+                  .map(
+                    (row) => `<tr>
+                      <td>${escapeHTML(new Date(row.at).toLocaleTimeString("es-CO"))}</td>
+                      <td>${escapeHTML(row.businessId || "global")}</td>
+                      <td>${escapeHTML(row.origin || "")}</td>
+                      <td>${escapeHTML(row.component || "")}</td>
+                      <td>${escapeHTML(row.hook || "")}</td>
+                      <td>${row.force ? "Si" : "No"}</td>
+                      <td>${escapeHTML(row.stack || "")}</td>
+                    </tr>`
+                  )
+                  .join("")
+              : `<tr><td colspan="7">Aun no hay ejecuciones registradas.</td></tr>`
+          }
+        </tbody>
+      </table>
+    </div>
     <div class="button-row">
       <button class="secondary-action" type="button" data-refresh-performance-metrics>Actualizar metricas</button>
       <button class="secondary-action danger" type="button" data-reset-performance-metrics>Reiniciar medicion</button>
@@ -6205,7 +6326,7 @@ async function handleDeleteBusinessSubmit(formElement) {
     app.superAdminDeleteTarget = null;
     app.superAdminDeleting = false;
     app.superAdminMessage = "Barberia eliminada correctamente.";
-    store.queueRemoteSync({ quiet: true });
+    store.queueRemoteSync({ quiet: true, origin: "delete-business:success", component: "SuperAdminDelete", hook: "handleDeleteBusinessSubmit" });
     scheduleRender();
   } catch (error) {
     console.error("Business delete failed", error);
@@ -6328,6 +6449,7 @@ function bindChromeEvents() {
         event.preventDefault();
         localStorage.setItem(PERF_QUERY_LOG_ENABLED_KEY, "1");
         localStorage.removeItem(PERF_QUERY_METRICS_KEY);
+        localStorage.removeItem(PERF_SYNC_METRICS_KEY);
         store.invalidateRemoteCache();
         app.superAdminMessage = "Medicion de rendimiento reiniciada. Navega por las vistas para recolectar nuevos datos.";
         scheduleRender();
@@ -6807,7 +6929,7 @@ function bindEvents() {
       app.superAdminDeleteTarget = null;
       app.superAdminDeleting = false;
       app.superAdminMessage = "Barberia eliminada correctamente.";
-      store.queueRemoteSync({ quiet: true });
+      store.queueRemoteSync({ quiet: true, origin: "delete-business:success", component: "SuperAdminDelete", hook: "deleteBusinessForm" });
       render();
     } catch (error) {
       console.error("Business delete failed", error);
@@ -6976,7 +7098,7 @@ function bindEvents() {
       store.state.meta.selectedDate = app.selectedDate;
       app.publicDaySelected = true;
       app.selectedSlot = "";
-      store.queueRemoteSync({ quiet: true });
+      store.queueRemoteSync({ quiet: true, origin: "public-date-change", component: "PublicAgenda", hook: "datePicker" });
       render();
     });
   });
@@ -7445,7 +7567,7 @@ function bindEvents() {
       app.selectedDate = todayISO();
       store.state.meta.selectedDate = app.selectedDate;
       app.adminSelectedSlots = [];
-      store.queueRemoteSync({ quiet: true });
+      store.queueRemoteSync({ quiet: true, origin: "admin-barber-change", component: "AdminAgenda", hook: "barberPicker" });
       render();
     });
   });
@@ -7456,7 +7578,7 @@ function bindEvents() {
       store.state.meta.selectedDate = app.selectedDate;
       app.adminScheduleView = "hours";
       app.adminSelectedSlots = [];
-      store.queueRemoteSync({ quiet: true });
+      store.queueRemoteSync({ quiet: true, origin: "admin-date-change", component: "AdminAgenda", hook: "datePicker" });
       render();
     });
   });
@@ -7769,7 +7891,7 @@ function bindEvents() {
       app.barberDate = button.dataset.barberDate;
       store.state.meta.selectedDate = app.barberDate;
       app.barberScheduleView = "hours";
-      store.queueRemoteSync({ quiet: true });
+      store.queueRemoteSync({ quiet: true, origin: "barber-date-change", component: "BarberAgenda", hook: "datePicker" });
       render();
     });
   });
