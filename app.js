@@ -4916,6 +4916,8 @@ function renderSuperAdmin() {
     ? `<dialog class="modal-dialog destructive-dialog" open>
         <form id="delete-business-form" class="form-stack">
           <div class="section-title"><span>!</span><h2>Eliminar barberia</h2></div>
+          ${app.superAdminMessage ? `<p class="form-note">${escapeHTML(app.superAdminMessage)}</p>` : ""}
+          ${app.superAdminMessage ? `<p class="form-note">${escapeHTML(app.superAdminMessage)}</p>` : ""}
           <p class="microcopy">¿Seguro que deseas eliminar esta barberia? Esta accion eliminara todo su entorno, datos y archivos asociados. No se podra deshacer.</p>
           <div class="empty-state-card">
             <strong>${escapeHTML(deleteTarget.name || "Barberia")}</strong>
@@ -4961,6 +4963,7 @@ function renderSuperAdmin() {
     <section class="admin-stack">
       <section class="admin-main dashboard-lite">
         <div class="section-title"><span>N</span><h2>Negocios registrados</h2></div>
+        ${app.superAdminMessage ? `<p class="form-note">${escapeHTML(app.superAdminMessage)}</p>` : ""}
         <div class="dashboard-cards">
           <div><span>Total negocios</span><strong>${businesses.length}</strong></div>
           <div><span>Negocios activos</span><strong>${businesses.filter((item) => item.active).length}</strong></div>
@@ -5754,6 +5757,73 @@ function scheduleRender() {
   });
 }
 
+function syncSuperAdminMessageBanner(viewRoot) {
+  if (!viewRoot || app.view !== "super-admin") return;
+  const existing = viewRoot.querySelector(".super-admin-global-message");
+  if (!app.superAdminMessage) {
+    existing?.remove();
+    return;
+  }
+  const messageMarkup = `<p class="form-note super-admin-global-message">${escapeHTML(app.superAdminMessage)}</p>`;
+  if (existing) {
+    existing.outerHTML = messageMarkup;
+    return;
+  }
+  viewRoot.insertAdjacentHTML("afterbegin", messageMarkup);
+}
+
+async function handleDeleteBusinessSubmit(formElement) {
+  const target = app.superAdminDeleteTarget;
+  if (!target?.id || target.id === DEFAULT_BUSINESS_ID) {
+    app.superAdminMessage = "No es posible eliminar esta barberia.";
+    app.superAdminDeleteTarget = null;
+    scheduleRender();
+    return;
+  }
+  const confirmation = String(new FormData(formElement).get("confirmation") || "").trim();
+  if (confirmation !== target.slug && confirmation !== target.name) {
+    app.superAdminMessage = "La confirmacion no coincide. No se elimino la barberia.";
+    scheduleRender();
+    return;
+  }
+  app.superAdminDeleting = true;
+  app.superAdminMessage = `Eliminando ${target.name || target.slug}...`;
+  scheduleRender();
+  try {
+    if (!app.superAdminSession?.passwordHash) {
+      throw new Error("Vuelve a iniciar sesion como Super Admin antes de eliminar.");
+    }
+    await deleteBusinessViaBackend(target.id, confirmation);
+    const removed = store.deleteBusinessLocalOnly(target.id);
+    if (!removed) throw new Error("No se pudo eliminar el negocio seleccionado.");
+    saveAdminAccounts(loadAdminAccounts().filter((account) => account.businessId !== target.id));
+    const visiblePasswords = loadVisibleAdminPasswords();
+    Object.keys(visiblePasswords).forEach((accountId) => {
+      if (visiblePasswords[accountId]?.businessId === target.id) {
+        delete visiblePasswords[accountId];
+      }
+    });
+    saveVisibleAdminPasswords(visiblePasswords);
+    const environmentAttachments = loadBusinessEnvironmentAttachments();
+    delete environmentAttachments[target.id];
+    saveBusinessEnvironmentAttachments(environmentAttachments);
+    delete app.superAdminPendingLogos[target.id];
+    delete app.superAdminPendingLogoFiles[target.id];
+    delete app.superAdminPendingEnvironmentArchives[target.id];
+    if (app.superAdminOpenBusinessId === target.id) app.superAdminOpenBusinessId = "";
+    app.superAdminDeleteTarget = null;
+    app.superAdminDeleting = false;
+    app.superAdminMessage = "Barberia eliminada correctamente.";
+    store.queueRemoteSync({ quiet: true });
+    scheduleRender();
+  } catch (error) {
+    console.error("Business delete failed", error);
+    app.superAdminDeleting = false;
+    app.superAdminMessage = `No fue posible eliminar la barberia: ${error.message || "error desconocido"}`;
+    scheduleRender();
+  }
+}
+
 function render() {
   const perf = perfMark("render");
   const root = document.querySelector("#app");
@@ -5826,6 +5896,7 @@ function render() {
       window.scrollTo(previousScroll.x, previousScroll.y);
     });
   }
+  syncSuperAdminMessageBanner(viewRoot);
   persistVisualRouteState();
   if (viewChanged) bindEvents();
   document.querySelector("#booking-confirm-dialog")?.showModal();
@@ -5834,6 +5905,38 @@ function render() {
 }
 
 function bindChromeEvents() {
+  if (!document.__superAdminDeleteDelegated) {
+    document.__superAdminDeleteDelegated = true;
+    document.addEventListener("click", (event) => {
+      const deleteButton = event.target.closest?.("[data-delete-business]");
+      if (deleteButton) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        app.superAdminDeleteTarget = {
+          id: deleteButton.dataset.deleteBusiness,
+          slug: deleteButton.dataset.deleteBusinessSlug || "",
+          name: deleteButton.dataset.deleteBusinessName || "",
+        };
+        app.superAdminMessage = "";
+        scheduleRender();
+        return;
+      }
+      if (event.target.closest?.("[data-cancel-delete-business]")) {
+        event.preventDefault();
+        app.superAdminDeleteTarget = null;
+        app.superAdminDeleting = false;
+        scheduleRender();
+      }
+    }, { capture: true });
+
+    document.addEventListener("submit", (event) => {
+      if (event.target?.id !== "delete-business-form") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      handleDeleteBusinessSubmit(event.target);
+    }, { capture: true });
+  }
+
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
       app.view = button.dataset.view;
