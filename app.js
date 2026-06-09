@@ -3193,6 +3193,24 @@ async function authenticateViaBackend(role, user, password, businessSlug = app.c
   }
 }
 
+async function deleteBusinessViaBackend(businessId, confirmation) {
+  const response = await fetch("/api/delete-business", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      businessId,
+      confirmation,
+      superAdminUser: app.superAdminSession?.user || "",
+      superAdminPasswordHash: app.superAdminSession?.passwordHash || "",
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || "No fue posible eliminar la barberia en el servidor.");
+  }
+  return result;
+}
+
 function businessUrlSet(business) {
   const slug = business?.slug || DEFAULT_BUSINESS_SLUG;
   if (business?.id === DEFAULT_BUSINESS_ID) {
@@ -5878,6 +5896,7 @@ function bindEvents() {
       app.superAdminSession = {
         user: SUPER_ADMIN_USER,
         role: "super_admin",
+        passwordHash: hash,
         startedAt: new Date().toISOString(),
         lastSeenAt: new Date().toISOString(),
         businessSlug: DEFAULT_BUSINESS_SLUG,
@@ -6256,7 +6275,11 @@ function bindEvents() {
     app.superAdminMessage = `Eliminando ${target.name || target.slug}...`;
     render();
     try {
-      const removed = await store.deleteBusinessCompletely(target.id);
+      if (!app.superAdminSession?.passwordHash) {
+        throw new Error("Vuelve a iniciar sesion como Super Admin antes de eliminar.");
+      }
+      await deleteBusinessViaBackend(target.id, confirmation);
+      const removed = store.deleteBusinessLocalOnly(target.id);
       if (!removed) throw new Error("No se pudo eliminar el negocio seleccionado.");
       saveAdminAccounts(loadAdminAccounts().filter((account) => account.businessId !== target.id));
       const visiblePasswords = loadVisibleAdminPasswords();
