@@ -1349,25 +1349,16 @@ class StudioStore {
       const businessesResult = await businessesQuery;
       if (businessesResult.error) throw businessesResult.error;
       perfStep("business", businessPerf, `(${route.view}:${route.businessSlug || "global"})`);
-      const remoteBusinesses = (businessesResult.data || []).map(mapRowToBusiness);
-      const missingBusinesses =
-        route.view === "super-admin"
-          ? (localState.businesses || []).filter(
-              (business) => !remoteBusinesses.some((remoteBusiness) => remoteBusiness.id === business.id)
-            )
-          : [];
-      if (route.view === "super-admin" && missingBusinesses.length) {
-        const { error } = await this.supabase
-          .from("businesses")
-          .upsert(missingBusinesses.map(mapBusinessToRow), { onConflict: "id" });
-        if (error) throw error;
-      }
+      const deletedBusinessIds = loadDeletedBusinessIds();
+      const remoteBusinesses = (businessesResult.data || [])
+        .map(mapRowToBusiness)
+        .filter((business) => !deletedBusinessIds.has(business.id));
       const mergedBusinesses =
         route.view === "super-admin"
-          ? mergeBusinessesById(remoteBusinesses, missingBusinesses)
+          ? remoteBusinesses
           : mergeBusinessesById(
-              (this.state.businesses || []).filter((business) => business.slug === route.businessSlug),
-              (localState.businesses || []).filter((business) => business.slug === route.businessSlug),
+              (this.state.businesses || []).filter((business) => business.slug === route.businessSlug && !deletedBusinessIds.has(business.id)),
+              (localState.businesses || []).filter((business) => business.slug === route.businessSlug && !deletedBusinessIds.has(business.id)),
               remoteBusinesses
             );
 
@@ -2258,6 +2249,7 @@ class StudioStore {
 
   deleteBusiness(businessId) {
     if (!businessId || businessId === DEFAULT_BUSINESS_ID) return false;
+    markBusinessDeleted(businessId);
     this.state.businesses = this.state.businesses.filter((business) => business.id !== businessId);
     this.state.barbers = this.state.barbers.filter((barber) => barber.negocioId !== businessId);
     this.state.services = this.state.services.filter((service) => service.negocioId !== businessId);
@@ -2270,6 +2262,7 @@ class StudioStore {
 
   deleteBusinessLocalOnly(businessId) {
     if (!businessId || businessId === DEFAULT_BUSINESS_ID) return false;
+    markBusinessDeleted(businessId);
     this.state.businesses = this.state.businesses.filter((business) => business.id !== businessId);
     this.state.barbers = this.state.barbers.filter((barber) => barber.negocioId !== businessId);
     this.state.services = this.state.services.filter((service) => service.negocioId !== businessId);
@@ -2568,6 +2561,7 @@ const BUSINESS_ENV_ATTACHMENTS_KEY = "barber-delux-business-env-attachments-v1";
 const VISUAL_NAV_STATE_KEY = "barber-delux-visual-nav-state-v1";
 const SUPER_ADMIN_VISIBLE_PASSWORDS_KEY = "barber-delux-super-admin-visible-passwords-v1";
 const SUPER_ADMIN_SESSION_KEY = "vision-barber-super-admin-session";
+const DELETED_BUSINESSES_KEY = "barber-delux-deleted-businesses-v1";
 const BACKGROUND_MEDIA_KEY = "barber-delux-background-media-v1";
 const BACKGROUND_MEDIA_BY_BUSINESS_KEY = "barber-delux-background-media-by-business-v1";
 const MULTITENANT_SECONDARY_PURGE_KEY = "barber-delux-secondary-business-purge-v1";
@@ -2658,6 +2652,21 @@ function loadVisibleAdminPasswords() {
 
 function saveVisibleAdminPasswords(map) {
   localStorage.setItem(SUPER_ADMIN_VISIBLE_PASSWORDS_KEY, JSON.stringify(map || {}));
+}
+
+function loadDeletedBusinessIds() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(DELETED_BUSINESSES_KEY) || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
+function markBusinessDeleted(businessId) {
+  if (!businessId || businessId === DEFAULT_BUSINESS_ID) return;
+  const deleted = loadDeletedBusinessIds();
+  deleted.add(businessId);
+  localStorage.setItem(DELETED_BUSINESSES_KEY, JSON.stringify([...deleted]));
 }
 
 function setVisibleAdminPassword(accountId, payload) {
