@@ -1,7 +1,12 @@
 const { timingSafeEqual } = require("node:crypto");
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const SUPABASE_SERVICE_ROLE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_SERVICE_KEY ||
+  process.env.SUPABASE_SERVICE_ROLE ||
+  process.env.SERVICE_ROLE_KEY ||
+  "";
 const SUPER_ADMIN_USER = process.env.SUPER_ADMIN_USER || "SDMcompany";
 const SUPER_ADMIN_PASSWORD_HASH =
   process.env.SUPER_ADMIN_PASSWORD_HASH || "9c92c00e241ec0c78798834456113f123762afcb4ef84e337eafbcf7d372f2fc";
@@ -34,7 +39,12 @@ const supabaseFetch = async (path, options = {}) => {
   });
   const text = await response.text().catch(() => "");
   if (!response.ok) {
-    const error = new Error(text || `Supabase ${response.status}`);
+    const invalidKey = /invalid api key/i.test(text || "");
+    const error = new Error(
+      invalidKey
+        ? "La variable SUPABASE_SERVICE_ROLE_KEY de Vercel no es una service_role valida. Copia la service_role key real desde Supabase > Project Settings > API."
+        : text || `Supabase ${response.status}`
+    );
     error.status = response.status;
     error.body = text;
     throw error;
