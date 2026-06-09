@@ -24,6 +24,7 @@ const PERF_LOG_KEY = "barber-delux-perf-logs";
 const PERF_QUERY_LOG_ENABLED_KEY = "barber-delux-query-metrics-enabled";
 const PERF_QUERY_METRICS_KEY = "barber-delux-query-metrics-v1";
 const PERF_SYNC_METRICS_KEY = "barber-delux-sync-metrics-v1";
+const PERF_SUBSCRIBE_METRICS_KEY = "barber-delux-subscribe-metrics-v1";
 const THEME_CACHE_PREFIX = "theme_cache_";
 const REMOTE_SYNC_DEBOUNCE_MS = 650;
 const REMOTE_SCOPE_CACHE_TTL_MS = 45 * 1000;
@@ -308,6 +309,15 @@ function loadSyncMetricRows() {
   }
 }
 
+function loadSubscribeMetricRows() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PERF_SUBSCRIBE_METRICS_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function simplifiedStack() {
   try {
     return (new Error().stack || "")
@@ -328,6 +338,16 @@ function recordSyncMetric(metric) {
     at: new Date().toISOString(),
   });
   localStorage.setItem(PERF_SYNC_METRICS_KEY, JSON.stringify(current.slice(-120)));
+}
+
+function recordSubscribeMetric(metric) {
+  if (!queryMetricsEnabled()) return;
+  const current = loadSubscribeMetricRows();
+  current.push({
+    ...metric,
+    at: new Date().toISOString(),
+  });
+  localStorage.setItem(PERF_SUBSCRIBE_METRICS_KEY, JSON.stringify(current.slice(-120)));
 }
 
 function recordQueryMetric(metric) {
@@ -471,6 +491,7 @@ function buildPerformanceDiagnostics() {
       b.executions - a.executions || b.kb - a.kb || b.totalMs - a.totalMs
     ),
     syncRows: loadSyncMetricRows().slice(-30).reverse(),
+    subscribeRows: loadSubscribeMetricRows().slice(-30).reverse(),
     slowest: pick("ms"),
     mostQueries: pick("queries"),
     mostKb: pick("kb"),
@@ -1405,6 +1426,9 @@ class StudioStore {
     this.remoteChannel = null;
     this.remoteScopeKey = "";
     this.remoteLoadedScopeKey = "";
+    this.remoteLoadedScopes = new Set();
+    this.remoteScopeLoadRequestedAt = new Map();
+    this.remoteSubscribeCounters = new Map();
     this.remoteReady = false;
     this.syncInFlight = false;
     this.syncQueued = false;
@@ -1507,12 +1531,14 @@ class StudioStore {
       return `${route.view}:global:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
     }
     const scopeView = route.shell === "internal" ? "internal" : route.view;
-    const scopedBusiness = this.businessBySlug(route.businessSlug) || null;
-    const scopedBusinessId =
-      route.businessSlug === DEFAULT_BUSINESS_SLUG
-        ? DEFAULT_BUSINESS_ID
-        : scopedBusiness?.id || null;
+    const scopedBusinessId = this.scopedBusinessIdForRoute(route);
     return `${scopeView}:${scopedBusinessId || "global"}:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
+  }
+
+  scopedBusinessIdForRoute(route = resolveRoute(location.pathname)) {
+    if (route.view === "super-admin") return null;
+    if (route.businessSlug === DEFAULT_BUSINESS_SLUG) return DEFAULT_BUSINESS_ID;
+    return this.businessBySlug(route.businessSlug)?.id || placeholderBusinessForSlug(route.businessSlug).id;
   }
 
   stateWithRuntimeScope(state = this.state, route = resolveRoute(location.pathname)) {
@@ -1548,6 +1574,7 @@ class StudioStore {
       this.businessRowsCache.clear();
       this.adminAccountsCache.clear();
       this.lastRemoteSyncByKey.clear();
+      this.remoteScopeLoadRequestedAt.clear();
       return;
     }
     [...this.remoteStateCache.keys()].forEach((key) => {
@@ -1561,6 +1588,9 @@ class StudioStore {
     });
     [...this.lastRemoteSyncByKey.keys()].forEach((key) => {
       if (key.includes(scopePrefix)) this.lastRemoteSyncByKey.delete(key);
+    });
+    [...this.remoteScopeLoadRequestedAt.keys()].forEach((key) => {
+      if (key.includes(scopePrefix)) this.remoteScopeLoadRequestedAt.delete(key);
     });
   }
 
@@ -1595,6 +1625,8 @@ class StudioStore {
     this.state = nextState;
     localStorage.setItem(APP_KEY, JSON.stringify(this.state));
     this.remoteLoadedScopeKey = syncScopeKey;
+    this.remoteLoadedScopes.add(syncScopeKey);
+    this.remoteScopeLoadRequestedAt.delete(syncScopeKey);
     this.remoteReady = true;
     if (!quiet) {
       this.emit({ type: "SYNC", table: reason });
@@ -2014,26 +2046,50 @@ class StudioStore {
   subscribeRemote() {
     if (!this.supabase) return;
     const route = resolveRoute(location.pathname);
-    const scopedBusiness =
-      route.view === "super-admin"
-        ? null
-        : this.businessBySlug(route.businessSlug) || null;
     const scopedBusinessId =
-      route.view === "super-admin"
-        ? null
-        : route.businessSlug === DEFAULT_BUSINESS_SLUG
-          ? DEFAULT_BUSINESS_ID
-          : scopedBusiness?.id || null;
+      route.view === "super-admin" ? null : this.scopedBusinessIdForRoute(route);
     const scopeView = route.shell === "internal" ? "internal" : route.view;
     const scopeKey = `${scopeView}:${scopedBusinessId || "global"}:${route.businessSlug || ""}`;
-    if (this.remoteChannel && this.remoteScopeKey === scopeKey) return;
+    const subscribeCount = (this.remoteSubscribeCounters.get(scopeKey) || 0) + 1;
+    this.remoteSubscribeCounters.set(scopeKey, subscribeCount);
+    if (this.remoteChannel && this.remoteScopeKey === scopeKey) {
+      recordSubscribeMetric({
+        action: "reuse",
+        scope: scopeKey,
+        businessId: scopedBusinessId || "global",
+        component: "StudioStore",
+        hook: "subscribeRemote",
+        count: subscribeCount,
+        stack: simplifiedStack(),
+      });
+      return;
+    }
     if (this.remoteChannel) {
+      recordSubscribeMetric({
+        action: "destroy",
+        scope: this.remoteScopeKey,
+        businessId: scopedBusinessId || "global",
+        component: "StudioStore",
+        hook: "subscribeRemote",
+        count: subscribeCount,
+        stack: simplifiedStack(),
+      });
       this.supabase.removeChannel(this.remoteChannel);
       this.remoteChannel = null;
     }
     this.remoteScopeKey = scopeKey;
-    const scopeWasLoaded = this.remoteLoadedScopeKey === scopeKey;
+    const scopeWasLoaded = this.remoteLoadedScopeKey === scopeKey || this.remoteLoadedScopes.has(scopeKey);
     this.remoteReady = scopeWasLoaded;
+    recordSubscribeMetric({
+      action: "create",
+      scope: scopeKey,
+      businessId: scopedBusinessId || "global",
+      component: "StudioStore",
+      hook: "subscribeRemote",
+      loaded: scopeWasLoaded,
+      count: subscribeCount,
+      stack: simplifiedStack(),
+    });
     const appointmentConfig =
       route.view === "super-admin"
         ? { event: "*", schema: "public", table: "appointments" }
@@ -2085,7 +2141,21 @@ class StudioStore {
     }
     this.remoteChannel = channel.subscribe();
     if (!scopeWasLoaded) {
-      this.queueRemoteSync({ origin: "subscribeRemote:scope_not_loaded", component: "StudioStore", hook: "subscribeRemote" });
+      const lastRequestedAt = this.remoteScopeLoadRequestedAt.get(scopeKey) || 0;
+      if (!lastRequestedAt || Date.now() - lastRequestedAt > DUPLICATE_SYNC_GUARD_MS) {
+        this.remoteScopeLoadRequestedAt.set(scopeKey, Date.now());
+        this.queueRemoteSync({ origin: "subscribeRemote:scope_not_loaded", component: "StudioStore", hook: "subscribeRemote" });
+      } else {
+        recordSubscribeMetric({
+          action: "skip_scope_not_loaded_duplicate",
+          scope: scopeKey,
+          businessId: scopedBusinessId || "global",
+          component: "StudioStore",
+          hook: "subscribeRemote",
+          count: subscribeCount,
+          stack: simplifiedStack(),
+        });
+      }
     }
   }
 
@@ -5541,6 +5611,42 @@ function renderSuperAdminV2() {
         </tbody>
       </table>
     </div>
+    <div class="section-title compact-title"><span>R</span><h2>Suscripciones Realtime</h2></div>
+    <div class="diagnostics-table-wrap">
+      <table class="diagnostics-table compact-diagnostics-table">
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Accion</th>
+            <th>Scope</th>
+            <th>Business ID</th>
+            <th>Cargado</th>
+            <th>Contador</th>
+            <th>Stack simplificado</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${
+            diagnostics.subscribeRows.length
+              ? diagnostics.subscribeRows
+                  .slice(0, 20)
+                  .map(
+                    (row) => `<tr>
+                      <td>${escapeHTML(new Date(row.at).toLocaleTimeString("es-CO"))}</td>
+                      <td>${escapeHTML(row.action || "")}</td>
+                      <td>${escapeHTML(row.scope || "")}</td>
+                      <td>${escapeHTML(row.businessId || "global")}</td>
+                      <td>${row.loaded ? "Si" : "No"}</td>
+                      <td>${row.count || 0}</td>
+                      <td>${escapeHTML(row.stack || "")}</td>
+                    </tr>`
+                  )
+                  .join("")
+              : `<tr><td colspan="7">Aun no hay suscripciones registradas.</td></tr>`
+          }
+        </tbody>
+      </table>
+    </div>
     <div class="button-row">
       <button class="secondary-action" type="button" data-refresh-performance-metrics>Actualizar metricas</button>
       <button class="secondary-action danger" type="button" data-reset-performance-metrics>Reiniciar medicion</button>
@@ -6450,6 +6556,7 @@ function bindChromeEvents() {
         localStorage.setItem(PERF_QUERY_LOG_ENABLED_KEY, "1");
         localStorage.removeItem(PERF_QUERY_METRICS_KEY);
         localStorage.removeItem(PERF_SYNC_METRICS_KEY);
+        localStorage.removeItem(PERF_SUBSCRIBE_METRICS_KEY);
         store.invalidateRemoteCache();
         app.superAdminMessage = "Medicion de rendimiento reiniciada. Navega por las vistas para recolectar nuevos datos.";
         scheduleRender();
