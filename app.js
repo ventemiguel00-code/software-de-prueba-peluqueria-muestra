@@ -283,7 +283,8 @@ function estimatePayloadKb(data) {
 }
 
 function queryMetricsEnabled() {
-  return localStorage.getItem(PERF_QUERY_LOG_ENABLED_KEY) !== "0" || perfLogsEnabled();
+  const route = resolveRoute(location.pathname);
+  return localStorage.getItem(PERF_QUERY_LOG_ENABLED_KEY) === "1" || route.view === "super-admin" || perfLogsEnabled();
 }
 
 function loadQueryMetricRows() {
@@ -345,6 +346,7 @@ function metricStageFromLabel(label = "") {
 }
 
 function buildPerformanceDiagnostics() {
+  const metricRows = loadQueryMetricRows();
   const views = ["Super Admin", "Agenda publica", "Panel Admin", "Panel Barbero"];
   const base = Object.fromEntries(
     views.map((view) => [
@@ -366,7 +368,7 @@ function buildPerformanceDiagnostics() {
     ])
   );
 
-  loadQueryMetricRows().forEach((row) => {
+  metricRows.forEach((row) => {
     const view = normalizeMetricView(row.scope);
     if (!base[view]) return;
     const target = base[view];
@@ -409,12 +411,13 @@ function buildPerformanceDiagnostics() {
   const pick = (field) =>
     rows.reduce((winner, item) => ((Number(item[field]) || 0) > (Number(winner?.[field]) || 0) ? item : winner), null);
 
+  const lastMetricAt = metricRows.length ? metricRows[metricRows.length - 1].at : "";
   return {
     rows,
     slowest: pick("ms"),
     mostQueries: pick("queries"),
     mostKb: pick("kb"),
-    measuredAt: new Date().toLocaleString("es-CO"),
+    measuredAt: lastMetricAt ? new Date(lastMetricAt).toLocaleString("es-CO") : "Sin mediciones todavia",
   };
 }
 
@@ -1377,6 +1380,9 @@ class StudioStore {
     }
 
     window.addEventListener("storage", (event) => {
+      if (event.key === PERF_QUERY_METRICS_KEY || event.key === PERF_QUERY_LOG_ENABLED_KEY) {
+        return;
+      }
       if (event.key === APP_KEY) {
         const incomingState = this.loadLocalState();
         if (this.shouldIgnoreCrossScopeLocalSync(incomingState)) {
