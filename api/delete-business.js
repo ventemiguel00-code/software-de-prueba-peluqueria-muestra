@@ -60,7 +60,8 @@ const isOptionalSchemaError = (error) => {
     body.includes("schema cache") ||
     body.includes("could not find the table") ||
     body.includes("could not find the 'business_id' column") ||
-    body.includes("column") && body.includes("business_id")
+    body.includes("could not find the 'source_business_id' column") ||
+    body.includes("column") && (body.includes("business_id") || body.includes("source_business_id"))
   );
 };
 
@@ -89,6 +90,21 @@ const deleteByBusinessId = async (table, businessId) => {
   }
 };
 
+const deleteBySourceBusinessId = async (table, businessId) => {
+  const params = new URLSearchParams({ source_business_id: `eq.${businessId}` });
+  try {
+    await supabaseFetch(`/rest/v1/${table}?${params}`, {
+      method: "DELETE",
+      headers: { Prefer: "return=minimal" },
+    });
+    return true;
+  } catch (error) {
+    if (isOptionalSchemaError(error)) return false;
+    error.step = `delete:${table}:source_business_id`;
+    throw error;
+  }
+};
+
 const deleteBusinessRow = async (businessId) => {
   const params = new URLSearchParams({ id: `eq.${businessId}` });
   try {
@@ -98,27 +114,6 @@ const deleteBusinessRow = async (businessId) => {
     });
   } catch (error) {
     error.step = "delete:businesses";
-    throw error;
-  }
-};
-
-const archiveBusinessRow = async (business) => {
-  const archivedSlug = `deleted-${business.id}-${Date.now()}-${business.slug || "negocio"}`.slice(0, 180);
-  const archivedName = `[ELIMINADA] ${business.business_name || business.slug || business.id}`.slice(0, 180);
-  const params = new URLSearchParams({ id: `eq.${business.id}` });
-  try {
-    await supabaseFetch(`/rest/v1/businesses?${params}`, {
-      method: "PATCH",
-      headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({
-        business_name: archivedName,
-        slug: archivedSlug,
-        active: false,
-        updated_at: new Date().toISOString().slice(0, 10),
-      }),
-    });
-  } catch (error) {
-    error.step = "archive:businesses";
     throw error;
   }
 };
@@ -206,11 +201,47 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    // Safety-first delete: archive the business instead of deleting operational rows.
-    // Some older tenant data may have been assigned to the wrong business_id during migration;
-    // hard-deleting by business_id can therefore remove data visible in other businesses.
-    await archiveBusinessRow(business);
-    json(res, 200, { ok: true, archived: true });
+    // Borrado completo, aislado y exacto: nunca se elimina por slug/nombre ni sin business_id.
+    // El orden evita relaciones colgantes y mantiene cada operacion limitada al negocio objetivo.
+    const businessScopedTables = [
+      "appointments",
+      "blocked_days",
+      "barber_services",
+      "services",
+      "barbers",
+      "admin_accounts",
+      "clients",
+      "customers",
+      "schedules",
+      "horarios",
+      "business_settings",
+      "business_admin_passwords",
+    ];
+
+    for (const table of businessScopedTables) {
+      await deleteByBusinessId(table, businessId);
+    }
+    await deleteBySourceBusinessId("business_audit_log", businessId);
+    await Promise.allSettled([
+      removeStoragePrefix("logos-negocios", businessId),
+      removeStoragePrefix("fondos-negocios", businessId),
+      removeStoragePrefix("videos-negocios", businessId),
+      removeStoragePrefix("barberos", businessId),
+      removeStoragePrefix("entornos", businessId),
+    ]);
+    await deleteBusinessRow(businessId);
+
+    const stillExists = await getBusiness(businessId);
+    if (stillExists) {
+      json(res, 409, {
+        ok: false,
+        step: "verify:businesses",
+        error: "La barberia no se elimino completamente. Revisa restricciones o politicas de Supabase.",
+      });
+      return;
+    }
+
+    json(res, 200, { ok: true, deleted: true, businessId });
   } catch (error) {
     json(res, 500, {
       ok: false,

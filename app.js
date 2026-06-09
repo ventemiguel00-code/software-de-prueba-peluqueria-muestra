@@ -1313,11 +1313,6 @@ class StudioStore {
       this.dailyResetPending = false;
     }
     await this.syncFromRemote({ quiet: true });
-    if (!localStorage.getItem(MULTITENANT_SECONDARY_PURGE_KEY)) {
-      await this.purgeSecondaryBusinessesOperationalData();
-      localStorage.setItem(MULTITENANT_SECONDARY_PURGE_KEY, todayISO());
-      await this.syncFromRemote({ quiet: true });
-    }
     this.emit({ type: "SYNC", table: "remote", reason: "remote_bootstrap" });
     this.subscribeRemote();
   }
@@ -1561,23 +1556,11 @@ class StudioStore {
 
       await this.syncAdminAccountsFromRemote(route.view === "super-admin" ? null : scopedBusinessId, nextState.businesses);
 
-      const replicatedBusinessIds = detectReplicatedBusinessIds(nextState);
-
       this.applyingRemote = true;
       this.state = nextState;
       localStorage.setItem(APP_KEY, JSON.stringify(this.state));
       this.remoteLoadedScopeKey = syncScopeKey;
       this.remoteReady = true;
-
-      if (replicatedBusinessIds.length) {
-        for (const businessId of replicatedBusinessIds) {
-          await this.ensureBusinessStartsEmpty(businessId);
-        }
-        this.applyingRemote = false;
-        this.syncInFlight = false;
-        await this.syncFromRemote({ quiet });
-        return;
-      }
 
       if (!quiet) {
         this.emit({ type: "SYNC", table: "remote" });
@@ -1779,14 +1762,12 @@ class StudioStore {
 
     if (event.table === "businesses") {
       if (event.type === "CASCADE_DELETE") {
-        const businessId = event.id;
-        if (!businessId) return;
-        await this.deleteBusinessRemoteCascade(businessId);
+        // Las eliminaciones completas solo deben ejecutarse desde el backend con service_role.
+        // Evitamos cascadas desde el navegador para no tocar otros negocios por sincronizaciones locales.
         return;
       }
       if (event.type === "DELETE") {
-        const { error } = await this.supabase.from("businesses").delete().eq("id", event.id);
-        if (error) throw error;
+        // Igual que CASCADE_DELETE: el frontend no borra negocios en remoto.
         return;
       }
       if (!event.record) return;
@@ -2177,32 +2158,8 @@ class StudioStore {
   }
 
   async deleteBusinessRemoteCascade(businessId) {
-    if (!this.supabase || !businessId || businessId === DEFAULT_BUSINESS_ID) return true;
-    const childTables = [
-      "appointments",
-      "blocked_days",
-      "barber_services",
-      "services",
-      "barbers",
-      "admin_accounts",
-      "clients",
-      "customers",
-      "schedules",
-      "horarios",
-      "business_settings",
-    ];
-    for (const table of childTables) {
-      await this.deleteRowsByBusinessId(table, businessId);
-    }
-    await Promise.all([
-      this.removeStoragePrefix("logos-negocios", businessId),
-      this.removeStoragePrefix("fondos-negocios", businessId),
-      this.removeStoragePrefix("videos-negocios", businessId),
-      this.removeStoragePrefix("barberos", businessId),
-      this.removeStoragePrefix("entornos", businessId),
-    ]);
-    const { error } = await this.supabase.from("businesses").delete().eq("id", businessId);
-    if (error) throw error;
+    // Por seguridad multi-negocio, el navegador no ejecuta cascadas remotas.
+    // Usar /api/delete-business, que borra con service_role y filtros exactos por business_id.
     return true;
   }
 
@@ -2244,26 +2201,14 @@ class StudioStore {
   }
 
   async purgeSecondaryBusinessesOperationalData() {
-    const replicatedBusinessIds = detectReplicatedBusinessIds(this.state);
-    if (!replicatedBusinessIds.length) return true;
-
-    for (const businessId of replicatedBusinessIds) {
-      await this.ensureBusinessStartsEmpty(businessId);
-    }
+    // Desactivado: en SaaS multi-negocio no debe existir limpieza automatica
+    // de negocios secundarios. Solo se vacia un negocio nuevo durante su creacion.
     return true;
   }
 
   deleteBusiness(businessId) {
     if (!businessId || businessId === DEFAULT_BUSINESS_ID) return false;
-    markBusinessDeleted(businessId);
-    this.state.businesses = this.state.businesses.filter((business) => business.id !== businessId);
-    this.state.barbers = this.state.barbers.filter((barber) => barber.negocioId !== businessId);
-    this.state.services = this.state.services.filter((service) => service.negocioId !== businessId);
-    this.state.appointments = this.state.appointments.filter((appointment) => appointment.negocioId !== businessId);
-    this.state.blockedDays = this.state.blockedDays.filter((blockedDay) => blockedDay.negocioId !== businessId);
-    this.state.barberServices = this.state.barberServices.filter((relation) => relation.negocioId !== businessId);
-    this.persist({ type: "CASCADE_DELETE", table: "businesses", id: businessId });
-    return true;
+    return this.deleteBusinessLocalOnly(businessId);
   }
 
   deleteBusinessLocalOnly(businessId) {
@@ -2283,7 +2228,7 @@ class StudioStore {
 
   async deleteBusinessCompletely(businessId) {
     if (!businessId || businessId === DEFAULT_BUSINESS_ID) return false;
-    await this.deleteBusinessRemoteCascade(businessId);
+    // Compatibilidad: el borrado remoto completo se hace solo desde /api/delete-business.
     return this.deleteBusinessLocalOnly(businessId);
   }
 
