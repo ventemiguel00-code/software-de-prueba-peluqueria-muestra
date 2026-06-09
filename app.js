@@ -488,6 +488,12 @@ function normalizeBusiness(record = {}) {
   };
 }
 
+function isArchivedBusiness(business = {}) {
+  const slug = String(business.slug || "").toLowerCase();
+  const name = String(business.name || business.business_name || "").toLowerCase();
+  return slug.startsWith("deleted-") || name.startsWith("[eliminada]");
+}
+
 function normalizeTenantState(state = {}) {
   const business = normalizeBusiness((state.businesses || [defaultBusiness()])[0] || defaultBusiness());
   const businesses = (state.businesses?.length ? state.businesses : [business]).map(normalizeBusiness);
@@ -1352,7 +1358,7 @@ class StudioStore {
       const deletedBusinessIds = loadDeletedBusinessIds();
       const remoteBusinesses = (businessesResult.data || [])
         .map(mapRowToBusiness)
-        .filter((business) => !deletedBusinessIds.has(business.id));
+        .filter((business) => !deletedBusinessIds.has(business.id) && !isArchivedBusiness(business));
       const mergedBusinesses =
         route.view === "super-admin"
           ? remoteBusinesses

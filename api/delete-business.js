@@ -102,6 +102,27 @@ const deleteBusinessRow = async (businessId) => {
   }
 };
 
+const archiveBusinessRow = async (business) => {
+  const archivedSlug = `deleted-${business.id}-${Date.now()}-${business.slug || "negocio"}`.slice(0, 180);
+  const archivedName = `[ELIMINADA] ${business.business_name || business.slug || business.id}`.slice(0, 180);
+  const params = new URLSearchParams({ id: `eq.${business.id}` });
+  try {
+    await supabaseFetch(`/rest/v1/businesses?${params}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        business_name: archivedName,
+        slug: archivedSlug,
+        active: false,
+        updated_at: new Date().toISOString().slice(0, 10),
+      }),
+    });
+  } catch (error) {
+    error.step = "archive:businesses";
+    throw error;
+  }
+};
+
 const listStoragePrefix = async (bucket, prefix) => {
   try {
     return await supabaseFetch(`/storage/v1/object/list/${bucket}`, {
@@ -185,40 +206,11 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    const childTables = [
-      "appointments",
-      "blocked_days",
-      "barber_services",
-      "services",
-      "barbers",
-      "admin_accounts",
-      "clients",
-      "customers",
-      "schedules",
-      "horarios",
-      "business_settings",
-    ];
-
-    for (const table of childTables) {
-      await deleteByBusinessId(table, businessId);
-    }
-
-    await deleteBusinessRow(businessId);
-    const stillExists = await getBusiness(businessId);
-    if (stillExists) {
-      json(res, 500, { ok: false, error: "Supabase no elimino el negocio principal.", step: "verify:businesses" });
-      return;
-    }
-
-    await Promise.allSettled([
-      removeStoragePrefix("logos-negocios", businessId),
-      removeStoragePrefix("fondos-negocios", businessId),
-      removeStoragePrefix("videos-negocios", businessId),
-      removeStoragePrefix("barberos", businessId),
-      removeStoragePrefix("entornos", businessId),
-    ]);
-
-    json(res, 200, { ok: true });
+    // Safety-first delete: archive the business instead of deleting operational rows.
+    // Some older tenant data may have been assigned to the wrong business_id during migration;
+    // hard-deleting by business_id can therefore remove data visible in other businesses.
+    await archiveBusinessRow(business);
+    json(res, 200, { ok: true, archived: true });
   } catch (error) {
     json(res, 500, {
       ok: false,
