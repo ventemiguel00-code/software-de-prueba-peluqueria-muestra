@@ -24,7 +24,7 @@ const PERF_LOG_KEY = "barber-delux-perf-logs";
 const PERF_QUERY_LOG_ENABLED_KEY = "barber-delux-query-metrics-enabled";
 const PERF_QUERY_METRICS_KEY = "barber-delux-query-metrics-v1";
 const THEME_CACHE_PREFIX = "theme_cache_";
-const REMOTE_SYNC_DEBOUNCE_MS = 180;
+const REMOTE_SYNC_DEBOUNCE_MS = 650;
 const REMOTE_SCOPE_CACHE_TTL_MS = 45 * 1000;
 const SUPER_ADMIN_CACHE_TTL_MS = 60 * 1000;
 const ADMIN_ACCOUNTS_CACHE_TTL_MS = 90 * 1000;
@@ -377,6 +377,9 @@ function buildPerformanceDiagnostics() {
     const queryItem = querySummary.get(queryKey) || {
       view,
       label: row.label || "consulta",
+      component: row.component || "StudioStore",
+      reason: row.reason || "supabase_read",
+      source: row.source || "supabase",
       executions: 0,
       kb: 0,
       totalMs: 0,
@@ -1392,7 +1395,6 @@ class StudioStore {
         if (!event.data?.type) return;
         const incomingState = this.loadLocalState();
         if (this.shouldIgnoreCrossScopeLocalSync(incomingState)) {
-          this.queueRemoteSync();
           return;
         }
         this.state = incomingState;
@@ -1407,7 +1409,6 @@ class StudioStore {
       if (event.key === APP_KEY) {
         const incomingState = this.loadLocalState();
         if (this.shouldIgnoreCrossScopeLocalSync(incomingState)) {
-          this.queueRemoteSync();
           return;
         }
         this.state = incomingState;
@@ -1569,6 +1570,9 @@ class StudioStore {
     recordQueryMetric({
       label,
       scope,
+      component: "StudioStore.syncFromRemote",
+      reason: "supabase_read",
+      source: "supabase",
       ms,
       kb: estimatePayloadKb(result?.data),
       rows: Array.isArray(result?.data) ? result.data.length : result?.data ? 1 : 0,
@@ -1616,6 +1620,26 @@ class StudioStore {
       const localState = this.loadLocalState();
       const route = resolveRoute(location.pathname);
       const queryScope = `${route.view}:${route.businessSlug || "global"}`;
+      const earlyRangeAnchor = /^\d{4}-\d{2}-\d{2}$/.test(this.state.meta?.selectedDate || "")
+        ? this.state.meta.selectedDate
+        : todayISO();
+      const earlyWeekDates = getWeekDates(new Date(`${earlyRangeAnchor}T00:00:00`));
+      const earlyIsPublicRoute = route.view === "public" || route.view === "business-test";
+      const earlyDataRangeKey =
+        route.view === "super-admin"
+          ? todayISO()
+          : earlyIsPublicRoute
+            ? earlyRangeAnchor
+            : `${earlyWeekDates[0]}:${earlyWeekDates[earlyWeekDates.length - 1]}`;
+      const earlyScopeKey = this.currentRuntimeScopeKey(route);
+      const earlyCachedState = !force
+        ? this.getCachedRemoteState(`${earlyScopeKey}:${earlyDataRangeKey}`, route.view === "super-admin" ? SUPER_ADMIN_CACHE_TTL_MS : REMOTE_SCOPE_CACHE_TTL_MS)
+        : null;
+      if (earlyCachedState) {
+        this.applyRemoteState(earlyCachedState, earlyScopeKey, quiet, "remote-cache");
+        perfEnd(perf, `(${route.view}:early-cache)`);
+        return;
+      }
       const businessPerf = perfMark("business");
       const businessCacheKey =
         route.view === "super-admin"
@@ -1866,8 +1890,6 @@ class StudioStore {
         barberServices: barberServicesData,
       };
 
-      await this.syncAdminAccountsFromRemote(route.view === "super-admin" ? null : scopedBusinessId, nextState.businesses);
-
       this.setCachedRemoteState(cacheKey, nextState);
       this.applyRemoteState(nextState, syncScopeKey, quiet, "remote");
 
@@ -1961,21 +1983,25 @@ class StudioStore {
         ? { event: "*", schema: "public", table: "businesses" }
         : { event: "*", schema: "public", table: "businesses", filter: `id=eq.${scopedBusinessId}` };
 
-    const onTenantChange = () => {
-      this.invalidateRemoteCache(scopedBusinessId || "global");
+    const onTenantChange = (table = "") => {
+      if (table === "businesses" || table === "business_settings") {
+        this.invalidateRemoteCache();
+      } else {
+        this.invalidateRemoteCache(scopedBusinessId || "global");
+      }
       this.queueRemoteSync({ force: true });
     };
     let channel = this.supabase
       .channel(`barber-delux-realtime-${scopeKey}`)
-      .on("postgres_changes", businessesConfig, onTenantChange)
-      .on("postgres_changes", businessSettingsConfig, onTenantChange);
+      .on("postgres_changes", businessesConfig, () => onTenantChange("businesses"))
+      .on("postgres_changes", businessSettingsConfig, () => onTenantChange("business_settings"));
     if (route.view !== "super-admin") {
       channel = channel
-        .on("postgres_changes", barbersConfig, onTenantChange)
-        .on("postgres_changes", appointmentConfig, onTenantChange)
-        .on("postgres_changes", blockedDaysConfig, onTenantChange)
-        .on("postgres_changes", servicesConfig, onTenantChange)
-        .on("postgres_changes", barberServicesConfig, onTenantChange);
+        .on("postgres_changes", barbersConfig, () => onTenantChange("barbers"))
+        .on("postgres_changes", appointmentConfig, () => onTenantChange("appointments"))
+        .on("postgres_changes", blockedDaysConfig, () => onTenantChange("blocked_days"))
+        .on("postgres_changes", servicesConfig, () => onTenantChange("services"))
+        .on("postgres_changes", barberServicesConfig, () => onTenantChange("barber_services"));
     }
     this.remoteChannel = channel.subscribe();
     if (!scopeWasLoaded) {
@@ -5361,6 +5387,9 @@ function renderSuperAdminV2() {
           <tr>
             <th>Vista</th>
             <th>Consulta exacta</th>
+            <th>Componente/hook</th>
+            <th>Motivo</th>
+            <th>Fuente</th>
             <th>Ejecuciones</th>
             <th>KB</th>
             <th>Tiempo total</th>
@@ -5376,6 +5405,9 @@ function renderSuperAdminV2() {
                     (row) => `<tr>
                       <td>${escapeHTML(row.view)}</td>
                       <td>${escapeHTML(row.label)}</td>
+                      <td>${escapeHTML(row.component)}</td>
+                      <td>${escapeHTML(row.reason)}</td>
+                      <td>${escapeHTML(row.source)}</td>
                       <td>${row.executions}</td>
                       <td>${metricValue(row.kb, " KB")}</td>
                       <td>${metricValue(row.totalMs)}</td>
@@ -5383,7 +5415,7 @@ function renderSuperAdminV2() {
                     </tr>`
                   )
                   .join("")
-              : `<tr><td colspan="6">Aun no hay consultas registradas.</td></tr>`
+              : `<tr><td colspan="9">Aun no hay consultas registradas.</td></tr>`
           }
         </tbody>
       </table>
@@ -7555,9 +7587,16 @@ function bindEvents() {
   });
 
   document.querySelectorAll("[data-admin-panel]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const panel = button.dataset.adminPanel;
       app.adminOpenPanel = app.adminOpenPanel === panel ? "" : panel;
+      if (app.adminOpenPanel === "admin-accounts") {
+        try {
+          await store.syncAdminAccountsFromRemote(currentBusinessId());
+        } catch (error) {
+          console.warn("Admin accounts lazy load skipped", error);
+        }
+      }
       render();
     });
   });
