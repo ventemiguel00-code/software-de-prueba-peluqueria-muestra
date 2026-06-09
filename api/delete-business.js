@@ -42,6 +42,18 @@ const supabaseFetch = async (path, options = {}) => {
   return text ? JSON.parse(text) : null;
 };
 
+const isOptionalSchemaError = (error) => {
+  const body = String(error?.body || error?.message || "").toLowerCase();
+  return (
+    error?.status === 404 ||
+    body.includes("does not exist") ||
+    body.includes("schema cache") ||
+    body.includes("could not find the table") ||
+    body.includes("could not find the 'business_id' column") ||
+    body.includes("column") && body.includes("business_id")
+  );
+};
+
 const getBusiness = async (businessId) => {
   const params = new URLSearchParams({
     select: "id,business_name,slug",
@@ -61,17 +73,23 @@ const deleteByBusinessId = async (table, businessId) => {
     });
     return true;
   } catch (error) {
-    if (error.status === 404 || String(error.body || "").includes("does not exist")) return false;
+    if (isOptionalSchemaError(error)) return false;
+    error.step = `delete:${table}`;
     throw error;
   }
 };
 
 const deleteBusinessRow = async (businessId) => {
   const params = new URLSearchParams({ id: `eq.${businessId}` });
-  await supabaseFetch(`/rest/v1/businesses?${params}`, {
-    method: "DELETE",
-    headers: { Prefer: "return=minimal" },
-  });
+  try {
+    await supabaseFetch(`/rest/v1/businesses?${params}`, {
+      method: "DELETE",
+      headers: { Prefer: "return=minimal" },
+    });
+  } catch (error) {
+    error.step = "delete:businesses";
+    throw error;
+  }
 };
 
 const listStoragePrefix = async (bucket, prefix) => {
@@ -175,7 +193,14 @@ module.exports = async function handler(req, res) {
       await deleteByBusinessId(table, businessId);
     }
 
-    await Promise.all([
+    await deleteBusinessRow(businessId);
+    const stillExists = await getBusiness(businessId);
+    if (stillExists) {
+      json(res, 500, { ok: false, error: "Supabase no elimino el negocio principal.", step: "verify:businesses" });
+      return;
+    }
+
+    await Promise.allSettled([
       removeStoragePrefix("logos-negocios", businessId),
       removeStoragePrefix("fondos-negocios", businessId),
       removeStoragePrefix("videos-negocios", businessId),
@@ -183,9 +208,12 @@ module.exports = async function handler(req, res) {
       removeStoragePrefix("entornos", businessId),
     ]);
 
-    await deleteBusinessRow(businessId);
     json(res, 200, { ok: true });
   } catch (error) {
-    json(res, 500, { ok: false, error: error.message || "No fue posible eliminar la barberia." });
+    json(res, 500, {
+      ok: false,
+      step: error.step || "delete-business",
+      error: error.message || "No fue posible eliminar la barberia.",
+    });
   }
 };

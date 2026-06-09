@@ -3206,7 +3206,7 @@ async function deleteBusinessViaBackend(businessId, confirmation) {
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.ok) {
-    throw new Error(result.error || "No fue posible eliminar la barberia en el servidor.");
+    throw new Error(`${result.step ? `${result.step}: ` : ""}${result.error || "No fue posible eliminar la barberia en el servidor."}`);
   }
   return result;
 }
