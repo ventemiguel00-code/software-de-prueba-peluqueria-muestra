@@ -1308,6 +1308,19 @@ input:focus {
   border-bottom: 0;
 }
 
+.compact-title {
+  margin-top: 18px;
+}
+
+.compact-diagnostics-table {
+  min-width: 760px;
+}
+
+.compact-diagnostics-table td:nth-child(2) {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: var(--muted);
+}
+
 .admin-layout {
   display: grid;
   grid-template-columns: 350px minmax(0, 1fr);

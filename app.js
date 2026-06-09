@@ -28,6 +28,7 @@ const REMOTE_SYNC_DEBOUNCE_MS = 180;
 const REMOTE_SCOPE_CACHE_TTL_MS = 45 * 1000;
 const SUPER_ADMIN_CACHE_TTL_MS = 60 * 1000;
 const ADMIN_ACCOUNTS_CACHE_TTL_MS = 90 * 1000;
+const BUSINESS_IDENTITY_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const dayNames = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
 const longDayNames = ["Domingo", "Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"];
@@ -368,9 +369,25 @@ function buildPerformanceDiagnostics() {
     ])
   );
 
+  const querySummary = new Map();
   metricRows.forEach((row) => {
     const view = normalizeMetricView(row.scope);
     if (!base[view]) return;
+    const queryKey = `${view}|${row.label || "consulta"}`;
+    const queryItem = querySummary.get(queryKey) || {
+      view,
+      label: row.label || "consulta",
+      executions: 0,
+      kb: 0,
+      totalMs: 0,
+      avgMs: 0,
+    };
+    queryItem.executions += 1;
+    queryItem.kb = Math.round((queryItem.kb + (Number(row.kb) || 0)) * 10) / 10;
+    queryItem.totalMs = Math.round((queryItem.totalMs + (Number(row.ms) || 0)) * 10) / 10;
+    queryItem.avgMs = Math.round((queryItem.totalMs / queryItem.executions) * 10) / 10;
+    querySummary.set(queryKey, queryItem);
+
     const target = base[view];
     const ms = Number(row.ms) || 0;
     target.queries += 1;
@@ -414,6 +431,9 @@ function buildPerformanceDiagnostics() {
   const lastMetricAt = metricRows.length ? metricRows[metricRows.length - 1].at : "";
   return {
     rows,
+    queryRows: [...querySummary.values()].sort((a, b) =>
+      b.executions - a.executions || b.kb - a.kb || b.totalMs - a.totalMs
+    ),
     slowest: pick("ms"),
     mostQueries: pick("queries"),
     mostKb: pick("kb"),
@@ -1357,6 +1377,7 @@ class StudioStore {
     this.bucketCacheStateRef = null;
     this.bucketCache = new Map();
     this.remoteStateCache = new Map();
+    this.businessRowsCache = new Map();
     this.adminAccountsCache = new Map();
     this.applyingRemote = false;
     this.dailyResetPending = false;
@@ -1488,11 +1509,15 @@ class StudioStore {
   invalidateRemoteCache(scopePrefix = "") {
     if (!scopePrefix) {
       this.remoteStateCache.clear();
+      this.businessRowsCache.clear();
       this.adminAccountsCache.clear();
       return;
     }
     [...this.remoteStateCache.keys()].forEach((key) => {
       if (key.includes(scopePrefix)) this.remoteStateCache.delete(key);
+    });
+    [...this.businessRowsCache.keys()].forEach((key) => {
+      if (key.includes(scopePrefix)) this.businessRowsCache.delete(key);
     });
     [...this.adminAccountsCache.keys()].forEach((key) => {
       if (key.includes(scopePrefix)) this.adminAccountsCache.delete(key);
@@ -1509,6 +1534,19 @@ class StudioStore {
     this.remoteStateCache.set(cacheKey, {
       createdAt: Date.now(),
       state,
+    });
+  }
+
+  getCachedBusinessRows(cacheKey) {
+    const cached = this.businessRowsCache.get(cacheKey);
+    if (!cached || Date.now() - cached.createdAt > BUSINESS_IDENTITY_CACHE_TTL_MS) return null;
+    return cached.rows;
+  }
+
+  setCachedBusinessRows(cacheKey, rows = []) {
+    this.businessRowsCache.set(cacheKey, {
+      createdAt: Date.now(),
+      rows,
     });
   }
 
@@ -1579,12 +1617,22 @@ class StudioStore {
       const route = resolveRoute(location.pathname);
       const queryScope = `${route.view}:${route.businessSlug || "global"}`;
       const businessPerf = perfMark("business");
-      const businessesQuery =
+      const businessCacheKey =
         route.view === "super-admin"
-          ? this.supabase.from("businesses").select(BUSINESS_SELECT_COLUMNS).order("created_at", { ascending: true })
-          : this.supabase.from("businesses").select(BUSINESS_SELECT_COLUMNS).eq("slug", route.businessSlug).limit(1);
-      const businessesResult = await this.trackedQuery("businesses", queryScope, businessesQuery);
+          ? "businesses:all"
+          : `business:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
+      const cachedBusinessRows = !force ? this.getCachedBusinessRows(businessCacheKey) : null;
+      const businessesResult = cachedBusinessRows
+        ? { data: cachedBusinessRows, error: null }
+        : await this.trackedQuery(
+            "businesses",
+            queryScope,
+            route.view === "super-admin"
+              ? this.supabase.from("businesses").select(BUSINESS_SELECT_COLUMNS).order("created_at", { ascending: true })
+              : this.supabase.from("businesses").select(BUSINESS_SELECT_COLUMNS).eq("slug", route.businessSlug).limit(1)
+          );
       if (businessesResult.error) throw businessesResult.error;
+      if (!cachedBusinessRows) this.setCachedBusinessRows(businessCacheKey, businessesResult.data || []);
       perfStep("business", businessPerf, `(${route.view}:${route.businessSlug || "global"})`);
       const deletedBusinessIds = loadDeletedBusinessIds();
       const remoteBusinesses = (businessesResult.data || [])
@@ -5243,9 +5291,6 @@ function renderSuperAdminV2() {
   }
 
   const businesses = [...store.state.businesses].sort((a, b) => a.name.localeCompare(b.name, "es"));
-  if (app.superAdminSession && store.supabase && businesses.length <= 1 && !store.syncInFlight) {
-    store.queueRemoteSync();
-  }
   const credentialReveal = app.superAdminCredentialReveal
     ? `<div class="editor-card credential-reveal-card">
         <p class="eyebrow">Credenciales temporales</p>
@@ -5306,6 +5351,40 @@ function renderSuperAdminV2() {
               </tr>`
             )
             .join("")}
+        </tbody>
+      </table>
+    </div>
+    <div class="section-title compact-title"><span>Q</span><h2>Consultas repetidas</h2></div>
+    <div class="diagnostics-table-wrap">
+      <table class="diagnostics-table compact-diagnostics-table">
+        <thead>
+          <tr>
+            <th>Vista</th>
+            <th>Consulta exacta</th>
+            <th>Ejecuciones</th>
+            <th>KB</th>
+            <th>Tiempo total</th>
+            <th>Promedio</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${
+            diagnostics.queryRows.length
+              ? diagnostics.queryRows
+                  .slice(0, 18)
+                  .map(
+                    (row) => `<tr>
+                      <td>${escapeHTML(row.view)}</td>
+                      <td>${escapeHTML(row.label)}</td>
+                      <td>${row.executions}</td>
+                      <td>${metricValue(row.kb, " KB")}</td>
+                      <td>${metricValue(row.totalMs)}</td>
+                      <td>${metricValue(row.avgMs)}</td>
+                    </tr>`
+                  )
+                  .join("")
+              : `<tr><td colspan="6">Aun no hay consultas registradas.</td></tr>`
+          }
         </tbody>
       </table>
     </div>
