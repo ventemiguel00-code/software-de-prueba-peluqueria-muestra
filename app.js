@@ -1491,6 +1491,8 @@ class StudioStore {
     this.remoteScopeLoadRequestedAt = new Map();
     this.remoteSubscribeCounters = new Map();
     this.remoteReady = false;
+    this.remoteLastError = "";
+    this.remoteAttemptedAt = 0;
     this.syncInFlight = false;
     this.syncQueued = false;
     this.syncQueuedQuiet = false;
@@ -1825,6 +1827,8 @@ class StudioStore {
     if (!this.supabase || this.syncInFlight) return;
     const perf = perfMark("syncFromRemote");
     this.syncInFlight = true;
+    this.remoteAttemptedAt = Date.now();
+    this.remoteLastError = "";
 
     try {
       const localState = this.loadLocalState();
@@ -2144,6 +2148,13 @@ class StudioStore {
       this.applyRemoteState(stampedState, syncScopeKey, quiet, "remote");
 
       perfEnd(perf, `(${route.view}:${scopedBusinessId || "global"})`);
+    } catch (error) {
+      this.remoteReady = true;
+      this.remoteLastError = error?.message || "No fue posible cargar los datos remotos.";
+      console.error("Supabase sync failed", error);
+      if (!quiet) {
+        this.emit({ type: "SYNC_ERROR", table: "remote", error: this.remoteLastError });
+      }
     } finally {
       this.applyingRemote = false;
       this.syncInFlight = false;
@@ -2225,8 +2236,12 @@ class StudioStore {
       this.remoteChannel = null;
     }
     this.remoteScopeKey = scopeKey;
-    const scopeWasLoaded = this.remoteLoadedScopeKey === scopeKey || this.remoteLoadedScopes.has(scopeKey);
-    this.remoteReady = scopeWasLoaded;
+    const dataScopeKey = this.currentRuntimeScopeKey(route);
+    const scopeWasLoaded =
+      this.remoteLoadedScopeKey === dataScopeKey ||
+      this.remoteLoadedScopes.has(dataScopeKey) ||
+      this.remoteLoadedScopes.has(scopeKey);
+    this.remoteReady = this.remoteReady || scopeWasLoaded;
     recordSubscribeMetric({
       action: "create",
       scope: scopeKey,
@@ -3695,11 +3710,13 @@ function expectedScopeForCurrentRoute() {
 
 function isCurrentBusinessLoading() {
   if (!store.supabase) return false;
+  if (store.remoteLastError) return false;
   if (app.view === "super-admin") return store.remoteLoadedScopeKey !== expectedScopeForCurrentRoute() && !store.remoteReady;
   const route = resolveRoute(location.pathname);
   const hasResolvedBusiness = Boolean(requestedBusiness()) || app.currentBusinessSlug === DEFAULT_BUSINESS_SLUG;
   if (route.shell === "internal") return !hasResolvedBusiness && !store.remoteReady;
   if (hasResolvedBusiness) return false;
+  if (store.remoteAttemptedAt && Date.now() - store.remoteAttemptedAt > 8000) return false;
   return !store.remoteReady;
 }
 
@@ -6450,7 +6467,7 @@ function render() {
     root.dataset.chromeBound = "true";
   }
   const remoteScopeKey = store.currentRealtimeScopeKey(app.route);
-  if (root.dataset.remoteScopeKey !== remoteScopeKey || !store.remoteSubscriptionScopeKey) {
+  if (root.dataset.remoteScopeKey !== remoteScopeKey || !store.remoteScopeKey) {
     store.subscribeRemote();
     root.dataset.remoteScopeKey = remoteScopeKey;
   }
