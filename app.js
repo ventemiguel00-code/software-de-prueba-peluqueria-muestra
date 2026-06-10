@@ -745,10 +745,15 @@ function placeholderBusinessForSlug(slug = "") {
     borderColor: palette.border,
     iconColor: palette.icon,
     badgeColor: palette.badge,
-    active: false,
+    active: true,
+    isPlaceholder: true,
     createdAt: todayISO(),
     updatedAt: todayISO(),
   });
+}
+
+function isPlaceholderBusiness(business = {}) {
+  return Boolean(business.isPlaceholder) || String(business.id || "").startsWith("missing_");
 }
 
 function normalizeThemeKey(themeKey = DEFAULT_BUSINESS_THEME_KEY) {
@@ -783,8 +788,20 @@ function normalizeBusiness(record = {}) {
     iconColor: record.iconColor || palette.icon,
     badgeColor: record.badgeColor || palette.badge,
     backgroundUrl: normalizeAssetUrl(record.backgroundUrl || ""),
+    active: parseActiveFlag(record.active, true),
     updatedAt: record.updatedAt || todayISO(),
   };
+}
+
+function parseActiveFlag(value, fallback = true) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "si", "sí", "active", "activo"].includes(normalized)) return true;
+    if (["false", "0", "no", "inactive", "inactivo"].includes(normalized)) return false;
+  }
+  if (typeof value === "number") return value !== 0;
+  return fallback;
 }
 
 function isArchivedBusiness(business = {}) {
@@ -1269,7 +1286,7 @@ function mapRowToBusiness(row) {
     textColor: row.color_texto || "",
     buttonColor: row.color_boton || "",
     backgroundUrl: normalizeAssetUrl(row.background_url || ""),
-    active: row.active !== false,
+    active: parseActiveFlag(row.active, true),
     createdAt: row.created_at || todayISO(),
     updatedAt: row.updated_at || todayISO(),
   });
@@ -1888,18 +1905,20 @@ class StudioStore {
               : this.supabase.from("businesses").select(BUSINESS_SELECT_COLUMNS).eq("slug", route.businessSlug).limit(1)
           );
       if (businessesResult.error) throw businessesResult.error;
-      if (!cachedBusinessRows) this.setCachedBusinessRows(businessCacheKey, businessesResult.data || []);
+      if (!cachedBusinessRows && (route.view === "super-admin" || (businessesResult.data || []).length)) {
+        this.setCachedBusinessRows(businessCacheKey, businessesResult.data || []);
+      }
       perfStep("business", businessPerf, `(${route.view}:${route.businessSlug || "global"})`);
       const deletedBusinessIds = loadDeletedBusinessIds();
       const remoteBusinesses = (businessesResult.data || [])
         .map(mapRowToBusiness)
-        .filter((business) => !deletedBusinessIds.has(business.id) && !isArchivedBusiness(business));
+        .filter((business) => !isArchivedBusiness(business));
       const mergedBusinesses =
         route.view === "super-admin"
           ? remoteBusinesses
           : mergeBusinessesById(
-              (this.state.businesses || []).filter((business) => business.slug === route.businessSlug && !deletedBusinessIds.has(business.id)),
-              (localState.businesses || []).filter((business) => business.slug === route.businessSlug && !deletedBusinessIds.has(business.id)),
+              (this.state.businesses || []).filter((business) => business.slug === route.businessSlug && !deletedBusinessIds.has(business.id) && !isPlaceholderBusiness(business)),
+              (localState.businesses || []).filter((business) => business.slug === route.businessSlug && !deletedBusinessIds.has(business.id) && !isPlaceholderBusiness(business)),
               remoteBusinesses
             );
 
@@ -2114,7 +2133,11 @@ class StudioStore {
         ? stableBucket.barberServices
         : (barberServicesResult.error ? [] : (barberServicesResult.data || []).map(mapRowToBarberService));
       const scopedBusinessSettingsRows = businessSettingsResult.fromStableCache ? [] : businessSettingsResult.data || [];
-      const scopedBusinessList = mergedBusinesses.length ? mergedBusinesses : [scopedBusiness];
+      const scopedBusinessList = mergedBusinesses.length
+        ? mergedBusinesses
+        : isPlaceholderBusiness(scopedBusiness)
+          ? []
+          : [scopedBusiness];
       const scopedThemedBusinesses = applyBusinessSettingsThemeColors(scopedBusinessList, scopedBusinessSettingsRows);
       cacheBusinessThemes(scopedThemedBusinesses);
       if (!businessSettingsResult.fromStableCache) {
@@ -2133,7 +2156,11 @@ class StudioStore {
           remoteView: route.view,
           remoteBusinessSlug: route.businessSlug || DEFAULT_BUSINESS_SLUG,
         },
-        businesses: scopedThemedBusinesses.length ? scopedThemedBusinesses : [scopedBusiness],
+        businesses: scopedThemedBusinesses.length
+          ? scopedThemedBusinesses
+          : isPlaceholderBusiness(scopedBusiness)
+            ? (this.state.businesses || []).filter((business) => !isPlaceholderBusiness(business))
+            : [scopedBusiness],
         barbers: barbersData,
         appointments: (appointmentsResult.data || [])
           .map(mapRowToAppointment)
@@ -2535,7 +2562,7 @@ class StudioStore {
 
   businessBySlug(slug) {
     const normalizedSlug = String(slug || "").trim().toLowerCase();
-    return this.state.businesses.find((business) => business.slug === normalizedSlug) || null;
+    return this.state.businesses.find((business) => business.slug === normalizedSlug && !isPlaceholderBusiness(business)) || null;
   }
 
   saveBusiness(payload) {
@@ -3198,24 +3225,25 @@ const PRINCIPAL_ADMIN = {
 
 function resolveRoute(pathname = location.pathname) {
   const parts = pathname.split("/").filter(Boolean);
+  const routeSlug = (index) => slugify(decodeURIComponent(parts[index] || "")) || DEFAULT_BUSINESS_SLUG;
   if (parts[0] === "super-admin" || parts[0] === "admin-global") {
     return { view: "super-admin", businessSlug: DEFAULT_BUSINESS_SLUG };
   }
   if (parts[0] === "barberia-test" && parts[1]) {
-    return { view: "business-test", businessSlug: parts[1] };
+    return { view: "business-test", businessSlug: routeSlug(1) };
   }
   if (parts[0] === "panel" && parts[1]) {
     const params = new URLSearchParams(location.search);
-    return { view: params.get("modo") === "barbero" ? "barber" : "admin", businessSlug: parts[1], shell: "internal" };
+    return { view: params.get("modo") === "barbero" ? "barber" : "admin", businessSlug: routeSlug(1), shell: "internal" };
   }
   if (parts[0] === "admin" && parts[1]) {
-    return { view: "admin", businessSlug: parts[1], shell: "internal" };
+    return { view: "admin", businessSlug: routeSlug(1), shell: "internal" };
   }
   if (parts[0] === "barbero" && parts[1]) {
-    return { view: "barber", businessSlug: parts[1], shell: "internal" };
+    return { view: "barber", businessSlug: routeSlug(1), shell: "internal" };
   }
   if ((parts[0] === "barberia" || parts[0] === "negocio") && parts[1]) {
-    return { view: "public", businessSlug: parts[1], shell: "public" };
+    return { view: "public", businessSlug: routeSlug(1), shell: "public" };
   }
   if (pathname === "/admin-vip") return { view: "admin", businessSlug: DEFAULT_BUSINESS_SLUG, shell: "internal" };
   if (pathname === "/gestion-equipo") return { view: "barber", businessSlug: DEFAULT_BUSINESS_SLUG, shell: "internal" };
@@ -7341,6 +7369,13 @@ function bindEvents() {
     const user = String(form.get("user") || "").trim();
     const password = String(form.get("password") || "");
     const business = currentBusiness();
+    if (isPlaceholderBusiness(business)) {
+      app.adminSession = null;
+      app.adminLoginError = "El entorno aun esta resolviendo este negocio. Intenta nuevamente en unos segundos.";
+      clearScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug);
+      render();
+      return;
+    }
     if (!business?.active) {
       app.adminSession = null;
       app.adminLoginError = "Este negocio esta inactivo. No es posible iniciar sesion administrativa.";
@@ -7987,6 +8022,13 @@ function bindEvents() {
     const form = new FormData(event.currentTarget);
     const user = String(form.get("user") || "").trim();
     const business = currentBusiness();
+    if (isPlaceholderBusiness(business)) {
+      app.barberSession = null;
+      app.barberLoginError = "El entorno aun esta resolviendo este negocio. Intenta nuevamente en unos segundos.";
+      clearScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
+      render();
+      return;
+    }
     if (!business?.active) {
       app.barberSession = null;
       app.barberLoginError = "Este negocio esta inactivo. No es posible iniciar sesion de barbero.";
