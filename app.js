@@ -27,10 +27,11 @@ const PERF_SYNC_METRICS_KEY = "barber-delux-sync-metrics-v1";
 const PERF_SUBSCRIBE_METRICS_KEY = "barber-delux-subscribe-metrics-v1";
 const THEME_CACHE_PREFIX = "theme_cache_";
 const REMOTE_SYNC_DEBOUNCE_MS = 650;
-const REMOTE_SCOPE_CACHE_TTL_MS = 45 * 1000;
-const SUPER_ADMIN_CACHE_TTL_MS = 60 * 1000;
+const REMOTE_SCOPE_CACHE_TTL_MS = 4 * 60 * 1000;
+const SUPER_ADMIN_CACHE_TTL_MS = 3 * 60 * 1000;
 const ADMIN_ACCOUNTS_CACHE_TTL_MS = 90 * 1000;
 const BUSINESS_IDENTITY_CACHE_TTL_MS = 5 * 60 * 1000;
+const STABLE_BUSINESS_CACHE_TTL_MS = 10 * 60 * 1000;
 const DUPLICATE_SYNC_GUARD_MS = 8 * 1000;
 
 const dayNames = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
@@ -203,6 +204,56 @@ function getWeekDates(anchor = new Date()) {
     next.setDate(date.getDate() + index);
     return toISO(next);
   });
+}
+
+const agendaMemo = {
+  stateRef: null,
+  weekDates: new Map(),
+  slotRows: new Map(),
+  publicDateAvailability: new Map(),
+};
+
+function currentAgendaTimeBucket() {
+  return `${todayISO()}:${Math.floor(nowMinutes() / 10)}`;
+}
+
+function ensureAgendaMemoFresh() {
+  if (agendaMemo.stateRef === store.state) return;
+  agendaMemo.stateRef = store.state;
+  agendaMemo.weekDates.clear();
+  agendaMemo.slotRows.clear();
+  agendaMemo.publicDateAvailability.clear();
+}
+
+function getWeekDatesMemo(anchor = new Date()) {
+  ensureAgendaMemoFresh();
+  const date = anchor instanceof Date ? anchor : new Date(anchor);
+  const key = toISO(date);
+  if (!agendaMemo.weekDates.has(key)) {
+    agendaMemo.weekDates.set(key, getWeekDates(date));
+  }
+  return agendaMemo.weekDates.get(key);
+}
+
+function slotRowsForBarberDate(barberId, date, businessId = currentBusinessId()) {
+  ensureAgendaMemoFresh();
+  const key = `${businessId || "global"}:${barberId || "sin-barbero"}:${date}`;
+  if (!agendaMemo.slotRows.has(key)) {
+    agendaMemo.slotRows.set(
+      key,
+      baseSlots.map((time) => ({ time, ...statusFor(barberId, date, time) }))
+    );
+  }
+  return agendaMemo.slotRows.get(key);
+}
+
+function publicDateAvailableMemo(barberId, date, businessId = currentBusinessId()) {
+  ensureAgendaMemoFresh();
+  const key = `${businessId || "global"}:${barberId || "sin-barbero"}:${date}:${currentAgendaTimeBucket()}`;
+  if (!agendaMemo.publicDateAvailability.has(key)) {
+    agendaMemo.publicDateAvailability.set(key, isPublicDateAvailable(barberId, date));
+  }
+  return agendaMemo.publicDateAvailability.get(key);
 }
 
 function moneylessPhone(raw) {
@@ -1511,6 +1562,12 @@ class StudioStore {
     invalidateDerivedBusinessCache();
     const changedBusinessId =
       event.businessId || event.record?.negocioId || event.record?.businessId || event.record?.business_id || "";
+    if (
+      ["businesses", "business_settings", "barbers", "services", "barber_services"].includes(event.table) &&
+      changedBusinessId
+    ) {
+      this.invalidateStableBusinessCache(changedBusinessId);
+    }
     if (event.table === "businesses" || !changedBusinessId) {
       this.invalidateRemoteCache();
     } else {
@@ -1545,6 +1602,14 @@ class StudioStore {
     return `${scopeView}:${scopedBusinessId || "global"}:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
   }
 
+  currentRealtimeScopeKey(route = resolveRoute(location.pathname)) {
+    if (route.view === "super-admin") {
+      return `super-admin:global:${DEFAULT_BUSINESS_SLUG}`;
+    }
+    const scopedBusinessId = this.scopedBusinessIdForRoute(route);
+    return `business:${scopedBusinessId || "global"}:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
+  }
+
   scopedBusinessIdForRoute(route = resolveRoute(location.pathname)) {
     if (route.view === "super-admin") return null;
     if (route.businessSlug === DEFAULT_BUSINESS_SLUG) return DEFAULT_BUSINESS_ID;
@@ -1576,6 +1641,57 @@ class StudioStore {
   invalidateBusinessBuckets() {
     this.bucketCacheStateRef = null;
     this.bucketCache = new Map();
+  }
+
+  stableBusinessCacheMap(state = this.state) {
+    return state.meta?.stableBusinessCacheById && typeof state.meta.stableBusinessCacheById === "object"
+      ? state.meta.stableBusinessCacheById
+      : {};
+  }
+
+  stableBusinessCacheEntry(businessId) {
+    return this.stableBusinessCacheMap()[businessId] || null;
+  }
+
+  hasFreshStableBusinessData(businessId, { needsFull = false } = {}) {
+    if (!businessId) return false;
+    const entry = this.stableBusinessCacheEntry(businessId);
+    const cachedAt = Number(typeof entry === "object" ? entry.at : entry || 0);
+    const hasFullData = typeof entry === "object" ? Boolean(entry.full) : false;
+    if (needsFull && !hasFullData) return false;
+    return Boolean(cachedAt && Date.now() - cachedAt < STABLE_BUSINESS_CACHE_TTL_MS);
+  }
+
+  withStableBusinessCacheStamp(state, businessId, { full = false } = {}) {
+    if (!businessId) return state;
+    const previous = this.stableBusinessCacheEntry(businessId);
+    const previousFull = typeof previous === "object" ? Boolean(previous.full) : false;
+    return {
+      ...state,
+      meta: {
+        ...(state.meta || {}),
+        stableBusinessCacheById: {
+          ...(state.meta?.stableBusinessCacheById || {}),
+          [businessId]: {
+            at: Date.now(),
+            full: previousFull || full,
+          },
+        },
+      },
+    };
+  }
+
+  invalidateStableBusinessCache(businessId = "") {
+    if (!businessId || !this.state?.meta?.stableBusinessCacheById) return;
+    const nextCache = { ...this.state.meta.stableBusinessCacheById };
+    delete nextCache[businessId];
+    this.state = {
+      ...this.state,
+      meta: {
+        ...this.state.meta,
+        stableBusinessCacheById: nextCache,
+      },
+    };
   }
 
   invalidateRemoteCache(scopePrefix = "") {
@@ -1934,12 +2050,20 @@ class StudioStore {
         );
       };
 
+      const stableBucket = scopedBusinessId ? getBusinessBucket(scopedBusinessId) : emptyBusinessBucket();
+      const canReuseStableBusinessData =
+        !force &&
+        scopedBusinessId &&
+        this.hasFreshStableBusinessData(scopedBusinessId, { needsFull: route.view === "admin" });
+      const stableQueryResult = { data: null, error: null, fromStableCache: true };
       const scopedDataPerf = perfMark("business scoped data");
       const [barbersResult, appointmentsBaseResult, blockedDaysResult, servicesResult, barberServicesResult, businessSettingsResult] = await Promise.all([
         // These scoped reads intentionally stay parallel and filtered by business_id to keep each tenant isolated.
-        queryScoped("barbers", "created_at", true, (query) =>
-          isPublicRoute || route.view === "barber" ? query.eq("active", true) : query
-        ),
+        canReuseStableBusinessData
+          ? Promise.resolve(stableQueryResult)
+          : queryScoped("barbers", "created_at", true, (query) =>
+              isPublicRoute || route.view === "barber" ? query.eq("active", true) : query
+            ),
         queryScoped("appointments", "date", true, (query) =>
           isPublicRoute ? query.eq("date", publicDate) : query.gte("date", weekStartDate).lte("date", weekEndDate)
         ),
@@ -1950,11 +2074,13 @@ class StudioStore {
               ? query.gte("date", weekStartDate).lte("date", weekEndDate)
               : query
         ),
-        queryScoped("services", "created_at", true, (query) =>
-          isPublicRoute || route.view === "barber" ? query.eq("active", true) : query
-        ),
-        queryScoped("barber_services", "created_at", true),
-        queryScoped("business_settings", "created_at", true),
+        canReuseStableBusinessData
+          ? Promise.resolve(stableQueryResult)
+          : queryScoped("services", "created_at", true, (query) =>
+              isPublicRoute || route.view === "barber" ? query.eq("active", true) : query
+            ),
+        canReuseStableBusinessData ? Promise.resolve(stableQueryResult) : queryScoped("barber_services", "created_at", true),
+        canReuseStableBusinessData ? Promise.resolve(stableQueryResult) : queryScoped("business_settings", "created_at", true),
       ]);
       perfStep("business scoped data", scopedDataPerf, `(${route.view}:${route.businessSlug || scopedBusinessId || "global"})`);
 
@@ -1972,13 +2098,24 @@ class StudioStore {
         ),
       };
 
-      const servicesData = servicesResult.error ? [] : (servicesResult.data || []).map(mapRowToService);
-      const barberServicesData = barberServicesResult.error ? [] : (barberServicesResult.data || []).map(mapRowToBarberService);
-      const scopedBusinessSettingsRows = businessSettingsResult.data || [];
+      const barbersData = barbersResult.fromStableCache
+        ? stableBucket.barbers
+        : (barbersResult.data || []).map((row, index) => mapRowToBarber(row, index));
+      const servicesData = servicesResult.fromStableCache
+        ? stableBucket.services
+        : servicesResult.error
+          ? []
+          : (servicesResult.data || []).map(mapRowToService);
+      const barberServicesData = barberServicesResult.fromStableCache
+        ? stableBucket.barberServices
+        : (barberServicesResult.error ? [] : (barberServicesResult.data || []).map(mapRowToBarberService));
+      const scopedBusinessSettingsRows = businessSettingsResult.fromStableCache ? [] : businessSettingsResult.data || [];
       const scopedBusinessList = mergedBusinesses.length ? mergedBusinesses : [scopedBusiness];
       const scopedThemedBusinesses = applyBusinessSettingsThemeColors(scopedBusinessList, scopedBusinessSettingsRows);
       cacheBusinessThemes(scopedThemedBusinesses);
-      this.syncBusinessSettingsToLocal(scopedBusinessSettingsRows, route.view === "super-admin" ? null : scopedBusinessId);
+      if (!businessSettingsResult.fromStableCache) {
+        this.syncBusinessSettingsToLocal(scopedBusinessSettingsRows, route.view === "super-admin" ? null : scopedBusinessId);
+      }
 
       const currentWeek = getWeekKey();
       const nextState = {
@@ -1993,7 +2130,7 @@ class StudioStore {
           remoteBusinessSlug: route.businessSlug || DEFAULT_BUSINESS_SLUG,
         },
         businesses: scopedThemedBusinesses.length ? scopedThemedBusinesses : [scopedBusiness],
-        barbers: (barbersResult.data || []).map((row, index) => mapRowToBarber(row, index)),
+        barbers: barbersData,
         appointments: (appointmentsResult.data || [])
           .map(mapRowToAppointment)
           .filter((item) => item.status !== "reserved" || item.weekKey === currentWeek),
@@ -2002,8 +2139,9 @@ class StudioStore {
         barberServices: barberServicesData,
       };
 
-      this.setCachedRemoteState(cacheKey, nextState);
-      this.applyRemoteState(nextState, syncScopeKey, quiet, "remote");
+      const stampedState = this.withStableBusinessCacheStamp(nextState, scopedBusinessId, { full: route.view === "admin" });
+      this.setCachedRemoteState(cacheKey, stampedState);
+      this.applyRemoteState(stampedState, syncScopeKey, quiet, "remote");
 
       perfEnd(perf, `(${route.view}:${scopedBusinessId || "global"})`);
     } finally {
@@ -2058,8 +2196,7 @@ class StudioStore {
     const route = resolveRoute(location.pathname);
     const scopedBusinessId =
       route.view === "super-admin" ? null : this.scopedBusinessIdForRoute(route);
-    const scopeView = route.shell === "internal" ? "internal" : route.view;
-    const scopeKey = `${scopeView}:${scopedBusinessId || "global"}:${route.businessSlug || ""}`;
+    const scopeKey = this.currentRealtimeScopeKey(route);
     const subscribeCount = (this.remoteSubscribeCounters.get(scopeKey) || 0) + 1;
     this.remoteSubscribeCounters.set(scopeKey, subscribeCount);
     if (this.remoteChannel && this.remoteScopeKey === scopeKey) {
@@ -2134,6 +2271,9 @@ class StudioStore {
         this.invalidateRemoteCache();
       } else {
         this.invalidateRemoteCache(scopedBusinessId || "global");
+      }
+      if (["business_settings", "barbers", "services", "barber_services"].includes(table) && scopedBusinessId) {
+        this.invalidateStableBusinessCache(scopedBusinessId);
       }
       this.queueRemoteSync({ force: true, origin: `realtime:${table || "unknown"}`, component: "SupabaseRealtime", hook: "postgres_changes" });
     };
@@ -3995,7 +4135,7 @@ function isCountableAppointment(item) {
 }
 
 function buildCounterSummary(anchorDate) {
-  const activeWeekDates = new Set(getWeekDates(dateAnchor(anchorDate)));
+  const activeWeekDates = new Set(getWeekDatesMemo(dateAnchor(anchorDate)));
   return getBusinessBucket(currentBusinessId()).appointments.reduce(
     (summary, appointment) => {
       if (!isCountableAppointment(appointment) || !activeWeekDates.has(appointment.date)) return summary;
@@ -4203,7 +4343,7 @@ function barberWhatsappLink(barber) {
 }
 
 function weekButtons(selected, attr = "data-admin-date") {
-  return `<div class="week-cards">${getWeekDates()
+  return `<div class="week-cards">${getWeekDatesMemo()
     .map((date) => {
       const d = new Date(`${date}T00:00:00`);
       const past = isPastDate(date);
@@ -4216,7 +4356,7 @@ function weekButtons(selected, attr = "data-admin-date") {
 }
 
 function dateStrip(selected, onClickAttr = "data-date") {
-  return `<div class="date-strip">${getWeekDates().map((date) => {
+  return `<div class="date-strip">${getWeekDatesMemo().map((date) => {
     const d = new Date(`${date}T00:00:00`);
     const disabled = onClickAttr === "data-date" && isPastDate(date);
     return `<button class="${date === selected ? "active" : ""} ${disabled ? "past-date" : ""}" ${onClickAttr}="${date}" ${disabled ? "disabled" : ""}>
@@ -4322,7 +4462,7 @@ function buildBarberSummary(barberId, anchorDate) {
       COUNTABLE_STATUSES.has(item.status)
   );
   const realizedToday = todayReservations.filter(isRealizedAppointment);
-  const weekDates = new Set(getWeekDates(new Date(`${anchorDate}T00:00:00`)).filter((date) => date <= anchorDate));
+  const weekDates = new Set(getWeekDatesMemo(new Date(`${anchorDate}T00:00:00`)).filter((date) => date <= anchorDate));
   const weekAppointments = appointments.filter(
     (item) =>
       item.barberId === barberId &&
@@ -4574,7 +4714,7 @@ function renderPublic() {
   const hasSelectedDay = hasSelectedBarber && app.publicDaySelected;
   const hasSelectedSlot = hasSelectedDay && Boolean(app.selectedSlot);
   const availability = hasSelectedDay
-    ? baseSlots.map((time) => ({ time, ...statusFor(selected.id, app.selectedDate, time) }))
+    ? slotRowsForBarberDate(selected.id, app.selectedDate, businessId)
     : [];
   const currentStep = hasSelectedSlot
     ? "details"
@@ -4677,10 +4817,10 @@ function renderPublic() {
       </div>
     </div>`;
     bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button>`;
-    bookingCardBody = `<div class="date-strip">${getWeekDates()
+    bookingCardBody = `<div class="date-strip">${getWeekDatesMemo()
       .map((date) => {
         const d = new Date(`${date}T00:00:00`);
-        const disabled = !isPublicDateAvailable(selected.id, date);
+        const disabled = !publicDateAvailableMemo(selected.id, date, businessId);
         return `<button class="${date === app.selectedDate ? "active" : ""} ${disabled ? "past-date" : ""}" data-public-date="${date}" ${disabled ? "disabled" : ""}>
           <span>${dayNames[d.getDay()]}</span>
           <strong>${String(d.getDate()).padStart(2, "0")}</strong>
@@ -4841,9 +4981,7 @@ function renderAdmin() {
   const businessBarbers = barbersForBusiness(businessId);
   const businessAppointments = store.state.appointments.filter((appointment) => appointment.negocioId === businessId);
   const businessBlockedDays = store.state.blockedDays.filter((blockedDay) => blockedDay.negocioId === businessId);
-  const rows = selected
-    ? baseSlots.map((time) => ({ time, ...statusFor(selected.id, app.selectedDate, time) }))
-    : [];
+  const rows = selected ? slotRowsForBarberDate(selected.id, app.selectedDate, businessId) : [];
   const blocked = selected ? store.isDayBlocked(selected.id, app.selectedDate) : false;
 
   return appShell(`
@@ -4967,7 +5105,7 @@ function renderBarber() {
     return renderBarber();
   }
   const date = todayISO();
-  const rows = baseSlots.map((time) => ({ time, ...statusFor(barber.id, date, time) }));
+  const rows = slotRowsForBarberDate(barber.id, date, currentBusinessId());
   return appShell(`
     <section class="dashboard-head">
       <div class="barber-heading">
@@ -5750,7 +5888,7 @@ function adminDashboardSection() {
   const today = todayISO();
   const businessAppointments = store.state.appointments.filter((item) => item.negocioId === businessId);
   const todayAppointments = businessAppointments.filter((item) => item.date === today);
-  const currentWeekDates = getWeekDates(new Date(`${today}T00:00:00`)).filter((date) => date <= today);
+  const currentWeekDates = getWeekDatesMemo(new Date(`${today}T00:00:00`)).filter((date) => date <= today);
   const currentWeekSet = new Set(currentWeekDates);
   const reservedToday = todayAppointments.filter((item) => COUNTABLE_STATUSES.has(item.status)).length;
   const realizedToday = todayAppointments.filter(isRealizedAppointment);
@@ -5904,10 +6042,10 @@ function renderAdminV2() {
                 </div>`
           }
         </section>
-        ${renderAccordionPanel("new-barber", "+", "Nuevo barbero", barberEditorForm(null, "Crear barbero"), app.adminOpenPanel === "new-barber")}
-        ${renderAccordionPanel("services", "S", "Servicios", servicesSection(), app.adminOpenPanel === "services")}
-        ${renderAccordionPanel("dynamic-bg", "U", "Fondo dinamico", backgroundSettingsSection(), app.adminOpenPanel === "dynamic-bg")}
-        ${isPrincipalAdmin() ? renderAccordionPanel("admin-accounts", "U", "Gestionar administradores", adminAccountsSection(), app.adminOpenPanel === "admin-accounts") : ""}
+        ${renderAccordionPanel("new-barber", "+", "Nuevo barbero", app.adminOpenPanel === "new-barber" ? barberEditorForm(null, "Crear barbero") : "", app.adminOpenPanel === "new-barber")}
+        ${renderAccordionPanel("services", "S", "Servicios", app.adminOpenPanel === "services" ? servicesSection() : "", app.adminOpenPanel === "services")}
+        ${renderAccordionPanel("dynamic-bg", "U", "Fondo dinamico", app.adminOpenPanel === "dynamic-bg" ? backgroundSettingsSection() : "", app.adminOpenPanel === "dynamic-bg")}
+        ${isPrincipalAdmin() ? renderAccordionPanel("admin-accounts", "U", "Gestionar administradores", app.adminOpenPanel === "admin-accounts" ? adminAccountsSection() : "", app.adminOpenPanel === "admin-accounts") : ""}
       </section>`
         : ""
     }
@@ -6013,7 +6151,7 @@ function renderAdminV2() {
 
 function adminHoursView(barber) {
   const counterSummary = buildCounterSummary(app.selectedDate);
-  const rows = baseSlots.map((time) => ({ time, ...statusFor(barber.id, app.selectedDate, time) }));
+  const rows = slotRowsForBarberDate(barber.id, app.selectedDate, currentBusinessId());
   const services = activeServicesForBusiness(currentBusinessId());
   return `<div class="agenda-toolbar">
     <div>
@@ -6127,7 +6265,7 @@ function renderBarberV2() {
     app.barberSession,
     { role: "barber", businessSlug: app.currentBusinessSlug, businessId: currentBusinessId() }
   );
-  const rows = baseSlots.map((time) => ({ time, ...statusFor(barber.id, app.barberDate, time) }));
+  const rows = slotRowsForBarberDate(barber.id, app.barberDate, currentBusinessId());
   const counterSummary = buildCounterSummary(app.barberDate);
   const hasOperationalRows = rows.some(({ status, dayBlocked, appointment }) => dayBlocked || status !== "available" || appointment);
 
@@ -6311,7 +6449,7 @@ function render() {
     bindChromeEvents();
     root.dataset.chromeBound = "true";
   }
-  const remoteScopeKey = store.currentRuntimeScopeKey(app.route);
+  const remoteScopeKey = store.currentRealtimeScopeKey(app.route);
   if (root.dataset.remoteScopeKey !== remoteScopeKey || !store.remoteSubscriptionScopeKey) {
     store.subscribeRemote();
     root.dataset.remoteScopeKey = remoteScopeKey;

@@ -2917,6 +2917,46 @@ textarea:focus {
 }
 
 @media (max-width: 720px) {
+  html,
+  body {
+    overflow-x: hidden;
+  }
+
+  .date-strip,
+  .week-cards {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(76px, 1fr);
+    grid-template-columns: none;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scroll-snap-type: inline proximity;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 6px;
+  }
+
+  .date-strip button,
+  .week-cards button {
+    scroll-snap-align: start;
+    min-width: 76px;
+    touch-action: manipulation;
+  }
+
+  .public-slots,
+  .slot-grid,
+  .admin-slots {
+    gap: 10px;
+  }
+
+  .button-row .primary-action,
+  .button-row .secondary-action,
+  .slot,
+  .slot-row,
+  .barber-card,
+  .service-card {
+    touch-action: manipulation;
+  }
+
   .admin-main,
   .booking-surface,
   .checkout,
