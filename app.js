@@ -1507,6 +1507,7 @@ class StudioStore {
     this.remoteLoadedScopes = new Set();
     this.remoteScopeLoadRequestedAt = new Map();
     this.remoteSubscribeCounters = new Map();
+    this.businessResolutionBySlug = new Map();
     this.remoteReady = false;
     this.remoteLastError = "";
     this.remoteAttemptedAt = 0;
@@ -1763,6 +1764,73 @@ class StudioStore {
       createdAt: Date.now(),
       rows,
     });
+  }
+
+  businessResolution(slug = "") {
+    const normalizedSlug = slugify(slug);
+    return normalizedSlug ? this.businessResolutionBySlug.get(normalizedSlug) || null : null;
+  }
+
+  async resolveBusinessBySlug(slug = "") {
+    const normalizedSlug = slugify(slug);
+    if (!normalizedSlug || normalizedSlug === DEFAULT_BUSINESS_SLUG) {
+      return { status: "success", business: this.businessById(DEFAULT_BUSINESS_ID) || defaultBusiness() };
+    }
+    const cachedBusiness = this.businessBySlug(normalizedSlug);
+    if (cachedBusiness) {
+      const result = { status: "success", business: cachedBusiness, checkedAt: Date.now() };
+      this.businessResolutionBySlug.set(normalizedSlug, result);
+      return result;
+    }
+    const current = this.businessResolutionBySlug.get(normalizedSlug);
+    if (current?.status === "pending") return current.promise;
+    if (!this.supabase) {
+      const result = { status: "error", error: "Supabase no esta configurado.", checkedAt: Date.now() };
+      this.businessResolutionBySlug.set(normalizedSlug, result);
+      return result;
+    }
+    const promise = this.supabase
+      .from("businesses")
+      .select(BUSINESS_SELECT_COLUMNS)
+      .eq("slug", normalizedSlug)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (error) {
+          const result = { status: "error", error: error.message || "No fue posible consultar el negocio.", checkedAt: Date.now() };
+          this.businessResolutionBySlug.set(normalizedSlug, result);
+          return result;
+        }
+        if (!data) {
+          const result = { status: "not_found", checkedAt: Date.now() };
+          this.businessResolutionBySlug.set(normalizedSlug, result);
+          return result;
+        }
+        const business = mapRowToBusiness(data);
+        this.state = {
+          ...this.state,
+          businesses: mergeBusinessesById(
+            (this.state.businesses || []).filter((item) => !isPlaceholderBusiness(item)),
+            [business]
+          ),
+        };
+        this.remoteLastError = "";
+        this.remoteReady = true;
+        this.setCachedBusinessRows(`business:${normalizedSlug}`, [data]);
+        localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+        invalidateDerivedBusinessCache();
+        this.invalidateBusinessBuckets();
+        const result = { status: "success", business, checkedAt: Date.now() };
+        this.businessResolutionBySlug.set(normalizedSlug, result);
+        this.emit({ type: "BUSINESS_RESOLVED", table: "businesses", businessId: business.id });
+        return result;
+      })
+      .catch((error) => {
+        const result = { status: "error", error: error?.message || "No fue posible consultar el negocio.", checkedAt: Date.now() };
+        this.businessResolutionBySlug.set(normalizedSlug, result);
+        return result;
+      });
+    this.businessResolutionBySlug.set(normalizedSlug, { status: "pending", promise, checkedAt: Date.now() });
+    return promise;
   }
 
   applyRemoteState(nextState, syncScopeKey, quiet = false, reason = "remote") {
@@ -3724,6 +3792,23 @@ function requestedBusiness() {
   return store.businessBySlug(String(app.currentBusinessSlug || "").trim().toLowerCase()) || null;
 }
 
+function currentBusinessResolution() {
+  if (!app.currentBusinessSlug || app.currentBusinessSlug === DEFAULT_BUSINESS_SLUG) {
+    return { status: "success", business: store.businessById(DEFAULT_BUSINESS_ID) || defaultBusiness() };
+  }
+  const business = requestedBusiness();
+  if (business) return { status: "success", business };
+  return store.businessResolution(app.currentBusinessSlug) || { status: "idle" };
+}
+
+function ensureCurrentBusinessResolution() {
+  if (!app.currentBusinessSlug || app.currentBusinessSlug === DEFAULT_BUSINESS_SLUG) return;
+  if (requestedBusiness()) return;
+  const resolution = store.businessResolution(app.currentBusinessSlug);
+  if (resolution && resolution.status !== "idle") return;
+  store.resolveBusinessBySlug(app.currentBusinessSlug).then(() => scheduleRender());
+}
+
 function currentBusinessId() {
   return currentBusiness()?.id || null;
 }
@@ -3742,6 +3827,8 @@ function isCurrentBusinessLoading() {
   if (app.view === "super-admin") return store.remoteLoadedScopeKey !== expectedScopeForCurrentRoute() && !store.remoteReady;
   const route = resolveRoute(location.pathname);
   const hasResolvedBusiness = Boolean(requestedBusiness()) || app.currentBusinessSlug === DEFAULT_BUSINESS_SLUG;
+  const resolution = currentBusinessResolution();
+  if (!hasResolvedBusiness && (resolution.status === "idle" || resolution.status === "pending")) return true;
   if (route.shell === "internal") return !hasResolvedBusiness && !store.remoteReady;
   if (hasResolvedBusiness) return false;
   if (store.remoteAttemptedAt && Date.now() - store.remoteAttemptedAt > 8000) return false;
@@ -4723,14 +4810,24 @@ function renderBusinessPublicTest() {
 function renderPublic() {
   const business = currentBusiness();
   const requested = requestedBusiness();
+  const resolution = currentBusinessResolution();
   const businessDataLoading =
     (!requested && isCurrentBusinessLoading()) ||
-    Boolean(app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && !store.remoteReady);
-  if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && !businessDataLoading) {
+    Boolean(app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && ["idle", "pending"].includes(resolution.status));
+  if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && resolution.status === "not_found") {
     return appShell(`
       <section class="booking-surface">
         <div class="section-title"><span>!</span><h2>Entorno no disponible</h2></div>
         <p class="microcopy">Negocio no encontrado.</p>
+      </section>
+    `);
+  }
+  if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && resolution.status === "error") {
+    return appShell(`
+      <section class="booking-surface">
+        <div class="section-title"><span>!</span><h2>No fue posible cargar el negocio</h2></div>
+        <p class="microcopy">${escapeHTML(resolution.error || "Error de conexion.")}</p>
+        <button class="secondary-action" type="button" data-retry-business-resolution>Reintentar</button>
       </section>
     `);
   }
@@ -5990,6 +6087,30 @@ function clientHistorySummary(record) {
 }
 
 function renderAdminV2() {
+  const businessResolution = currentBusinessResolution();
+  if (businessResolution.status === "not_found") {
+    return appShell(`
+      <section class="login-view">
+        <div class="login-panel">
+          <p class="eyebrow">Centro de operaciones</p>
+          <h1>NEGOCIO NO ENCONTRADO</h1>
+          <p class="microcopy">No existe una barberia registrada para este slug.</p>
+        </div>
+      </section>
+    `);
+  }
+  if (businessResolution.status === "error") {
+    return appShell(`
+      <section class="login-view">
+        <div class="login-panel">
+          <p class="eyebrow">Centro de operaciones</p>
+          <h1>NO FUE POSIBLE CARGAR</h1>
+          <p class="microcopy">${escapeHTML(businessResolution.error || "Error de conexion.")}</p>
+          <button class="secondary-action" type="button" data-retry-business-resolution>Reintentar</button>
+        </div>
+      </section>
+    `);
+  }
   if (isCurrentBusinessLoading()) {
     return businessLoadingShell("Preparando panel administrador");
   }
@@ -6275,6 +6396,30 @@ function adminHoursView(barber) {
 }
 
 function renderBarberV2() {
+  const businessResolution = currentBusinessResolution();
+  if (businessResolution.status === "not_found") {
+    return appShell(`
+      <section class="login-view">
+        <div class="login-panel">
+          <p class="eyebrow">Acceso barbero</p>
+          <h1>NEGOCIO NO ENCONTRADO</h1>
+          <p class="microcopy">No existe una barberia registrada para este slug.</p>
+        </div>
+      </section>
+    `);
+  }
+  if (businessResolution.status === "error") {
+    return appShell(`
+      <section class="login-view">
+        <div class="login-panel">
+          <p class="eyebrow">Acceso barbero</p>
+          <h1>NO FUE POSIBLE CARGAR</h1>
+          <p class="microcopy">${escapeHTML(businessResolution.error || "Error de conexion.")}</p>
+          <button class="secondary-action" type="button" data-retry-business-resolution>Reintentar</button>
+        </div>
+      </section>
+    `);
+  }
   if (isCurrentBusinessLoading()) {
     return businessLoadingShell("Preparando panel barbero");
   }
@@ -6474,6 +6619,7 @@ function render() {
   }
   applyDeviceProfile();
   applyVisualRouteState();
+  ensureCurrentBusinessResolution();
   const views = {
     public: renderPublic,
     admin: renderAdminV2,
@@ -6565,6 +6711,16 @@ function bindChromeEvents() {
         event.preventDefault();
         app.superAdminDeleteTarget = null;
         app.superAdminDeleting = false;
+        scheduleRender();
+        return;
+      }
+      if (event.target.closest?.("[data-retry-business-resolution]")) {
+        event.preventDefault();
+        if (app.currentBusinessSlug) {
+          store.businessResolutionBySlug.delete(app.currentBusinessSlug);
+          store.remoteLastError = "";
+          store.resolveBusinessBySlug(app.currentBusinessSlug).then(() => scheduleRender());
+        }
         scheduleRender();
         return;
       }
