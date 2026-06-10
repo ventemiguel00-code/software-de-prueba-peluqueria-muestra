@@ -2879,3 +2879,51 @@ textarea:focus {
   box-shadow: 0 18px 38px color-mix(in srgb, var(--color-primary) 18%, transparent);
 }
 
+/* Performance: isolate heavy panels so tab changes do not recalculate the full page. */
+#view-root {
+  min-height: 52vh;
+  contain: layout style;
+}
+
+.admin-main,
+.booking-surface,
+.checkout,
+.login-panel,
+.barber-board,
+.super-business-card,
+.super-business-panel,
+.editor-card,
+.service-card,
+.barber-card,
+.slot-row,
+.dashboard-cards div {
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 220px;
+}
+
+.topbar,
+.hero,
+.hero-bg,
+.brand,
+.nav-tabs {
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
+.super-business-summary__logo img,
+.super-admin-logo-preview img,
+.business-logo-mark img {
+  content-visibility: auto;
+}
+
+@media (max-width: 720px) {
+  .admin-main,
+  .booking-surface,
+  .checkout,
+  .barber-board,
+  .super-business-card,
+  .super-business-panel {
+    contain-intrinsic-size: 1px 360px;
+  }
+}
+

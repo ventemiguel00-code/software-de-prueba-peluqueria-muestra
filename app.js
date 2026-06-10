@@ -287,8 +287,7 @@ function estimatePayloadKb(data) {
 }
 
 function queryMetricsEnabled() {
-  const route = resolveRoute(location.pathname);
-  return localStorage.getItem(PERF_QUERY_LOG_ENABLED_KEY) === "1" || route.view === "super-admin" || perfLogsEnabled();
+  return perfLogsEnabled() && localStorage.getItem(PERF_QUERY_LOG_ENABLED_KEY) === "1";
 }
 
 function loadQueryMetricRows() {
@@ -363,6 +362,17 @@ function recordQueryMetric(metric) {
   console.debug(
     `[egress] ${entry.scope} ${entry.label}: ${entry.kb}KB ${entry.ms}ms ${entry.rows ?? 0} filas`
   );
+}
+
+function disableTemporaryPerformanceDiagnostics() {
+  try {
+    localStorage.removeItem(PERF_QUERY_LOG_ENABLED_KEY);
+    localStorage.removeItem(PERF_QUERY_METRICS_KEY);
+    localStorage.removeItem(PERF_SYNC_METRICS_KEY);
+    localStorage.removeItem(PERF_SUBSCRIBE_METRICS_KEY);
+  } catch {
+    // Ignore storage restrictions; diagnostics are optional and should never block the UI.
+  }
 }
 
 function summarizeQueryMetrics() {
@@ -2994,12 +3004,7 @@ class StudioStore {
 }
 
 const store = new StudioStore();
-window.__barberEgressReport = () => summarizeQueryMetrics();
-window.__barberEgressReset = () => {
-  localStorage.setItem(PERF_QUERY_LOG_ENABLED_KEY, "1");
-  localStorage.removeItem(PERF_QUERY_METRICS_KEY);
-  return "Medicion de egress reiniciada. Navega por las vistas y ejecuta window.__barberEgressReport().";
-};
+disableTemporaryPerformanceDiagnostics();
 const ADMIN_SESSION_KEY = "barber-delux-admin-session";
 const BARBER_SESSION_KEY = "noxora-barber-session";
 const ADMIN_ACCOUNTS_KEY = "barber-delux-admin-accounts-v1";
@@ -4170,7 +4175,7 @@ function businessThemeStyle(business = currentBusiness()) {
 
 function businessLogoMarkup(business = currentBusiness()) {
   return business?.logoUrl
-    ? `<span class="brand-mark business-logo-mark has-logo"><img src="${escapeHTML(business.logoUrl)}" alt="Logo ${escapeHTML(business.name || "barberia")}" loading="eager" /></span>`
+    ? `<span class="brand-mark business-logo-mark has-logo"><img src="${escapeHTML(business.logoUrl)}" alt="Logo ${escapeHTML(business.name || "barberia")}" loading="eager" decoding="async" fetchpriority="high" /></span>`
     : `<span class="brand-mark business-logo-mark empty-logo">${escapeHTML((business?.name || "B").slice(0, 1).toUpperCase())}</span>`;
 }
 
@@ -5287,7 +5292,7 @@ function renderSuperAdmin() {
               <input name="logo" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" data-business-logo-input="${escapeHTML(business.id)}" />
             </label>
           </div>
-          <div class="super-admin-logo-preview">${business.logoUrl || app.superAdminPendingLogos[business.id] ? `<img src="${escapeHTML(app.superAdminPendingLogos[business.id] || business.logoUrl)}" alt="Logo ${escapeHTML(business.name)}" />` : `<span>Sin logo cargado</span>`}</div>
+          <div class="super-admin-logo-preview">${business.logoUrl || app.superAdminPendingLogos[business.id] ? `<img src="${escapeHTML(app.superAdminPendingLogos[business.id] || business.logoUrl)}" alt="Logo ${escapeHTML(business.name)}" loading="lazy" decoding="async" />` : `<span>Sin logo cargado</span>`}</div>
           <label class="toggle-line"><input name="active" type="checkbox" ${business.active ? "checked" : ""} /> Negocio activo</label>
           <div class="button-row">
             <button class="primary-action">Guardar negocio</button>
@@ -5349,7 +5354,7 @@ function renderSuperAdmin() {
           <label class="file-control">Adjuntar Entorno<input name="environmentArchive" type="file" accept=".zip,.rar,application/zip,application/vnd.rar,application/x-rar-compressed" data-business-environment-input="create" /></label>
           <label>Administrador principal<input name="adminName" required placeholder="Nombre administrador" /></label>
         </div>
-        <div class="super-admin-logo-preview">${app.superAdminPendingLogos.create ? `<img src="${escapeHTML(app.superAdminPendingLogos.create)}" alt="Vista previa logo" />` : `<span>Vista previa del logo</span>`}</div>
+        <div class="super-admin-logo-preview">${app.superAdminPendingLogos.create ? `<img src="${escapeHTML(app.superAdminPendingLogos.create)}" alt="Vista previa logo" loading="lazy" decoding="async" />` : `<span>Vista previa del logo</span>`}</div>
         <div class="super-admin-environment-preview">${app.superAdminPendingEnvironmentArchives.create ? `<strong>${escapeHTML(app.superAdminPendingEnvironmentArchives.create.fileName)}</strong><span>${escapeHTML(summarizeEnvironmentAttachment(app.superAdminPendingEnvironmentArchives.create))}</span>` : `<span>Si no adjuntas entorno, la barberia usara la plantilla base dinamica.</span>`}</div>
         <p class="microcopy">El usuario administrador inicial se crea automaticamente como <strong>Desarrollo</strong> y el sistema genera una clave temporal segura.</p>
         <label class="toggle-line"><input name="active" type="checkbox" checked /> Negocio activo</label>
@@ -5485,175 +5490,6 @@ function renderSuperAdminV2() {
       </div>`
     : "";
 
-  const diagnostics = buildPerformanceDiagnostics();
-  const metricValue = (value, suffix = "ms") => `${Number(value || 0).toLocaleString("es-CO")}${suffix}`;
-  const diagnosticsPanel = `<section class="admin-main performance-diagnostics">
-    <div class="section-title"><span>D</span><h2>Diagnostico de rendimiento</h2></div>
-    <p class="microcopy">Medicion temporal visible solo para Super Admin. Registra consultas Supabase, KB aproximados y tiempos por vista.</p>
-    <div class="dashboard-cards diagnostics-winners">
-      <div><span>Vista mas lenta</span><strong>${escapeHTML(diagnostics.slowest?.view || "Sin datos")}</strong><small>${metricValue(diagnostics.slowest?.ms)}</small></div>
-      <div><span>Mas consultas</span><strong>${escapeHTML(diagnostics.mostQueries?.view || "Sin datos")}</strong><small>${metricValue(diagnostics.mostQueries?.queries, "")} consultas</small></div>
-      <div><span>Mas KB descargados</span><strong>${escapeHTML(diagnostics.mostKb?.view || "Sin datos")}</strong><small>${metricValue(diagnostics.mostKb?.kb, " KB")}</small></div>
-    </div>
-    <div class="diagnostics-table-wrap">
-      <table class="diagnostics-table">
-        <thead>
-          <tr>
-            <th>Vista</th>
-            <th>Consultas</th>
-            <th>KB</th>
-            <th>Total</th>
-            <th>Negocio</th>
-            <th>Tema</th>
-            <th>Logo</th>
-            <th>Servicios</th>
-            <th>Barberos</th>
-            <th>Reservas</th>
-            <th>Admins</th>
-            <th>Agenda</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${diagnostics.rows
-            .map(
-              (row) => `<tr>
-                <td>${escapeHTML(row.view)}</td>
-                <td>${row.queries}</td>
-                <td>${metricValue(row.kb, " KB")}</td>
-                <td>${metricValue(row.ms)}</td>
-                <td>${metricValue(row.businessMs)}</td>
-                <td>${metricValue(row.themeMs)}</td>
-                <td>${metricValue(row.logoMs)}</td>
-                <td>${metricValue(row.servicesMs)}</td>
-                <td>${metricValue(row.barbersMs)}</td>
-                <td>${metricValue(row.appointmentsMs)}</td>
-                <td>${metricValue(row.adminsMs)}</td>
-                <td>${metricValue(row.agendaMs)}</td>
-              </tr>`
-            )
-            .join("")}
-        </tbody>
-      </table>
-    </div>
-    <div class="section-title compact-title"><span>Q</span><h2>Consultas repetidas</h2></div>
-    <div class="diagnostics-table-wrap">
-      <table class="diagnostics-table compact-diagnostics-table">
-        <thead>
-          <tr>
-            <th>Vista</th>
-            <th>Consulta exacta</th>
-            <th>Componente/hook</th>
-            <th>Motivo</th>
-            <th>Fuente</th>
-            <th>Ejecuciones</th>
-            <th>KB</th>
-            <th>Tiempo total</th>
-            <th>Promedio</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${
-            diagnostics.queryRows.length
-              ? diagnostics.queryRows
-                  .slice(0, 18)
-                  .map(
-                    (row) => `<tr>
-                      <td>${escapeHTML(row.view)}</td>
-                      <td>${escapeHTML(row.label)}</td>
-                      <td>${escapeHTML(row.component)}</td>
-                      <td>${escapeHTML(row.reason)}</td>
-                      <td>${escapeHTML(row.source)}</td>
-                      <td>${row.executions}</td>
-                      <td>${metricValue(row.kb, " KB")}</td>
-                      <td>${metricValue(row.totalMs)}</td>
-                      <td>${metricValue(row.avgMs)}</td>
-                    </tr>`
-                  )
-                  .join("")
-              : `<tr><td colspan="9">Aun no hay consultas registradas.</td></tr>`
-          }
-        </tbody>
-      </table>
-    </div>
-    <div class="section-title compact-title"><span>S</span><h2>Ejecuciones de syncFromRemote</h2></div>
-    <div class="diagnostics-table-wrap">
-      <table class="diagnostics-table compact-diagnostics-table">
-        <thead>
-          <tr>
-            <th>Timestamp</th>
-            <th>Business ID</th>
-            <th>Origen</th>
-            <th>Componente</th>
-            <th>Hook</th>
-            <th>Force</th>
-            <th>Stack simplificado</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${
-            diagnostics.syncRows.length
-              ? diagnostics.syncRows
-                  .slice(0, 20)
-                  .map(
-                    (row) => `<tr>
-                      <td>${escapeHTML(new Date(row.at).toLocaleTimeString("es-CO"))}</td>
-                      <td>${escapeHTML(row.businessId || "global")}</td>
-                      <td>${escapeHTML(row.origin || "")}</td>
-                      <td>${escapeHTML(row.component || "")}</td>
-                      <td>${escapeHTML(row.hook || "")}</td>
-                      <td>${row.force ? "Si" : "No"}</td>
-                      <td>${escapeHTML(row.stack || "")}</td>
-                    </tr>`
-                  )
-                  .join("")
-              : `<tr><td colspan="7">Aun no hay ejecuciones registradas.</td></tr>`
-          }
-        </tbody>
-      </table>
-    </div>
-    <div class="section-title compact-title"><span>R</span><h2>Suscripciones Realtime</h2></div>
-    <div class="diagnostics-table-wrap">
-      <table class="diagnostics-table compact-diagnostics-table">
-        <thead>
-          <tr>
-            <th>Timestamp</th>
-            <th>Accion</th>
-            <th>Scope</th>
-            <th>Business ID</th>
-            <th>Cargado</th>
-            <th>Contador</th>
-            <th>Stack simplificado</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${
-            diagnostics.subscribeRows.length
-              ? diagnostics.subscribeRows
-                  .slice(0, 20)
-                  .map(
-                    (row) => `<tr>
-                      <td>${escapeHTML(new Date(row.at).toLocaleTimeString("es-CO"))}</td>
-                      <td>${escapeHTML(row.action || "")}</td>
-                      <td>${escapeHTML(row.scope || "")}</td>
-                      <td>${escapeHTML(row.businessId || "global")}</td>
-                      <td>${row.loaded ? "Si" : "No"}</td>
-                      <td>${row.count || 0}</td>
-                      <td>${escapeHTML(row.stack || "")}</td>
-                    </tr>`
-                  )
-                  .join("")
-              : `<tr><td colspan="7">Aun no hay suscripciones registradas.</td></tr>`
-          }
-        </tbody>
-      </table>
-    </div>
-    <div class="button-row">
-      <button class="secondary-action" type="button" data-refresh-performance-metrics>Actualizar metricas</button>
-      <button class="secondary-action danger" type="button" data-reset-performance-metrics>Reiniciar medicion</button>
-    </div>
-    <p class="microcopy">Ultima lectura local: ${escapeHTML(diagnostics.measuredAt)}. Los KB son estimados desde las respuestas JSON recibidas por el navegador.</p>
-  </section>`;
-
   const businessCards = businesses
     .map((business) => {
       const urls = businessUrlSet(business);
@@ -5698,7 +5534,7 @@ function renderSuperAdminV2() {
           <button class="super-business-summary__trigger" type="button" data-toggle-super-business="${escapeHTML(business.id)}" aria-expanded="${isOpen ? "true" : "false"}">
           <div class="super-business-summary__brand">
             <div class="super-business-summary__logo">
-              ${business.logoUrl || app.superAdminPendingLogos[business.id] ? `<img src="${escapeHTML(app.superAdminPendingLogos[business.id] || business.logoUrl)}" alt="Logo ${escapeHTML(business.name)}" />` : `<span>${escapeHTML((business.name || "B").slice(0, 1).toUpperCase())}</span>`}
+              ${business.logoUrl || app.superAdminPendingLogos[business.id] ? `<img src="${escapeHTML(app.superAdminPendingLogos[business.id] || business.logoUrl)}" alt="Logo ${escapeHTML(business.name)}" loading="lazy" decoding="async" />` : `<span>${escapeHTML((business.name || "B").slice(0, 1).toUpperCase())}</span>`}
             </div>
             <div class="super-business-summary__copy">
               <h3>${escapeHTML(business.name)}</h3>
@@ -5740,7 +5576,7 @@ function renderSuperAdminV2() {
                 <input name="logo" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" data-business-logo-input="${escapeHTML(business.id)}" />
               </label>
             </div>
-            <div class="super-admin-logo-preview">${business.logoUrl || app.superAdminPendingLogos[business.id] ? `<img src="${escapeHTML(app.superAdminPendingLogos[business.id] || business.logoUrl)}" alt="Logo ${escapeHTML(business.name)}" />` : `<span>Sin logo cargado</span>`}</div>
+            <div class="super-admin-logo-preview">${business.logoUrl || app.superAdminPendingLogos[business.id] ? `<img src="${escapeHTML(app.superAdminPendingLogos[business.id] || business.logoUrl)}" alt="Logo ${escapeHTML(business.name)}" loading="lazy" decoding="async" />` : `<span>Sin logo cargado</span>`}</div>
             <label class="toggle-line"><input name="active" type="checkbox" ${business.active ? "checked" : ""} /> Negocio activo</label>
             <div class="button-row">
               <button class="primary-action">Guardar negocio</button>
@@ -5803,7 +5639,7 @@ function renderSuperAdminV2() {
           <label class="file-control">Adjuntar Entorno<input name="environmentArchive" type="file" accept=".zip,.rar,application/zip,application/vnd.rar,application/x-rar-compressed" data-business-environment-input="create" /></label>
           <label>Administrador principal<input name="adminName" required placeholder="Nombre administrador" /></label>
         </div>
-        <div class="super-admin-logo-preview">${app.superAdminPendingLogos.create ? `<img src="${escapeHTML(app.superAdminPendingLogos.create)}" alt="Vista previa logo" />` : `<span>Vista previa del logo</span>`}</div>
+        <div class="super-admin-logo-preview">${app.superAdminPendingLogos.create ? `<img src="${escapeHTML(app.superAdminPendingLogos.create)}" alt="Vista previa logo" loading="lazy" decoding="async" />` : `<span>Vista previa del logo</span>`}</div>
         <div class="super-admin-environment-preview">${app.superAdminPendingEnvironmentArchives.create ? `<strong>${escapeHTML(app.superAdminPendingEnvironmentArchives.create.fileName)}</strong><span>${escapeHTML(summarizeEnvironmentAttachment(app.superAdminPendingEnvironmentArchives.create))}</span>` : `<span>Si no adjuntas entorno, la barberia usara la plantilla base dinamica.</span>`}</div>
         <p class="microcopy">El usuario administrador inicial se crea automaticamente como <strong>Desarrollo</strong> y el sistema genera una clave temporal segura.</p>
         <label class="toggle-line"><input name="active" type="checkbox" checked /> Negocio activo</label>
@@ -5872,7 +5708,6 @@ function renderSuperAdminV2() {
           <div><span>URL base</span><strong>/barberia/:slug</strong></div>
         </div>
       </section>
-      ${diagnosticsPanel}
       <section class="admin-main">
         <div class="section-title"><span>+</span><h2>Nuevo negocio</h2></div>
         ${createBusinessPanel}
@@ -6456,7 +6291,6 @@ function render() {
   }
   applyDeviceProfile();
   applyVisualRouteState();
-  store.subscribeRemote();
   const views = {
     public: renderPublic,
     admin: renderAdminV2,
@@ -6476,6 +6310,11 @@ function render() {
   if (root.dataset.chromeBound !== "true") {
     bindChromeEvents();
     root.dataset.chromeBound = "true";
+  }
+  const remoteScopeKey = store.currentRuntimeScopeKey(app.route);
+  if (root.dataset.remoteScopeKey !== remoteScopeKey || !store.remoteSubscriptionScopeKey) {
+    store.subscribeRemote();
+    root.dataset.remoteScopeKey = remoteScopeKey;
   }
   refreshPersistentShellBrand();
   document.querySelectorAll(".nav-tabs [data-view]").forEach((button) => {
@@ -6545,21 +6384,6 @@ function bindChromeEvents() {
         app.superAdminDeleting = false;
         scheduleRender();
         return;
-      }
-      if (event.target.closest?.("[data-refresh-performance-metrics]")) {
-        event.preventDefault();
-        scheduleRender();
-        return;
-      }
-      if (event.target.closest?.("[data-reset-performance-metrics]")) {
-        event.preventDefault();
-        localStorage.setItem(PERF_QUERY_LOG_ENABLED_KEY, "1");
-        localStorage.removeItem(PERF_QUERY_METRICS_KEY);
-        localStorage.removeItem(PERF_SYNC_METRICS_KEY);
-        localStorage.removeItem(PERF_SUBSCRIBE_METRICS_KEY);
-        store.invalidateRemoteCache();
-        app.superAdminMessage = "Medicion de rendimiento reiniciada. Navega por las vistas para recolectar nuevos datos.";
-        scheduleRender();
       }
     }, { capture: true });
 
