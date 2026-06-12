@@ -1521,6 +1521,7 @@ class StudioStore {
     this.remoteStateCache = new Map();
     this.businessRowsCache = new Map();
     this.adminAccountsCache = new Map();
+    this.sessionStableBusinessCacheById = new Map();
     this.lastRemoteSyncByKey = new Map();
     this.applyingRemote = false;
     this.dailyResetPending = false;
@@ -1598,9 +1599,26 @@ class StudioStore {
     this.emit(event);
     this.channel?.postMessage(event);
     if (this.supabase && !this.applyingRemote) {
-      this.persistRemote(event).catch((error) => {
-        console.error("Supabase sync failed", error);
-      });
+      this.persistRemote(event)
+        .then(() => {
+          if (
+            changedBusinessId &&
+            ["business_settings", "barbers", "services", "barber_services"].includes(event.table)
+          ) {
+            this.invalidateStableBusinessCache(changedBusinessId);
+            this.invalidateRemoteCache(changedBusinessId);
+            this.queueRemoteSync({
+              quiet: true,
+              force: true,
+              origin: `persist:${event.table}`,
+              component: "StudioStore",
+              hook: "persist",
+            });
+          }
+        })
+        .catch((error) => {
+          console.error("Supabase sync failed", error);
+        });
     }
   }
 
@@ -1670,7 +1688,7 @@ class StudioStore {
   }
 
   stableBusinessCacheEntry(businessId) {
-    return this.stableBusinessCacheMap()[businessId] || null;
+    return this.sessionStableBusinessCacheById.get(businessId) || null;
   }
 
   hasFreshStableBusinessData(businessId, { needsFull = false } = {}) {
@@ -1686,23 +1704,23 @@ class StudioStore {
     if (!businessId) return state;
     const previous = this.stableBusinessCacheEntry(businessId);
     const previousFull = typeof previous === "object" ? Boolean(previous.full) : false;
+    this.sessionStableBusinessCacheById.set(businessId, {
+      at: Date.now(),
+      full: previousFull || full,
+    });
     return {
       ...state,
       meta: {
         ...(state.meta || {}),
-        stableBusinessCacheById: {
-          ...(state.meta?.stableBusinessCacheById || {}),
-          [businessId]: {
-            at: Date.now(),
-            full: previousFull || full,
-          },
-        },
+        stableBusinessCacheById: {},
       },
     };
   }
 
   invalidateStableBusinessCache(businessId = "") {
-    if (!businessId || !this.state?.meta?.stableBusinessCacheById) return;
+    if (!businessId) return;
+    this.sessionStableBusinessCacheById.delete(businessId);
+    if (!this.state?.meta?.stableBusinessCacheById) return;
     const nextCache = { ...this.state.meta.stableBusinessCacheById };
     delete nextCache[businessId];
     this.state = {
@@ -1819,9 +1837,18 @@ class StudioStore {
         localStorage.setItem(APP_KEY, JSON.stringify(this.state));
         invalidateDerivedBusinessCache();
         this.invalidateBusinessBuckets();
+        this.invalidateStableBusinessCache(business.id);
+        this.invalidateRemoteCache(business.id);
         const result = { status: "success", business, checkedAt: Date.now() };
         this.businessResolutionBySlug.set(normalizedSlug, result);
         this.emit({ type: "BUSINESS_RESOLVED", table: "businesses", businessId: business.id });
+        this.queueRemoteSync({
+          quiet: true,
+          force: true,
+          origin: "resolve-business-by-slug",
+          component: "StudioStore",
+          hook: "resolveBusinessBySlug",
+        });
         return result;
       })
       .catch((error) => {
