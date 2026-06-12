@@ -1874,6 +1874,9 @@ class StudioStore {
     this.remoteLoadedScopes.add(syncScopeKey);
     this.remoteScopeLoadRequestedAt.delete(syncScopeKey);
     this.remoteReady = true;
+    if (typeof scheduleRender === "function" && document.visibilityState === "visible") {
+      scheduleRender();
+    }
     if (!quiet) {
       this.emit({ type: "SYNC", table: reason });
       this.channel?.postMessage({ type: "SYNC", table: reason });
@@ -2253,6 +2256,18 @@ class StudioStore {
         ? stableBucket.barberServices
         : (barberServicesResult.error ? [] : (barberServicesResult.data || []).map(mapRowToBarberService));
       const scopedBusinessSettingsRows = businessSettingsResult.fromStableCache || businessSettingsResult.error ? [] : businessSettingsResult.data || [];
+      if (route.view !== "super-admin") {
+        console.info("[BusinessDataHydration]", {
+          view: route.view,
+          slug: route.businessSlug,
+          businessId: scopedBusinessId,
+          receivedBarbers: barbersData.length,
+          receivedServices: servicesData.length,
+          receivedBarberServices: barberServicesData.length,
+          barbersError: barbersResult.error?.message || "",
+          servicesError: servicesResult.error?.message || "",
+        });
+      }
       const scopedBusinessList = mergedBusinesses.length
         ? mergedBusinesses
         : isPlaceholderBusiness(scopedBusiness)
@@ -4901,6 +4916,12 @@ function renderPublic() {
   const businessId = business.id;
   const publicServices = activeServicesForBusiness(businessId);
   const activeBarbers = app.selectedServiceId ? barbersForService(app.selectedServiceId) : store.activeBarbersByBusiness(businessId);
+  console.info("[BusinessRenderPublic]", {
+    slug: app.currentBusinessSlug,
+    businessId,
+    servicesUsedForRender: publicServices.length,
+    barbersUsedForRender: store.activeBarbersByBusiness(businessId).length,
+  });
   const businessHasNoServices = !businessDataLoading && publicServices.length === 0;
   const businessHasNoBarbers = !businessDataLoading && store.activeBarbersByBusiness(businessId).length === 0;
   const selected = activeBarbers.find((barber) => barber.id === app.selectedBarberId) || null;
@@ -6216,6 +6237,12 @@ function renderAdminV2() {
 
   const selected = barberById(app.adminBarberId);
   const businessBarbers = [...barbersForBusiness(currentBusinessId())].sort((a, b) => a.name.localeCompare(b.name, "es"));
+  console.info("[BusinessRenderAdmin]", {
+    slug: app.currentBusinessSlug,
+    businessId: currentBusinessId(),
+    barbersUsedForRender: businessBarbers.length,
+    servicesUsedForRender: servicesForBusiness(currentBusinessId()).length,
+  });
   const counterSummary = buildCounterSummary(app.selectedDate);
   const selectedRecords = app.adminSelectedSlots
     .map((time) => selected && store.getAppointment(selected.id, app.selectedDate, time))
