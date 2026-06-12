@@ -1651,7 +1651,7 @@ class StudioStore {
   scopedBusinessIdForRoute(route = resolveRoute(location.pathname)) {
     if (route.view === "super-admin") return null;
     if (route.businessSlug === DEFAULT_BUSINESS_SLUG) return DEFAULT_BUSINESS_ID;
-    return this.businessBySlug(route.businessSlug)?.id || placeholderBusinessForSlug(route.businessSlug).id;
+    return this.businessBySlug(route.businessSlug)?.id || null;
   }
 
   stateWithRuntimeScope(state = this.state, route = resolveRoute(location.pathname)) {
@@ -1960,7 +1960,8 @@ class StudioStore {
       const earlyScopeKey = this.currentRuntimeScopeKey(route);
       const duplicateGuardKey = `${earlyScopeKey}:${earlyDataRangeKey}`;
       const lastSyncAt = this.lastRemoteSyncByKey.get(duplicateGuardKey) || 0;
-      const earlyCachedState = !force
+      const canUseRemoteStateCache = route.view === "super-admin";
+      const earlyCachedState = !force && canUseRemoteStateCache
         ? this.getCachedRemoteState(`${earlyScopeKey}:${earlyDataRangeKey}`, route.view === "super-admin" ? SUPER_ADMIN_CACHE_TTL_MS : REMOTE_SCOPE_CACHE_TTL_MS)
         : null;
       recordSyncMetric({
@@ -2130,13 +2131,6 @@ class StudioStore {
       const isPublicRoute = route.view === "public" || route.view === "business-test";
       const isInternalRoute = route.view === "admin" || route.view === "barber";
       const dataRangeKey = isPublicRoute ? publicDate : `${weekStartDate}:${weekEndDate}`;
-      const cacheKey = `${syncScopeKey}:${dataRangeKey}`;
-      const cachedState = !force ? this.getCachedRemoteState(cacheKey, REMOTE_SCOPE_CACHE_TTL_MS) : null;
-      if (cachedState) {
-        this.applyRemoteState(cachedState, syncScopeKey, quiet, "remote-cache");
-        perfEnd(perf, `(${route.view}:${scopedBusinessId || "global"} cache)`);
-        return;
-      }
 
       const queryScoped = (table, orderColumn, ascending = true, tune = null) => {
         if (route.view !== "super-admin" && !scopedBusinessId) {
@@ -2169,9 +2163,13 @@ class StudioStore {
       };
 
       const stableBucket = scopedBusinessId ? getBusinessBucket(scopedBusinessId) : emptyBusinessBucket();
+      const stableBucketHasBusinessData = Boolean(
+        stableBucket.barbers.length || stableBucket.services.length || stableBucket.barberServices.length
+      );
       const canReuseStableBusinessData =
         !force &&
         scopedBusinessId &&
+        stableBucketHasBusinessData &&
         this.hasFreshStableBusinessData(scopedBusinessId, { needsFull: route.view === "admin" });
       const stableQueryResult = { data: null, error: null, fromStableCache: true };
       const scopedDataPerf = perfMark("business scoped data");
@@ -2266,7 +2264,6 @@ class StudioStore {
       };
 
       const stampedState = this.withStableBusinessCacheStamp(nextState, scopedBusinessId, { full: route.view === "admin" });
-      this.setCachedRemoteState(cacheKey, stampedState);
       this.applyRemoteState(stampedState, syncScopeKey, quiet, "remote");
 
       perfEnd(perf, `(${route.view}:${scopedBusinessId || "global"})`);
@@ -3837,13 +3834,16 @@ function ensureCurrentBusinessResolution() {
 }
 
 function currentBusinessId() {
-  return currentBusiness()?.id || null;
+  if (!app.currentBusinessSlug || app.currentBusinessSlug === DEFAULT_BUSINESS_SLUG) {
+    return DEFAULT_BUSINESS_ID;
+  }
+  return requestedBusiness()?.id || null;
 }
 
 function expectedScopeForCurrentRoute() {
   const route = resolveRoute(location.pathname);
   if (route.view === "super-admin") return `super-admin:global:${DEFAULT_BUSINESS_SLUG}`;
-  const business = requestedBusiness() || currentBusiness();
+  const business = route.businessSlug === DEFAULT_BUSINESS_SLUG ? defaultBusiness() : requestedBusiness();
   const scopeView = route.shell === "internal" ? "internal" : route.view;
   return `${scopeView}:${business?.id || "global"}:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
 }
