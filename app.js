@@ -1539,6 +1539,8 @@ class StudioStore {
           return;
         }
         this.state = incomingState;
+        this.invalidateBusinessBuckets();
+        invalidateDerivedBusinessCache();
         this.emit(event.data);
       };
     }
@@ -1553,6 +1555,8 @@ class StudioStore {
           return;
         }
         this.state = incomingState;
+        this.invalidateBusinessBuckets();
+        invalidateDerivedBusinessCache();
         this.emit({ type: "SYNC" });
       }
     });
@@ -1863,6 +1867,8 @@ class StudioStore {
   applyRemoteState(nextState, syncScopeKey, quiet = false, reason = "remote") {
     this.applyingRemote = true;
     this.state = nextState;
+    this.invalidateBusinessBuckets();
+    invalidateDerivedBusinessCache();
     localStorage.setItem(APP_KEY, JSON.stringify(this.state));
     this.remoteLoadedScopeKey = syncScopeKey;
     this.remoteLoadedScopes.add(syncScopeKey);
