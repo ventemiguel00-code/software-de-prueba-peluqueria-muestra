@@ -2163,16 +2163,21 @@ class StudioStore {
           `${route.view}:${scopedBusinessId || "global"}:${dataRangeKey}`,
           buildQuery(selectedColumns)
         );
-        if (
-          !primaryResult.error ||
-          !["barbers", "services", "barber_services"].includes(table)
-        ) {
+        const canFallbackScopedBusinessData =
+          route.view !== "super-admin" && ["barbers", "services", "barber_services"].includes(table);
+        const needsFallback =
+          canFallbackScopedBusinessData &&
+          (primaryResult.error || !(primaryResult.data || []).length);
+        if (!needsFallback) {
           return primaryResult;
         }
+        const fallbackQuery = primaryResult.error
+          ? buildQuery("*", false, false)
+          : this.supabase.from(table).select("*").eq("negocio_id", scopedBusinessId);
         const fallbackResult = await this.trackedQuery(
           `${table}:fallback`,
           `${route.view}:${scopedBusinessId || "global"}:${dataRangeKey}`,
-          buildQuery("*", false, false)
+          fallbackQuery
         );
         if (fallbackResult.error) return primaryResult;
         if ((isPublicRoute || route.view === "barber") && ["barbers", "services"].includes(table)) {
