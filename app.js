@@ -1033,7 +1033,7 @@ function buildBusinessSummaryMapFromRpcRows(businesses = [], rows = []) {
     businesses.map((business) => [business.id, emptyBusinessSummary(business)])
   );
   (rows || []).forEach((row) => {
-    const businessId = row.business_id || row.negocio_id || row.id || "";
+    const businessId = row.business_id || row.id || "";
     if (!businessId) return;
     const business = businesses.find((item) => item.id === businessId) || {
       id: businessId,
@@ -1393,7 +1393,7 @@ function mapBarberServiceToRow(item) {
 function mapRowToBarber(row, index = 0) {
   return {
     id: row.id,
-    negocioId: row.business_id || row.negocio_id || DEFAULT_BUSINESS_ID,
+    negocioId: row.business_id || DEFAULT_BUSINESS_ID,
     name: row.name || row.nombre || row.nombre_barbero || "",
     user: row.user || row.usuario || "",
     password: row.password || "",
@@ -1410,7 +1410,7 @@ function mapRowToAppointment(row) {
   const parsedMeta = parseAppointmentNotes(row.notes || "");
   return {
     id: row.id,
-    negocioId: row.business_id || row.negocio_id || DEFAULT_BUSINESS_ID,
+    negocioId: row.business_id || DEFAULT_BUSINESS_ID,
     barberId: row.barber_id,
     date: row.date,
     time: row.time,
@@ -1430,7 +1430,7 @@ function mapRowToAppointment(row) {
 function mapRowToBlockedDay(row) {
   return {
     id: row.id,
-    negocioId: row.business_id || row.negocio_id || DEFAULT_BUSINESS_ID,
+    negocioId: row.business_id || DEFAULT_BUSINESS_ID,
     barberId: row.barber_id,
     date: row.date,
   };
@@ -1439,7 +1439,7 @@ function mapRowToBlockedDay(row) {
 function mapRowToService(row) {
   return {
     id: row.id,
-    negocioId: row.business_id || row.negocio_id || DEFAULT_BUSINESS_ID,
+    negocioId: row.business_id || DEFAULT_BUSINESS_ID,
     name: row.service_name || row.nombre_servicio || row.name || row.nombre || "",
     value: Number(row.service_value ?? row.valor_servicio ?? row.value ?? row.valor) || 0,
     adminPercentage: Number(row.admin_percentage ?? row.porcentaje_admin) || 0,
@@ -1451,7 +1451,7 @@ function mapRowToService(row) {
 function mapRowToBarberService(row) {
   return {
     id: row.id,
-    negocioId: row.business_id || row.negocio_id || DEFAULT_BUSINESS_ID,
+    negocioId: row.business_id || DEFAULT_BUSINESS_ID,
     barberId: row.barber_id,
     serviceId: row.service_id,
     active: row.active ?? true,
@@ -2165,19 +2165,14 @@ class StudioStore {
         );
         const canFallbackScopedBusinessData =
           route.view !== "super-admin" && ["barbers", "services", "barber_services"].includes(table);
-        const needsFallback =
-          canFallbackScopedBusinessData &&
-          (primaryResult.error || !(primaryResult.data || []).length);
+        const needsFallback = canFallbackScopedBusinessData && primaryResult.error;
         if (!needsFallback) {
           return primaryResult;
         }
-        const fallbackQuery = primaryResult.error
-          ? buildQuery("*", false, false)
-          : this.supabase.from(table).select("*").eq("negocio_id", scopedBusinessId);
         const fallbackResult = await this.trackedQuery(
           `${table}:fallback`,
           `${route.view}:${scopedBusinessId || "global"}:${dataRangeKey}`,
-          fallbackQuery
+          buildQuery("*", false, false)
         );
         if (fallbackResult.error) return primaryResult;
         if ((isPublicRoute || route.view === "barber") && ["barbers", "services"].includes(table)) {
