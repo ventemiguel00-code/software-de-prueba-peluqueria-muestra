@@ -2224,23 +2224,25 @@ class StudioStore {
       ]);
       perfStep("business scoped data", scopedDataPerf, `(${route.view}:${route.businessSlug || scopedBusinessId || "global"})`);
 
-      if (barbersResult.error) throw barbersResult.error;
-      if (appointmentsBaseResult.error) throw appointmentsBaseResult.error;
-      if (blockedDaysResult.error) throw blockedDaysResult.error;
-      if (servicesResult.error) throw servicesResult.error;
-      if (barberServicesResult.error) throw barberServicesResult.error;
-      if (businessSettingsResult.error && businessSettingsResult.error.code !== "42P01") throw businessSettingsResult.error;
+      if (barbersResult.error) console.warn("Scoped barbers query skipped", barbersResult.error);
+      if (appointmentsBaseResult.error) console.warn("Scoped appointments query skipped", appointmentsBaseResult.error);
+      if (blockedDaysResult.error) console.warn("Scoped blocked days query skipped", blockedDaysResult.error);
+      if (servicesResult.error) console.warn("Scoped services query skipped", servicesResult.error);
+      if (barberServicesResult.error) console.warn("Scoped barber services query skipped", barberServicesResult.error);
+      if (businessSettingsResult.error && businessSettingsResult.error.code !== "42P01") {
+        console.warn("Scoped business settings query skipped", businessSettingsResult.error);
+      }
 
       const appointmentsResult = {
         ...appointmentsBaseResult,
-        data: (appointmentsBaseResult.data || []).sort((a, b) =>
+        data: (appointmentsBaseResult.error ? [] : appointmentsBaseResult.data || []).sort((a, b) =>
           String(a.time || "").localeCompare(String(b.time || ""))
         ),
       };
 
       const barbersData = barbersResult.fromStableCache
         ? stableBucket.barbers
-        : (barbersResult.data || []).map((row, index) => mapRowToBarber(row, index));
+        : (barbersResult.error ? [] : barbersResult.data || []).map((row, index) => mapRowToBarber(row, index));
       const servicesData = servicesResult.fromStableCache
         ? stableBucket.services
         : servicesResult.error
@@ -2249,7 +2251,7 @@ class StudioStore {
       const barberServicesData = barberServicesResult.fromStableCache
         ? stableBucket.barberServices
         : (barberServicesResult.error ? [] : (barberServicesResult.data || []).map(mapRowToBarberService));
-      const scopedBusinessSettingsRows = businessSettingsResult.fromStableCache ? [] : businessSettingsResult.data || [];
+      const scopedBusinessSettingsRows = businessSettingsResult.fromStableCache || businessSettingsResult.error ? [] : businessSettingsResult.data || [];
       const scopedBusinessList = mergedBusinesses.length
         ? mergedBusinesses
         : isPlaceholderBusiness(scopedBusiness)
@@ -2282,7 +2284,7 @@ class StudioStore {
         appointments: (appointmentsResult.data || [])
           .map(mapRowToAppointment)
           .filter((item) => item.status !== "reserved" || item.weekKey === currentWeek),
-        blockedDays: (blockedDaysResult.data || []).map(mapRowToBlockedDay),
+        blockedDays: (blockedDaysResult.error ? [] : blockedDaysResult.data || []).map(mapRowToBlockedDay),
         services: servicesData,
         barberServices: barberServicesData,
       };
