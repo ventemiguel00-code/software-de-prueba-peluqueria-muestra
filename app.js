@@ -1394,15 +1394,15 @@ function mapRowToBarber(row, index = 0) {
   return {
     id: row.id,
     negocioId: row.business_id || row.negocio_id || DEFAULT_BUSINESS_ID,
-    name: row.name || "",
-    user: row.user || "",
+    name: row.name || row.nombre || row.nombre_barbero || "",
+    user: row.user || row.usuario || "",
     password: row.password || "",
     passwordHash: row.password_hash || "",
     whatsapp: row.whatsapp || "",
-    active: row.active ?? true,
-    photo: row.photo || "",
+    active: parseActiveFlag(row.active ?? row.activo, true),
+    photo: row.photo || row.foto || row.fotografia || "",
     gradient: row.gradient || avatarGradients[index % avatarGradients.length],
-    specialty: row.specialty || "Servicio premium",
+    specialty: row.specialty || row.especialidad || "Servicio premium",
   };
 }
 
@@ -1440,11 +1440,11 @@ function mapRowToService(row) {
   return {
     id: row.id,
     negocioId: row.business_id || row.negocio_id || DEFAULT_BUSINESS_ID,
-    name: row.service_name || "",
-    value: Number(row.service_value) || 0,
-    adminPercentage: Number(row.admin_percentage) || 0,
-    barberPercentage: Number(row.barber_percentage) || 0,
-    active: row.active ?? true,
+    name: row.service_name || row.nombre_servicio || row.name || row.nombre || "",
+    value: Number(row.service_value ?? row.valor_servicio ?? row.value ?? row.valor) || 0,
+    adminPercentage: Number(row.admin_percentage ?? row.porcentaje_admin) || 0,
+    barberPercentage: Number(row.barber_percentage ?? row.porcentaje_barbero) || 0,
+    active: parseActiveFlag(row.active ?? row.activo, true),
   };
 }
 
@@ -2132,7 +2132,7 @@ class StudioStore {
       const isInternalRoute = route.view === "admin" || route.view === "barber";
       const dataRangeKey = isPublicRoute ? publicDate : `${weekStartDate}:${weekEndDate}`;
 
-      const queryScoped = (table, orderColumn, ascending = true, tune = null) => {
+      const queryScoped = async (table, orderColumn, ascending = true, tune = null) => {
         if (route.view !== "super-admin" && !scopedBusinessId) {
           return Promise.resolve({ data: [], error: null });
         }
@@ -2148,18 +2148,37 @@ class StudioStore {
         if (!selectedColumns) {
           return Promise.resolve({ data: [], error: new Error(`Columnas no definidas para ${table}`) });
         }
-        let query = this.supabase.from(table).select(selectedColumns);
-        if (route.view !== "super-admin") {
-          query = query.eq("business_id", scopedBusinessId);
-        }
-        if (typeof tune === "function") {
-          query = tune(query);
-        }
-        return this.trackedQuery(
+        const buildQuery = (columns, applyTune = true, applyOrder = true) => {
+          let query = this.supabase.from(table).select(columns);
+          if (route.view !== "super-admin") {
+            query = query.eq("business_id", scopedBusinessId);
+          }
+          if (applyTune && typeof tune === "function") {
+            query = tune(query);
+          }
+          return applyOrder ? query.order(orderColumn, { ascending }) : query;
+        };
+        const primaryResult = await this.trackedQuery(
           table,
           `${route.view}:${scopedBusinessId || "global"}:${dataRangeKey}`,
-          query.order(orderColumn, { ascending })
+          buildQuery(selectedColumns)
         );
+        if (
+          !primaryResult.error ||
+          !["barbers", "services", "barber_services"].includes(table)
+        ) {
+          return primaryResult;
+        }
+        const fallbackResult = await this.trackedQuery(
+          `${table}:fallback`,
+          `${route.view}:${scopedBusinessId || "global"}:${dataRangeKey}`,
+          buildQuery("*", false, false)
+        );
+        if (fallbackResult.error) return primaryResult;
+        if ((isPublicRoute || route.view === "barber") && ["barbers", "services"].includes(table)) {
+          fallbackResult.data = (fallbackResult.data || []).filter((row) => parseActiveFlag(row.active ?? row.activo, true));
+        }
+        return fallbackResult;
       };
 
       const stableBucket = scopedBusinessId ? getBusinessBucket(scopedBusinessId) : emptyBusinessBucket();
