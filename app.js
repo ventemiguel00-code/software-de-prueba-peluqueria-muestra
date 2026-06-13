@@ -1699,7 +1699,7 @@ class StudioStore {
     if (!businessId) return false;
     const entry = this.stableBusinessCacheEntry(businessId);
     const cachedAt = Number(typeof entry === "object" ? entry.at : entry || 0);
-    const hasFullData = typeof entry === "object" ? Boolean(entry.full) : false;
+    const hasFullData = entry && typeof entry === "object" ? Boolean(entry.full) : false;
     if (needsFull && !hasFullData) return false;
     return Boolean(cachedAt && Date.now() - cachedAt < STABLE_BUSINESS_CACHE_TTL_MS);
   }
@@ -1707,7 +1707,7 @@ class StudioStore {
   withStableBusinessCacheStamp(state, businessId, { full = false } = {}) {
     if (!businessId) return state;
     const previous = this.stableBusinessCacheEntry(businessId);
-    const previousFull = typeof previous === "object" ? Boolean(previous.full) : false;
+    const previousFull = previous && typeof previous === "object" ? Boolean(previous.full) : false;
     this.sessionStableBusinessCacheById.set(businessId, {
       at: Date.now(),
       full: previousFull || full,
@@ -2305,7 +2305,12 @@ class StudioStore {
         barberServices: barberServicesData,
       };
 
-      const stampedState = this.withStableBusinessCacheStamp(nextState, scopedBusinessId, { full: route.view === "admin" });
+      let stampedState = nextState;
+      try {
+        stampedState = this.withStableBusinessCacheStamp(nextState, scopedBusinessId, { full: route.view === "admin" });
+      } catch (cacheError) {
+        console.warn("Stable business cache stamp skipped", cacheError);
+      }
       this.applyRemoteState(stampedState, syncScopeKey, quiet, "remote");
 
       perfEnd(perf, `(${route.view}:${scopedBusinessId || "global"})`);
