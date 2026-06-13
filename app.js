@@ -3324,6 +3324,7 @@ class StudioStore {
   }
 }
 
+let app = null;
 const store = new StudioStore();
 disableTemporaryPerformanceDiagnostics();
 const ADMIN_SESSION_KEY = "barber-delux-admin-session";
@@ -3881,7 +3882,7 @@ function ensureCurrentBusinessResolution() {
 }
 
 function currentBusinessId() {
-  if (!app.currentBusinessSlug || app.currentBusinessSlug === DEFAULT_BUSINESS_SLUG) {
+  if (!app?.currentBusinessSlug || app.currentBusinessSlug === DEFAULT_BUSINESS_SLUG) {
     return DEFAULT_BUSINESS_ID;
   }
   return requestedBusiness()?.id || null;
@@ -4227,7 +4228,7 @@ function loadSoundPreference() {
 
 const initialRoute = resolveRoute(location.pathname);
 
-const app = {
+app = {
   route: initialRoute,
   view: initialRoute.view,
   currentBusinessSlug: initialRoute.businessSlug,

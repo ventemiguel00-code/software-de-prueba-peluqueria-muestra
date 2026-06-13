@@ -35,7 +35,18 @@ const supabaseRest = async (path, params = {}) => {
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(text || `Supabase REST ${response.status}`);
+    let body = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = null;
+    }
+    const message = body?.message || text || `Supabase REST ${response.status}`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.code = body?.code || "";
+    error.details = body?.details || "";
+    throw error;
   }
   return response.json();
 };
@@ -84,14 +95,18 @@ module.exports = async function handler(req, res) {
     }
 
     const business = await firstBySlug(businessSlug);
-    if (!business || business.active === false) {
-      json(res, 403, { ok: false, error: "Negocio no disponible." });
+    if (!business) {
+      json(res, 404, { ok: false, error: "Negocio no encontrado." });
+      return;
+    }
+    if (business.active === false) {
+      json(res, 403, { ok: false, error: "Negocio inactivo." });
       return;
     }
 
     if (role === "admin") {
       const accounts = await supabaseRest("admin_accounts", {
-        select: "id,business_id,admin_name,admin_user,password_hash,password,role,active",
+        select: "id,business_id,admin_name,admin_user,password_hash,role,active",
         business_id: `eq.${business.id}`,
         admin_user: `eq.${user}`,
         active: "eq.true",
@@ -139,6 +154,16 @@ module.exports = async function handler(req, res) {
       },
     });
   } catch (error) {
-    json(res, 500, { ok: false, fallback: true, error: error.message || "Error de autenticacion." });
+    if (error instanceof SyntaxError) {
+      json(res, 400, { ok: false, error: "JSON invalido." });
+      return;
+    }
+    const status = Number(error.status) || 500;
+    if (status >= 400 && status < 500) {
+      json(res, status, { ok: false, error: error.message || "Solicitud de autenticacion invalida." });
+      return;
+    }
+    console.error("auth-login unexpected error", error);
+    json(res, 500, { ok: false, fallback: true, error: "Error interno de autenticacion." });
   }
 };
