@@ -2967,3 +2967,28 @@ textarea:focus {
   }
 }
 
+body[data-device="mobile"] .topbar,
+body[data-device="mobile"] .booking-surface,
+body[data-device="mobile"] .checkout,
+body[data-device="mobile"] .login-panel,
+body[data-device="mobile"] .barber-board,
+body[data-device="mobile"] .admin-main,
+body[data-device="mobile"] .super-business-card,
+body[data-device="mobile"] .super-business-panel,
+body[data-device="mobile"] .editor-card,
+body[data-device="mobile"] .service-card,
+body[data-device="mobile"] .barber-card,
+body[data-device="mobile"] .slot-row,
+body[data-device="mobile"] .modal {
+  backdrop-filter: none !important;
+  box-shadow: var(--inner-light) !important;
+}
+
+body[data-device="mobile"] *,
+body[data-device="mobile"] *::before,
+body[data-device="mobile"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+}
+

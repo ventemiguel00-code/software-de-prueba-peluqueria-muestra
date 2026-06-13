@@ -76,7 +76,7 @@ const avatarGradients = [
   "linear-gradient(145deg, #324044, #f1f5f4)",
   "linear-gradient(145deg, #0b1519, #8ca2a7)",
 ];
-const DEFAULT_BUSINESS_THEME_KEY = "gold-prestige";
+const DEFAULT_BUSINESS_THEME_KEY = "urban-neon";
 const BUSINESS_THEME_ALIASES = {
   gold_black: "gold-prestige",
   blue_black: "urban-neon",
@@ -102,6 +102,8 @@ const LOADING_BUSINESS_PALETTE = {
   icon: "#9EDDFB",
   badge: "#9EDDFB",
 };
+const themeMemoryCache = new Map();
+let lastAppliedThemeSignature = "";
 const BUSINESS_THEMES = {
   "gold-prestige": {
     label: "Gold Prestige",
@@ -706,15 +708,26 @@ function defaultBusiness() {
 
 function cachedThemeForSlug(slug = "") {
   const cleanSlug = slugify(slug) || DEFAULT_BUSINESS_SLUG;
+  const memoryTheme = themeMemoryCache.get(cleanSlug);
+  if (memoryTheme?.theme && memoryTheme?.colors) return memoryTheme;
   try {
     const cached = JSON.parse(localStorage.getItem(`${THEME_CACHE_PREFIX}${cleanSlug}`) || "null");
     const theme = cached?.theme && BUSINESS_THEMES[cached.theme] ? cached.theme : "";
     const colors = cached?.colors && typeof cached.colors === "object" ? cached.colors : null;
     if (!theme || !colors) return null;
-    return { theme, colors };
+    const themeRecord = { theme, colors, businessId: cached.businessId || "", updatedAt: cached.updatedAt || "" };
+    themeMemoryCache.set(cleanSlug, themeRecord);
+    if (themeRecord.businessId) themeMemoryCache.set(themeRecord.businessId, themeRecord);
+    return themeRecord;
   } catch {
     return null;
   }
+}
+
+function cachedThemeForBusiness(business = {}) {
+  const businessId = String(business?.id || "").trim();
+  const slug = slugify(business?.slug || "");
+  return (businessId && themeMemoryCache.get(businessId)) || (slug && cachedThemeForSlug(slug)) || null;
 }
 
 function placeholderBusinessForSlug(slug = "") {
@@ -852,6 +865,10 @@ function paletteForTheme(themeKey = DEFAULT_BUSINESS_THEME_KEY) {
 }
 
 function colorsForBusiness(business = currentBusiness()) {
+  const cachedTheme = cachedThemeForBusiness(business);
+  if (cachedTheme?.colors && normalizeThemeKey(business?.theme || cachedTheme.theme) === cachedTheme.theme) {
+    return cachedTheme.colors;
+  }
   const palette = paletteForTheme(business?.theme || DEFAULT_BUSINESS_THEME_KEY);
   return {
     primary: business?.primaryColor || palette.primary,
@@ -871,6 +888,23 @@ function colorsForBusiness(business = currentBusiness()) {
 }
 
 function applyThemeColorsToRoot(colors) {
+  const signature = [
+    colors.primary,
+    colors.secondary,
+    colors.background,
+    colors.card,
+    colors.text,
+    colors.textSecondary,
+    colors.title,
+    colors.subtitle,
+    colors.button,
+    colors.buttonHover,
+    colors.border,
+    colors.icon,
+    colors.badge,
+  ].join("|");
+  if (signature === lastAppliedThemeSignature) return;
+  lastAppliedThemeSignature = signature;
   const rootStyle = document.documentElement.style;
   rootStyle.setProperty("--color-primary", colors.primary);
   rootStyle.setProperty("--color-secondary", colors.secondary);
@@ -904,11 +938,30 @@ function cacheBusinessTheme(business) {
   if (!business?.slug) return;
   const theme = normalizeThemeKey(business.theme || "loading-neutral");
   if (theme === "loading-neutral") return;
-  const colors = colorsForBusiness(business);
+  const palette = paletteForTheme(theme);
+  const colors = {
+    primary: business?.primaryColor || palette.primary,
+    secondary: business?.secondaryColor || palette.secondary,
+    background: business?.backgroundColor || palette.background,
+    card: business?.cardColor || palette.card,
+    text: business?.textColor || palette.text,
+    textSecondary: business?.textSecondaryColor || palette.textSecondary,
+    title: business?.titleColor || palette.title,
+    subtitle: business?.subtitleColor || palette.subtitle,
+    button: business?.buttonColor || palette.button,
+    buttonHover: business?.buttonHoverColor || palette.buttonHover,
+    border: business?.borderColor || palette.border,
+    icon: business?.iconColor || palette.icon,
+    badge: business?.badgeColor || palette.badge,
+  };
+  const themeRecord = { theme, colors, businessId: business.id || "", updatedAt: new Date().toISOString() };
+  const cleanSlug = slugify(business.slug);
+  if (cleanSlug) themeMemoryCache.set(cleanSlug, themeRecord);
+  if (business.id) themeMemoryCache.set(business.id, themeRecord);
   try {
     localStorage.setItem(
       `${THEME_CACHE_PREFIX}${business.slug}`,
-      JSON.stringify({ theme, colors, businessId: business.id || "", updatedAt: new Date().toISOString() })
+      JSON.stringify(themeRecord)
     );
   } catch {
     // Cache visual solamente; si falla, la app sigue usando Supabase/local state.
@@ -3339,6 +3392,7 @@ const BACKGROUND_MEDIA_KEY = "barber-delux-background-media-v1";
 const BACKGROUND_MEDIA_BY_BUSINESS_KEY = "barber-delux-background-media-by-business-v1";
 const MULTITENANT_SECONDARY_PURGE_KEY = "barber-delux-secondary-business-purge-v1";
 const SOUND_PREF_KEY = "barber-delux-sound-enabled";
+const DEVICE_ID_KEY = "barber-delux-device-id-v1";
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const SESSION_IDLE_TTL_MS = 45 * 60 * 1000;
 const SESSION_HEARTBEAT_MS = 60 * 1000;
@@ -3470,6 +3524,69 @@ function readStoredJSON(storage, key) {
   }
 }
 
+function randomSessionToken(prefix = "session") {
+  if (window.crypto?.randomUUID) return `${prefix}_${window.crypto.randomUUID()}`;
+  const random = window.crypto?.getRandomValues
+    ? [...window.crypto.getRandomValues(new Uint32Array(4))].map((value) => value.toString(16)).join("")
+    : Math.random().toString(16).slice(2);
+  return `${prefix}_${Date.now().toString(36)}_${random}`;
+}
+
+function persistentStorage() {
+  return window.localStorage;
+}
+
+function getDeviceId() {
+  try {
+    const storage = persistentStorage();
+    const existing = storage.getItem(DEVICE_ID_KEY);
+    if (existing) return existing;
+    const nextDeviceId = randomSessionToken("device");
+    storage.setItem(DEVICE_ID_KEY, nextDeviceId);
+    return nextDeviceId;
+  } catch {
+    return "device_unavailable";
+  }
+}
+
+function normalizePersistentSession(session, context = {}) {
+  if (!session) return null;
+  const role = context.role || session.role || "session";
+  const businessSlug = context.businessSlug || session.businessSlug || DEFAULT_BUSINESS_SLUG;
+  const businessId = context.businessId || session.businessId || "";
+  const now = new Date().toISOString();
+  return {
+    ...session,
+    role,
+    businessSlug,
+    businessId,
+    token: session.token || randomSessionToken(role),
+    deviceId: session.deviceId || getDeviceId(),
+    startedAt: session.startedAt || now,
+    lastSeenAt: session.lastSeenAt || now,
+    fingerprint: buildSessionFingerprint(role, businessSlug, businessId),
+  };
+}
+
+function loadSuperAdminSession() {
+  const stored = readStoredJSON(localStorage, SUPER_ADMIN_SESSION_KEY) || readStoredJSON(sessionStorage, SUPER_ADMIN_SESSION_KEY);
+  const normalized = normalizePersistentSession(stored, { role: "super_admin", businessSlug: DEFAULT_BUSINESS_SLUG });
+  if (normalized) saveSuperAdminSession(normalized);
+  return normalized;
+}
+
+function saveSuperAdminSession(session) {
+  if (!session) return;
+  const normalized = normalizePersistentSession(session, { role: "super_admin", businessSlug: DEFAULT_BUSINESS_SLUG });
+  localStorage.setItem(SUPER_ADMIN_SESSION_KEY, JSON.stringify(normalized));
+  sessionStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
+}
+
+function clearSuperAdminSession() {
+  localStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
+  sessionStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
+}
+
 function businessScopedSessionKey(baseKey, businessSlug = DEFAULT_BUSINESS_SLUG) {
   const slug = String(businessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
   return `${baseKey}:${slug}`;
@@ -3585,21 +3702,39 @@ function applyDeviceProfile() {
 }
 
 function loadScopedBusinessSession(baseKey, businessSlug, legacyKey = baseKey) {
-  const scoped = readStoredJSON(sessionStorage, businessScopedSessionKey(baseKey, businessSlug));
-  if (scoped) return scoped;
-  return readStoredJSON(sessionStorage, legacyKey);
+  const scopedKey = businessScopedSessionKey(baseKey, businessSlug);
+  const scoped =
+    readStoredJSON(localStorage, scopedKey) ||
+    readStoredJSON(sessionStorage, scopedKey) ||
+    readStoredJSON(localStorage, legacyKey) ||
+    readStoredJSON(sessionStorage, legacyKey);
+  if (!scoped) return null;
+  const role = baseKey === BARBER_SESSION_KEY ? "barber" : "admin";
+  const normalized = normalizePersistentSession(scoped, { role, businessSlug, businessId: scoped.businessId || "" });
+  saveScopedBusinessSession(baseKey, businessSlug, normalized, legacyKey);
+  return normalized;
 }
 
 function saveScopedBusinessSession(baseKey, businessSlug, value, legacyKey = baseKey) {
-  sessionStorage.setItem(businessScopedSessionKey(baseKey, businessSlug), JSON.stringify(value));
+  const role = baseKey === BARBER_SESSION_KEY ? "barber" : "admin";
+  const normalized = normalizePersistentSession(value, {
+    role,
+    businessSlug,
+    businessId: value?.businessId || "",
+  });
+  localStorage.setItem(businessScopedSessionKey(baseKey, businessSlug), JSON.stringify(normalized));
   if (legacyKey) {
+    localStorage.removeItem(legacyKey);
     sessionStorage.removeItem(legacyKey);
   }
+  sessionStorage.removeItem(businessScopedSessionKey(baseKey, businessSlug));
 }
 
 function clearScopedBusinessSession(baseKey, businessSlug, legacyKey = baseKey) {
+  localStorage.removeItem(businessScopedSessionKey(baseKey, businessSlug));
   sessionStorage.removeItem(businessScopedSessionKey(baseKey, businessSlug));
   if (legacyKey) {
+    localStorage.removeItem(legacyKey);
     sessionStorage.removeItem(legacyKey);
   }
 }
@@ -3611,18 +3746,15 @@ function buildSessionFingerprint(role = "session", businessSlug = DEFAULT_BUSINE
     String(role || "session").trim().toLowerCase(),
     String(businessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase(),
     String(businessId || "").trim().toLowerCase(),
+    getDeviceId(),
     host,
     userAgent.slice(0, 160),
   ].join("|");
 }
 
 function isSessionExpired(session, context = {}) {
-  if (!session?.startedAt) return false;
-  const startedAt = new Date(session.startedAt).getTime();
-  if (!Number.isFinite(startedAt)) return false;
-  if (Date.now() - startedAt > SESSION_TTL_MS) return true;
-  const lastSeenAt = new Date(session.lastSeenAt || session.startedAt).getTime();
-  if (Number.isFinite(lastSeenAt) && Date.now() - lastSeenAt > SESSION_IDLE_TTL_MS) return true;
+  if (!session) return false;
+  if (session.deviceId && session.deviceId !== getDeviceId()) return true;
   const expectedFingerprint = buildSessionFingerprint(
     context.role || session.role || "session",
     context.businessSlug || session.businessSlug || DEFAULT_BUSINESS_SLUG,
@@ -3649,7 +3781,7 @@ function refreshSessionHeartbeat(baseKey, businessSlug, session, context = {}, l
     nextSession.fingerprint !== session.fingerprint
   ) {
     if (baseKey === SUPER_ADMIN_SESSION_KEY) {
-      sessionStorage.setItem(baseKey, JSON.stringify(nextSession));
+      saveSuperAdminSession(nextSession);
     } else {
       saveScopedBusinessSession(baseKey, businessSlug, nextSession, legacyKey);
     }
@@ -3999,7 +4131,7 @@ async function deleteBusinessViaBackend(businessId, confirmation) {
       businessId,
       confirmation,
       superAdminUser: app.superAdminSession?.user || "",
-      superAdminPasswordHash: app.superAdminSession?.passwordHash || "",
+      superAdminPasswordHash: app.superAdminSession?.token ? SUPER_ADMIN_PASSWORD_HASH : "",
     }),
   });
   const result = await response.json().catch(() => ({}));
@@ -4248,7 +4380,7 @@ app = {
   adminModalMode: "reserved",
   adminServiceEditAppointmentId: "",
   adminSession: loadScopedBusinessSession(ADMIN_SESSION_KEY, initialRoute.businessSlug),
-  superAdminSession: JSON.parse(sessionStorage.getItem(SUPER_ADMIN_SESSION_KEY) || "null"),
+  superAdminSession: loadSuperAdminSession(),
   superAdminLoginError: "",
   superAdminMessage: "",
   superAdminCredentialReveal: null,
@@ -4471,7 +4603,7 @@ function renderLayoutShell() {
       ]
     : [];
   return `
-    <header class="topbar" style="${businessThemeStyle(business)}">
+    <header class="topbar">
       <button class="brand" data-public-link aria-label="Ir a agenda publica">
         ${businessLogoMarkup(business)}
         <span><strong>${escapeHTML(business?.name || "Vision")}</strong></span>
@@ -4534,9 +4666,7 @@ function refreshPersistentShellBrand() {
   const business = currentBusiness();
   const colors = colorsForBusiness(business);
   applyThemeColorsToRoot(colors);
-  const topbar = document.querySelector(".topbar");
   const brand = document.querySelector(".brand");
-  if (topbar) topbar.setAttribute("style", businessThemeStyle(business));
   if (!brand) return;
   brand.innerHTML = `
     ${businessLogoMarkup(business)}
@@ -5805,8 +5935,8 @@ function renderSuperAdmin() {
 function renderSuperAdminV2() {
   if (isSessionExpired(app.superAdminSession, { role: "super_admin", businessSlug: DEFAULT_BUSINESS_SLUG })) {
     app.superAdminSession = null;
-    app.superAdminLoginError = "La sesion del super administrador expiro. Inicia sesion nuevamente.";
-    sessionStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
+    app.superAdminLoginError = "La sesion del super administrador no corresponde a este dispositivo. Inicia sesion nuevamente.";
+    clearSuperAdminSession();
   }
   app.superAdminSession = refreshSessionHeartbeat(
     SUPER_ADMIN_SESSION_KEY,
@@ -6658,7 +6788,7 @@ async function handleDeleteBusinessSubmit(formElement) {
   app.superAdminMessage = `Eliminando ${target.name || target.slug}...`;
   scheduleRender();
   try {
-    if (!app.superAdminSession?.passwordHash) {
+    if (app.superAdminSession?.role !== "super_admin" || !app.superAdminSession?.token) {
       throw new Error("Vuelve a iniciar sesion como Super Admin antes de eliminar.");
     }
     await deleteBusinessViaBackend(target.id, confirmation);
@@ -6881,9 +7011,11 @@ function bindEvents() {
 
     if (user === SUPER_ADMIN_USER && hash === SUPER_ADMIN_PASSWORD_HASH) {
       app.superAdminSession = {
+        id: "super_admin",
         user: SUPER_ADMIN_USER,
         role: "super_admin",
-        passwordHash: hash,
+        token: randomSessionToken("super_admin"),
+        deviceId: getDeviceId(),
         startedAt: new Date().toISOString(),
         lastSeenAt: new Date().toISOString(),
         businessSlug: DEFAULT_BUSINESS_SLUG,
@@ -6891,7 +7023,7 @@ function bindEvents() {
       };
       app.superAdminLoginError = "";
       clearAuthAttemptState("super_admin", DEFAULT_BUSINESS_SLUG, user);
-      sessionStorage.setItem(SUPER_ADMIN_SESSION_KEY, JSON.stringify(app.superAdminSession));
+      saveSuperAdminSession(app.superAdminSession);
       render();
       return;
     }
@@ -6901,14 +7033,14 @@ function bindEvents() {
     app.superAdminLoginError = failedAttempt.blockedUntil
       ? authBlockMessage("Acceso de super administrador", failedAttempt.blockedUntil)
       : `Credenciales invalidas. Intentos restantes: ${failedAttempt.remainingAttempts}.`;
-    sessionStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
+    clearSuperAdminSession();
     render();
   });
 
   document.querySelector("[data-super-logout]")?.addEventListener("click", () => {
     app.superAdminSession = null;
     app.superAdminLoginError = "";
-    sessionStorage.removeItem(SUPER_ADMIN_SESSION_KEY);
+    clearSuperAdminSession();
     render();
   });
 
@@ -7262,7 +7394,7 @@ function bindEvents() {
     app.superAdminMessage = `Eliminando ${target.name || target.slug}...`;
     render();
     try {
-      if (!app.superAdminSession?.passwordHash) {
+      if (app.superAdminSession?.role !== "super_admin" || !app.superAdminSession?.token) {
         throw new Error("Vuelve a iniciar sesion como Super Admin antes de eliminar.");
       }
       await deleteBusinessViaBackend(target.id, confirmation);
@@ -7636,6 +7768,8 @@ function bindEvents() {
         name: account.name,
         role: account.role,
         businessId: currentBusinessId(),
+        token: randomSessionToken("admin"),
+        deviceId: getDeviceId(),
         startedAt: new Date().toISOString(),
         lastSeenAt: new Date().toISOString(),
       };
@@ -8296,6 +8430,8 @@ function bindEvents() {
       id: barber.id,
       businessId: currentBusinessId(),
       businessSlug: app.currentBusinessSlug,
+      token: randomSessionToken("barber"),
+      deviceId: getDeviceId(),
       startedAt: new Date().toISOString(),
       lastSeenAt: new Date().toISOString(),
       role: "barber",
