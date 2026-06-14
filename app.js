@@ -870,25 +870,32 @@ function paletteForTheme(themeKey = DEFAULT_BUSINESS_THEME_KEY) {
   return BUSINESS_THEMES[normalizeThemeKey(themeKey)] || BUSINESS_THEMES[DEFAULT_BUSINESS_THEME_KEY];
 }
 
-function colorsForBusiness(business = currentBusiness()) {
+function paletteColorRecord(palette = BUSINESS_THEMES[DEFAULT_BUSINESS_THEME_KEY]) {
+  return {
+    primary: palette.primary,
+    secondary: palette.secondary,
+    background: palette.background,
+    card: palette.card,
+    text: palette.text,
+    textSecondary: palette.textSecondary,
+    title: palette.title,
+    subtitle: palette.subtitle,
+    button: palette.button,
+    buttonHover: palette.buttonHover,
+    border: palette.border,
+    icon: palette.icon,
+    badge: palette.badge,
+  };
+}
+
+function visualColorsForBusiness(business = currentBusiness()) {
   if (FORCE_GLOBAL_VISUAL_THEME) {
-    const palette = paletteForTheme(activeVisualThemeKey(business?.theme || DEFAULT_BUSINESS_THEME_KEY));
-    return {
-      primary: palette.primary,
-      secondary: palette.secondary,
-      background: palette.background,
-      card: palette.card,
-      text: palette.text,
-      textSecondary: palette.textSecondary,
-      title: palette.title,
-      subtitle: palette.subtitle,
-      button: palette.button,
-      buttonHover: palette.buttonHover,
-      border: palette.border,
-      icon: palette.icon,
-      badge: palette.badge,
-    };
+    return paletteColorRecord(paletteForTheme(activeVisualThemeKey(business?.theme || DEFAULT_BUSINESS_THEME_KEY)));
   }
+  return colorsForBusiness(business);
+}
+
+function colorsForBusiness(business = currentBusiness()) {
   const cachedTheme = cachedThemeForBusiness(business);
   if (cachedTheme?.colors && normalizeThemeKey(business?.theme || cachedTheme.theme) === cachedTheme.theme) {
     return cachedTheme.colors;
@@ -4645,7 +4652,7 @@ function renderLayoutShell() {
 }
 
 function businessThemeStyle(business = currentBusiness()) {
-  const colors = colorsForBusiness(business);
+  const colors = visualColorsForBusiness(business);
   return [
     `--color-primary:${colors.primary}`,
     `--color-secondary:${colors.secondary}`,
@@ -4684,11 +4691,11 @@ function businessLogoMarkup(business = currentBusiness()) {
 
 function refreshPersistentShellBrand() {
   if (app.view === "super-admin") {
-    applyThemeColorsToRoot(colorsForBusiness(defaultBusiness()));
+    applyThemeColorsToRoot(visualColorsForBusiness(defaultBusiness()));
     return;
   }
   const business = currentBusiness();
-  const colors = colorsForBusiness(business);
+  const colors = visualColorsForBusiness(business);
   applyThemeColorsToRoot(colors);
   const brand = document.querySelector(".brand");
   if (!brand) return;
