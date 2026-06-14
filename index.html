@@ -47,7 +47,8 @@
         } catch (error) {
           cached = null;
         }
-        var colors = cached && cached.colors ? cached.colors : themes[cached && cached.theme] || themes.neutral;
+        var forcedVisualTheme = "urban-neon";
+        var colors = themes[forcedVisualTheme] || themes.neutral;
         var root = document.documentElement;
         var pairs = {
           "--color-primary": colors.primary, "--color-secondary": colors.secondary, "--color-background": colors.background,
@@ -61,7 +62,7 @@
           "--glass-soft": colors.primary + "12"
         };
         Object.keys(pairs).forEach(function (key) { root.style.setProperty(key, pairs[key]); });
-        root.dataset.themeBoot = cached && cached.theme ? cached.theme : "neutral";
+        root.dataset.themeBoot = forcedVisualTheme;
       })();
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />

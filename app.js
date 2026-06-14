@@ -77,6 +77,8 @@ const avatarGradients = [
   "linear-gradient(145deg, #0b1519, #8ca2a7)",
 ];
 const DEFAULT_BUSINESS_THEME_KEY = "urban-neon";
+const FORCE_GLOBAL_VISUAL_THEME = true;
+const GLOBAL_VISUAL_THEME_KEY = "urban-neon";
 const BUSINESS_THEME_ALIASES = {
   gold_black: "gold-prestige",
   blue_black: "urban-neon",
@@ -775,6 +777,10 @@ function normalizeThemeKey(themeKey = DEFAULT_BUSINESS_THEME_KEY) {
   return BUSINESS_THEMES[key] ? key : BUSINESS_THEME_ALIASES[key] || DEFAULT_BUSINESS_THEME_KEY;
 }
 
+function activeVisualThemeKey(themeKey = DEFAULT_BUSINESS_THEME_KEY) {
+  return FORCE_GLOBAL_VISUAL_THEME ? GLOBAL_VISUAL_THEME_KEY : normalizeThemeKey(themeKey);
+}
+
 function normalizeBusiness(record = {}) {
   const base = defaultBusiness();
   const id = record.id || base.id;
@@ -865,6 +871,24 @@ function paletteForTheme(themeKey = DEFAULT_BUSINESS_THEME_KEY) {
 }
 
 function colorsForBusiness(business = currentBusiness()) {
+  if (FORCE_GLOBAL_VISUAL_THEME) {
+    const palette = paletteForTheme(activeVisualThemeKey(business?.theme || DEFAULT_BUSINESS_THEME_KEY));
+    return {
+      primary: palette.primary,
+      secondary: palette.secondary,
+      background: palette.background,
+      card: palette.card,
+      text: palette.text,
+      textSecondary: palette.textSecondary,
+      title: palette.title,
+      subtitle: palette.subtitle,
+      button: palette.button,
+      buttonHover: palette.buttonHover,
+      border: palette.border,
+      icon: palette.icon,
+      badge: palette.badge,
+    };
+  }
   const cachedTheme = cachedThemeForBusiness(business);
   if (cachedTheme?.colors && normalizeThemeKey(business?.theme || cachedTheme.theme) === cachedTheme.theme) {
     return cachedTheme.colors;
