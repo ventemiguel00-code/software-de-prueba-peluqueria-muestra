@@ -1082,6 +1082,7 @@ function emptyBusinessSummary(business = {}) {
     totalBarbers: 0,
     totalServices: 0,
     activeServices: 0,
+    reservableServices: 0,
     reservationsToday: 0,
   };
 }
@@ -1102,6 +1103,7 @@ function buildBusinessSummaryMap(businesses = [], collections = {}) {
     if (!businessId || !summaryMap[businessId]) return;
     summaryMap[businessId].totalServices += 1;
     if (parseActiveFlag(service.active, true)) summaryMap[businessId].activeServices += 1;
+    if (isReservableService(service)) summaryMap[businessId].reservableServices += 1;
   });
 
   (collections.appointments || []).forEach((appointment) => {
@@ -1137,6 +1139,7 @@ function buildBusinessSummaryMapFromRpcRows(businesses = [], rows = []) {
       totalBarbers: Number(row.total_barbers ?? row.total_barberos ?? 0) || 0,
       totalServices: Number(row.total_services ?? row.total_servicios ?? 0) || 0,
       activeServices: Number(row.active_services ?? row.servicios_activos ?? row.total_services ?? row.total_servicios ?? 0) || 0,
+      reservableServices: Number(row.reservable_services ?? row.servicios_reservables ?? row.active_services ?? row.servicios_activos ?? row.total_services ?? row.total_servicios ?? 0) || 0,
       reservationsToday: Number(row.reservations_today ?? row.reservas_hoy ?? 0) || 0,
     };
   });
@@ -1148,9 +1151,10 @@ function applyActiveServiceCounts(summaryMap = {}, serviceRows = []) {
   (serviceRows || []).forEach((row) => {
     const businessId = row.business_id || row.negocioId || row.businessId || "";
     if (!businessId) return;
-    counts[businessId] = counts[businessId] || { total: 0, active: 0 };
+    counts[businessId] = counts[businessId] || { total: 0, active: 0, reservable: 0 };
     counts[businessId].total += 1;
     if (parseActiveFlag(row.active ?? row.activo, true)) counts[businessId].active += 1;
+    if (isReservableService(mapRowToService(row))) counts[businessId].reservable += 1;
   });
   Object.entries(counts).forEach(([businessId, count]) => {
     if (!summaryMap[businessId]) return;
@@ -1158,6 +1162,7 @@ function applyActiveServiceCounts(summaryMap = {}, serviceRows = []) {
       ...summaryMap[businessId],
       totalServices: count.total,
       activeServices: count.active,
+      reservableServices: count.reservable,
     };
   });
   return summaryMap;
@@ -2172,7 +2177,7 @@ class StudioStore {
           this.trackedQuery(
             "summary:services_status",
             "super-admin",
-            this.supabase.from("services").select("id,business_id,active")
+            this.supabase.from("services").select("id,business_id,service_name,service_value,active")
           ),
         ]);
         perfStep("super-admin settings+summary", settingsPerf);
@@ -4163,11 +4168,29 @@ function currentAdminAccountRecord() {
 }
 
 function servicesForBusiness(businessId = currentBusinessId()) {
-  return getBusinessBucket(businessId).services;
+  return getServicesByBusiness(businessId);
 }
 
 function activeServicesForBusiness(businessId = currentBusinessId()) {
-  return getBusinessBucket(businessId).activeServices;
+  return getServicesByBusiness(businessId, { activeOnly: true });
+}
+
+function isReservableService(service = {}) {
+  return parseActiveFlag(service.active, true) && Boolean(String(service.name || "").trim()) && Number(service.value) > 0;
+}
+
+function getServicesByBusiness(businessId = currentBusinessId(), options = {}) {
+  const { activeOnly = false, reservableOnly = false } = options || {};
+  const services = getBusinessBucket(businessId).services || [];
+  return services.filter((service) => {
+    if (reservableOnly) return isReservableService(service);
+    if (activeOnly) return parseActiveFlag(service.active, true);
+    return true;
+  });
+}
+
+function reservableServicesForBusiness(businessId = currentBusinessId()) {
+  return getServicesByBusiness(businessId, { reservableOnly: true });
 }
 
 function barbersForBusiness(businessId = currentBusinessId()) {
@@ -4576,15 +4599,23 @@ function businessServiceCount(businessId) {
 function businessActiveServiceCount(businessId) {
   const summary = businessSummaryById(businessId);
   if (summary && Number.isFinite(Number(summary.activeServices))) return Number(summary.activeServices) || 0;
-  return getBusinessBucket(businessId).activeServices.length;
+  return getServicesByBusiness(businessId, { activeOnly: true }).length;
+}
+
+function businessReservableServiceCount(businessId) {
+  const summary = businessSummaryById(businessId);
+  if (summary && Number.isFinite(Number(summary.reservableServices))) return Number(summary.reservableServices) || 0;
+  return reservableServicesForBusiness(businessId).length;
 }
 
 function serviceCountLabel(businessId) {
   const total = businessServiceCount(businessId);
   const active = businessActiveServiceCount(businessId);
-  return total !== active
-    ? `<strong>${active}</strong> activos / <strong>${total}</strong> total`
-    : `<strong>${total}</strong> servicios`;
+  const reservable = businessReservableServiceCount(businessId);
+  if (total !== active || active !== reservable) {
+    return `<strong>${reservable}</strong> reservables / <strong>${active}</strong> activos / <strong>${total}</strong> total`;
+  }
+  return `<strong>${total}</strong> servicios`;
 }
 
 function businessTodayReservationCount(businessId) {
@@ -4995,7 +5026,7 @@ function barbersForService(serviceId) {
 }
 
 function servicesForBarber(barberId) {
-  return activeServicesForBusiness(currentBusinessId()).filter(
+  return reservableServicesForBusiness(currentBusinessId()).filter(
     (service) => barberOffersService(barberId, service.id)
   );
 }
@@ -5101,7 +5132,7 @@ function renderBusinessPublicTest() {
   }
 
   const businessId = requested.id;
-  const services = servicesForBusiness(businessId);
+  const services = getServicesByBusiness(businessId);
   const activeBarbers = store.activeBarbersByBusiness(businessId);
   const appointments = store.state.appointments.filter((appointment) => appointment.negocioId === businessId);
   const blockedDays = store.state.blockedDays.filter((blockedDay) => blockedDay.negocioId === businessId);
@@ -5207,7 +5238,7 @@ function renderPublic() {
   const businessId = business.id;
   const emptyDataRefreshPending = requestBusinessDataRefreshIfEmpty(businessId, "BusinessRenderPublic");
   businessDataLoading = businessDataLoading || emptyDataRefreshPending;
-  const publicServices = activeServicesForBusiness(businessId);
+  const publicServices = reservableServicesForBusiness(businessId);
   const activeBarbers = app.selectedServiceId ? barbersForService(app.selectedServiceId) : store.activeBarbersByBusiness(businessId);
   console.info("[BusinessRenderPublic]", {
     slug: app.currentBusinessSlug,
@@ -5830,6 +5861,7 @@ function validateBarberPayload(payload, editingId = "") {
 function serviceEditorCard(service) {
   return `<article class="service-card">
     <form class="service-edit-form form-stack" data-service-id="${escapeHTML(service.id)}">
+      <p class="microcopy">Estado visible: <strong>${service.active ? "Activo en agenda" : "Inactivo / oculto en agenda"}</strong></p>
       <div class="form-grid">
         <label>Nombre del servicio<input name="name" required value="${escapeHTML(service.name)}" /></label>
         <label>Valor del servicio<input name="value" required inputmode="numeric" value="${escapeHTML(service.value)}" /></label>
