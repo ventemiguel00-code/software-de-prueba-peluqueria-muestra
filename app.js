@@ -919,6 +919,7 @@ function colorsForBusiness(business = currentBusiness()) {
 }
 
 function applyThemeColorsToRoot(colors) {
+  document.documentElement.dataset.activeVisualTheme = FORCE_GLOBAL_VISUAL_THEME ? GLOBAL_VISUAL_THEME_KEY : "business";
   const signature = [
     colors.primary,
     colors.secondary,
@@ -3427,6 +3428,8 @@ const DEVICE_ID_KEY = "barber-delux-device-id-v1";
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const SESSION_IDLE_TTL_MS = 45 * 60 * 1000;
 const SESSION_HEARTBEAT_MS = 60 * 1000;
+const EMPTY_BUSINESS_DATA_REFRESH_COOLDOWN_MS = 12 * 1000;
+const EMPTY_BUSINESS_DATA_LOADING_MS = 3500;
 const AUTH_ATTEMPTS_KEY = "barber-delux-auth-attempts-v1";
 const AUTH_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_BLOCK_MS = 20 * 60 * 1000;
@@ -4071,6 +4074,34 @@ function isCurrentBusinessLoading() {
   if (hasResolvedBusiness) return false;
   if (store.remoteAttemptedAt && Date.now() - store.remoteAttemptedAt > 8000) return false;
   return !store.remoteReady;
+}
+
+function businessBucketHasVisibleSetupData(businessId = currentBusinessId()) {
+  if (!businessId) return false;
+  const bucket = getBusinessBucket(businessId);
+  return Boolean(bucket.barbers.length || bucket.services.length || bucket.barberServices.length);
+}
+
+function requestBusinessDataRefreshIfEmpty(businessId = currentBusinessId(), component = "BusinessRender") {
+  if (!store.supabase || !businessId || isPlaceholderBusiness(currentBusiness())) return false;
+  if (businessBucketHasVisibleSetupData(businessId)) return false;
+  app.emptyBusinessDataRefreshAt = app.emptyBusinessDataRefreshAt || {};
+  const now = Date.now();
+  const lastAttempt = app.emptyBusinessDataRefreshAt[businessId] || 0;
+  const recentlyRequested = lastAttempt && now - lastAttempt < EMPTY_BUSINESS_DATA_REFRESH_COOLDOWN_MS;
+  if (!recentlyRequested) {
+    app.emptyBusinessDataRefreshAt[businessId] = now;
+    store.invalidateStableBusinessCache(businessId);
+    store.invalidateRemoteCache(businessId);
+    store.queueRemoteSync({
+      quiet: true,
+      force: true,
+      origin: "empty-business-data-refresh",
+      component,
+      hook: "requestBusinessDataRefreshIfEmpty",
+    });
+  }
+  return now - (app.emptyBusinessDataRefreshAt[businessId] || now) < EMPTY_BUSINESS_DATA_LOADING_MS || store.syncInFlight;
 }
 
 function businessLoadingShell(title = "Preparando entorno") {
@@ -5047,7 +5078,7 @@ function renderPublic() {
   const business = currentBusiness();
   const requested = requestedBusiness();
   const resolution = currentBusinessResolution();
-  const businessDataLoading =
+  let businessDataLoading =
     (!requested && isCurrentBusinessLoading()) ||
     Boolean(app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && ["idle", "pending"].includes(resolution.status));
   if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && resolution.status === "not_found") {
@@ -5081,6 +5112,8 @@ function renderPublic() {
     app.selectedSlot = "";
   }
   const businessId = business.id;
+  const emptyDataRefreshPending = requestBusinessDataRefreshIfEmpty(businessId, "BusinessRenderPublic");
+  businessDataLoading = businessDataLoading || emptyDataRefreshPending;
   const publicServices = activeServicesForBusiness(businessId);
   const activeBarbers = app.selectedServiceId ? barbersForService(app.selectedServiceId) : store.activeBarbersByBusiness(businessId);
   console.info("[BusinessRenderPublic]", {
@@ -6403,6 +6436,7 @@ function renderAdminV2() {
   );
 
   const selected = barberById(app.adminBarberId);
+  const adminDataRefreshPending = requestBusinessDataRefreshIfEmpty(currentBusinessId(), "BusinessRenderAdmin");
   const businessBarbers = [...barbersForBusiness(currentBusinessId())].sort((a, b) => a.name.localeCompare(b.name, "es"));
   console.info("[BusinessRenderAdmin]", {
     slug: app.currentBusinessSlug,
@@ -6434,7 +6468,9 @@ function renderAdminV2() {
           <div class="section-title"><span>A</span><h2>Barberos</h2></div>
           <p class="microcopy">Selecciona un barbero para abrir automaticamente su agenda del dia actual.</p>
           ${
-            businessBarbers.length
+            adminDataRefreshPending
+              ? `<div class="business-component-skeleton"><span></span><span></span><span></span></div>`
+              : businessBarbers.length
               ? `<div class="admin-barber-grid">
             ${businessBarbers
               .map(
