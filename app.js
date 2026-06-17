@@ -1081,6 +1081,7 @@ function emptyBusinessSummary(business = {}) {
     active: business.active !== false,
     totalBarbers: 0,
     totalServices: 0,
+    activeServices: 0,
     reservationsToday: 0,
   };
 }
@@ -1100,6 +1101,7 @@ function buildBusinessSummaryMap(businesses = [], collections = {}) {
     const businessId = service.negocioId || service.businessId;
     if (!businessId || !summaryMap[businessId]) return;
     summaryMap[businessId].totalServices += 1;
+    if (parseActiveFlag(service.active, true)) summaryMap[businessId].activeServices += 1;
   });
 
   (collections.appointments || []).forEach((appointment) => {
@@ -1134,7 +1136,28 @@ function buildBusinessSummaryMapFromRpcRows(businesses = [], rows = []) {
       active: row.active !== false && business.active !== false,
       totalBarbers: Number(row.total_barbers ?? row.total_barberos ?? 0) || 0,
       totalServices: Number(row.total_services ?? row.total_servicios ?? 0) || 0,
+      activeServices: Number(row.active_services ?? row.servicios_activos ?? row.total_services ?? row.total_servicios ?? 0) || 0,
       reservationsToday: Number(row.reservations_today ?? row.reservas_hoy ?? 0) || 0,
+    };
+  });
+  return summaryMap;
+}
+
+function applyActiveServiceCounts(summaryMap = {}, serviceRows = []) {
+  const counts = {};
+  (serviceRows || []).forEach((row) => {
+    const businessId = row.business_id || row.negocioId || row.businessId || "";
+    if (!businessId) return;
+    counts[businessId] = counts[businessId] || { total: 0, active: 0 };
+    counts[businessId].total += 1;
+    if (parseActiveFlag(row.active ?? row.activo, true)) counts[businessId].active += 1;
+  });
+  Object.entries(counts).forEach(([businessId, count]) => {
+    if (!summaryMap[businessId]) return;
+    summaryMap[businessId] = {
+      ...summaryMap[businessId],
+      totalServices: count.total,
+      activeServices: count.active,
     };
   });
   return summaryMap;
@@ -2135,7 +2158,7 @@ class StudioStore {
           return;
         }
         const settingsPerf = perfMark("super-admin settings+summary");
-        const [businessSettingsResult, summaryRpcResult] = await Promise.all([
+        const [businessSettingsResult, summaryRpcResult, servicesStatusResult] = await Promise.all([
           this.trackedQuery(
             "business_settings",
             "super-admin",
@@ -2145,6 +2168,11 @@ class StudioStore {
             "rpc:business_dashboard_summary",
             "super-admin",
             this.supabase.rpc("business_dashboard_summary", { target_date: todayISO() })
+          ),
+          this.trackedQuery(
+            "summary:services_status",
+            "super-admin",
+            this.supabase.from("services").select("id,business_id,active")
           ),
         ]);
         perfStep("super-admin settings+summary", settingsPerf);
@@ -2181,6 +2209,11 @@ class StudioStore {
               status: row.status,
             })),
           });
+        }
+        if (!servicesStatusResult.error) {
+          businessSummaryById = applyActiveServiceCounts(businessSummaryById, servicesStatusResult.data || []);
+        } else if (servicesStatusResult.error.code !== "42P01") {
+          console.warn("Service active summary skipped", servicesStatusResult.error);
         }
 
         const businessSettingsRows = businessSettingsResult.data || [];
@@ -4167,6 +4200,52 @@ function generateSecurePassword(length = 10) {
   return picks.sort(() => Math.random() - 0.5).join("");
 }
 
+async function regenerateBarberPassword(barber) {
+  const businessId = barber?.negocioId || currentBusinessId();
+  if (!barber?.id || !businessId) {
+    throw new Error("Barbero o negocio no valido.");
+  }
+  const generatedPassword = generateSecurePassword(10);
+  const passwordHash = await sha256(generatedPassword);
+  if (store.supabase) {
+    const { data, error } = await store.supabase
+      .from("barbers")
+      .update({ password: "", password_hash: passwordHash })
+      .eq("id", barber.id)
+      .eq("business_id", businessId)
+      .select("id,business_id")
+      .maybeSingle();
+    if (error) {
+      console.error("Barber password regeneration failed", {
+        barber_id: barber.id,
+        business_id: businessId,
+        field: "password_hash",
+        error,
+      });
+      throw error;
+    }
+    if (!data?.id) {
+      const noRowError = new Error("Supabase no devolvio el barbero actualizado.");
+      console.error("Barber password regeneration updated no rows", {
+        barber_id: barber.id,
+        business_id: businessId,
+        field: "password_hash",
+        error: noRowError,
+      });
+      throw noRowError;
+    }
+  }
+  const updated = store.saveBarber({
+    ...barber,
+    negocioId: businessId,
+    password: "",
+    passwordHash,
+  });
+  store.invalidateStableBusinessCache(businessId);
+  store.invalidateRemoteCache(businessId);
+  return { barber: updated, password: generatedPassword };
+}
+
 async function authenticateViaBackend(role, user, password, businessSlug = app.currentBusinessSlug) {
   try {
     const response = await fetch("/api/auth-login", {
@@ -4492,6 +4571,20 @@ function businessServiceCount(businessId) {
   const summary = businessSummaryById(businessId);
   if (summary) return summary.totalServices || 0;
   return getBusinessBucket(businessId).services.length;
+}
+
+function businessActiveServiceCount(businessId) {
+  const summary = businessSummaryById(businessId);
+  if (summary && Number.isFinite(Number(summary.activeServices))) return Number(summary.activeServices) || 0;
+  return getBusinessBucket(businessId).activeServices.length;
+}
+
+function serviceCountLabel(businessId) {
+  const total = businessServiceCount(businessId);
+  const active = businessActiveServiceCount(businessId);
+  return total !== active
+    ? `<strong>${active}</strong> activos / <strong>${total}</strong> total`
+    : `<strong>${total}</strong> servicios`;
 }
 
 function businessTodayReservationCount(businessId) {
@@ -5594,6 +5687,7 @@ function barberEditorForm(barber, submitLabel) {
     <label class="toggle-line"><input name="active" type="checkbox" ${barber?.active ?? true ? "checked" : ""} /> Barbero activo</label>
     <div class="button-row">
       <button class="primary-action">${submitLabel}</button>
+      ${barber?.id ? `<button class="secondary-action" type="button" data-regenerate-barber-password="${escapeHTML(barber.id)}">Regenerar clave</button>` : ""}
     </div>
   </form>`;
 }
@@ -6050,7 +6144,7 @@ function renderSuperAdminV2() {
       const urls = businessUrlSet(business);
       const isOpen = app.superAdminOpenBusinessId === business.id;
       const barberCount = businessBarberCount(business.id);
-      const serviceCount = businessServiceCount(business.id);
+      const serviceLabel = serviceCountLabel(business.id);
       const reservationCount = businessTodayReservationCount(business.id);
       const environmentAttachment = businessEnvironmentAttachment(business.id);
       const admins = loadAdminAccounts().filter(
@@ -6098,7 +6192,7 @@ function renderSuperAdminV2() {
           </div>
           <div class="super-business-summary__stats">
             <span><strong>${barberCount}</strong> barberos</span>
-            <span><strong>${serviceCount}</strong> servicios</span>
+            <span>${serviceLabel}</span>
             <span><strong>${reservationCount}</strong> reservas hoy</span>
             <span><strong>${environmentAttachment?.mode === "attached_archive" ? "ZIP/RAR" : "Base"}</strong> entorno</span>
           </div>
@@ -6510,7 +6604,7 @@ function renderAdminV2() {
               <div>
                 <p class="eyebrow">${selected.active ? "Activo" : "Inactivo"}</p>
                 <h2>${escapeHTML(selected.name)}</h2>
-                <p>Usuario: ${escapeHTML(selected.user)} · Clave: ${escapeHTML(selected.password)}</p>
+                <p>Usuario: ${escapeHTML(selected.user)} · Clave protegida</p>
                 <p>${barberWhatsappLink(selected)}</p>
               </div>
             </div>
@@ -7600,6 +7694,7 @@ function bindEvents() {
       const generatedPassword = generateSecurePassword(10);
       try {
         const hash = await sha256(generatedPassword);
+        const business = store.businessById(account.businessId);
         account.password = "";
         account.passwordHash = hash;
         saveAdminAccounts(accounts);
@@ -7610,7 +7705,6 @@ function bindEvents() {
           password: generatedPassword,
         });
         await store.upsertAdminAccountRemote(account);
-        const business = store.businessById(account.businessId);
         const urls = businessUrlSet(business);
         app.superAdminCredentialReveal = {
           businessName: business?.name || "Barberia",
@@ -8204,6 +8298,31 @@ function bindEvents() {
       app.adminView = "home";
       app.adminOpenPanel = "";
       app.adminBarberMessage = "Barbero creado correctamente.";
+    }
+    render();
+  });
+
+  document.querySelector("[data-regenerate-barber-password]")?.addEventListener("click", async (event) => {
+    const barberId = event.currentTarget.dataset.regenerateBarberPassword || "";
+    const barber = barberById(barberId);
+    if (!barber) {
+      app.adminBarberMessage = "No fue posible encontrar el barbero en este negocio.";
+      render();
+      return;
+    }
+    try {
+      const result = await regenerateBarberPassword(barber);
+      app.adminBarberId = result.barber?.id || barber.id;
+      app.adminView = "profile";
+      app.adminBarberMessage = `Nueva clave temporal para ${barber.name}: ${result.password}`;
+    } catch (error) {
+      app.adminBarberMessage = `No fue posible regenerar la clave de ${barber.name}.`;
+      console.error("Barber password regeneration UI failed", {
+        barber_id: barber.id,
+        business_id: barber.negocioId || currentBusinessId(),
+        field: "password_hash",
+        error,
+      });
     }
     render();
   });
