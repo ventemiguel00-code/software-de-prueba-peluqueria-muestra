@@ -3478,6 +3478,7 @@ const SESSION_IDLE_TTL_MS = 45 * 60 * 1000;
 const SESSION_HEARTBEAT_MS = 60 * 1000;
 const EMPTY_BUSINESS_DATA_REFRESH_COOLDOWN_MS = 12 * 1000;
 const EMPTY_BUSINESS_DATA_LOADING_MS = 3500;
+const PUBLIC_SERVICES_LOADING_MS = 2000;
 const AUTH_ATTEMPTS_KEY = "barber-delux-auth-attempts-v1";
 const AUTH_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_BLOCK_MS = 20 * 60 * 1000;
@@ -4128,6 +4129,45 @@ function businessBucketHasVisibleSetupData(businessId = currentBusinessId()) {
   if (!businessId) return false;
   const bucket = getBusinessBucket(businessId);
   return Boolean(bucket.barbers.length || bucket.services.length || bucket.barberServices.length);
+}
+
+function businessBucketHasAnyServices(businessId = currentBusinessId()) {
+  if (!businessId) return false;
+  return Boolean(getBusinessBucket(businessId).services.length);
+}
+
+function publicServicesLoadState(businessId = currentBusinessId()) {
+  if (!store.supabase || !businessId || isPlaceholderBusiness(currentBusiness())) {
+    return { loading: false, slow: false, error: "" };
+  }
+  if (businessBucketHasAnyServices(businessId)) {
+    return { loading: false, slow: false, error: "" };
+  }
+  if (store.remoteLastError) {
+    return { loading: false, slow: false, error: store.remoteLastError };
+  }
+  app.emptyBusinessDataRefreshAt = app.emptyBusinessDataRefreshAt || {};
+  const now = Date.now();
+  const lastAttempt = app.emptyBusinessDataRefreshAt[businessId] || 0;
+  const recentlyRequested = lastAttempt && now - lastAttempt < EMPTY_BUSINESS_DATA_REFRESH_COOLDOWN_MS;
+  if (!recentlyRequested) {
+    app.emptyBusinessDataRefreshAt[businessId] = now;
+    store.invalidateStableBusinessCache(businessId);
+    store.invalidateRemoteCache(businessId);
+    store.queueRemoteSync({
+      quiet: true,
+      force: true,
+      origin: "public-services-refresh",
+      component: "BusinessRenderPublic",
+      hook: "publicServicesLoadState",
+    });
+  }
+  const elapsed = now - (app.emptyBusinessDataRefreshAt[businessId] || now);
+  return {
+    loading: elapsed < PUBLIC_SERVICES_LOADING_MS || (store.syncInFlight && elapsed < EMPTY_BUSINESS_DATA_LOADING_MS),
+    slow: elapsed >= PUBLIC_SERVICES_LOADING_MS && store.syncInFlight,
+    error: "",
+  };
 }
 
 function requestBusinessDataRefreshIfEmpty(businessId = currentBusinessId(), component = "BusinessRender") {
@@ -5055,8 +5095,6 @@ function BusinessPublicTemplate({
   bookingCardSummary,
   bookingCardActions,
   bookingCardBody,
-  businessHasNoServices,
-  businessHasNoBarbers,
 }) {
   const backgroundMedia = currentBackgroundMedia();
   return appShell(`
@@ -5085,15 +5123,6 @@ function BusinessPublicTemplate({
         </div>
         <div class="flow-card-body booking-card-body">
           ${bookingCardBody}
-          ${
-            currentStep === "services" && (businessHasNoServices || businessHasNoBarbers)
-              ? `<div class="empty-state-card">
-                  ${businessHasNoServices ? `<p>Aun no hay servicios disponibles.</p>` : ""}
-                  ${businessHasNoBarbers ? `<p>Aun no hay barberos disponibles.</p>` : ""}
-                  <p>Este negocio todavia no tiene horarios configurados.</p>
-                </div>`
-              : ""
-          }
         </div>
       </section>
     </section>
@@ -5246,12 +5275,11 @@ function renderPublic() {
     app.selectedSlot = "";
   }
   const businessId = business.id;
-  const emptyDataRefreshPending = requestBusinessDataRefreshIfEmpty(businessId, "BusinessRenderPublic");
-  businessDataLoading = businessDataLoading || emptyDataRefreshPending;
   const publicServices = reservableServicesForBusiness(businessId);
+  const servicesLoadState = publicServices.length ? { loading: false, slow: false, error: "" } : publicServicesLoadState(businessId);
+  const servicesLoading = !publicServices.length && servicesLoadState.loading;
+  businessDataLoading = businessDataLoading || servicesLoading;
   const activeBarbers = app.selectedServiceId ? barbersForService(app.selectedServiceId) : store.activeBarbersByBusiness(businessId);
-  const businessHasNoServices = !businessDataLoading && publicServices.length === 0;
-  const businessHasNoBarbers = !businessDataLoading && store.activeBarbersByBusiness(businessId).length === 0;
   const selected = activeBarbers.find((barber) => barber.id === app.selectedBarberId) || null;
   const hasSelectedBarber = Boolean(selected);
   const selectedService = publicServices.find((service) => service.id === app.selectedServiceId) || null;
@@ -5288,13 +5316,15 @@ function renderPublic() {
 
   if (currentStep === "services") {
     bookingCardTitle = "Seleccionar servicio";
-    bookingCardMicrocopy = businessDataLoading
-      ? "Preparando servicios, barberos y agenda del negocio."
+    bookingCardMicrocopy = servicesLoading
+      ? servicesLoadState.slow
+        ? "Estamos cargando los servicios..."
+        : "Preparando servicios disponibles."
       : "Elige el servicio que deseas reservar.";
     bookingCardBody = `<div class="barber-list">
       ${
-        businessDataLoading
-          ? `<div class="business-component-skeleton public-component-skeleton"><span></span><span></span><span></span></div>`
+        servicesLoading
+          ? `<div class="business-component-skeleton public-component-skeleton public-service-skeleton"><span></span><span></span></div>`
           : publicServices.length
           ? publicServices
         .map(
@@ -5307,7 +5337,10 @@ function renderPublic() {
           </div>`
         )
         .join("")
-          : `<div class="empty-state-card"><p>Aun no hay servicios disponibles.</p></div>`
+          : `<div class="empty-state-card">
+              <p>${servicesLoadState.error ? "No fue posible cargar los servicios." : "No hay servicios disponibles para reservar."}</p>
+              ${servicesLoadState.error ? `<button class="secondary-action" type="button" data-retry-public-services>Reintentar</button>` : ""}
+            </div>`
       }
     </div>`;
   }
@@ -5485,15 +5518,6 @@ function renderPublic() {
         </div>
         <div class="flow-card-body booking-card-body">
           ${bookingCardBody}
-          ${
-            currentStep === "services" && (businessHasNoServices || businessHasNoBarbers)
-              ? `<div class="empty-state-card">
-                  ${businessHasNoServices ? `<p>Aun no hay servicios disponibles.</p>` : ""}
-                  ${businessHasNoBarbers ? `<p>Aun no hay barberos disponibles.</p>` : ""}
-                  <p>Este negocio todavia no tiene horarios configurados.</p>
-                </div>`
-              : ""
-          }
         </div>
       </section>
     </section>
@@ -7128,6 +7152,28 @@ function bindChromeEvents() {
           store.businessResolutionBySlug.delete(app.currentBusinessSlug);
           store.remoteLastError = "";
           store.resolveBusinessBySlug(app.currentBusinessSlug).then(() => scheduleRender());
+        }
+        scheduleRender();
+        return;
+      }
+      if (event.target.closest?.("[data-retry-public-services]")) {
+        event.preventDefault();
+        const businessId = currentBusinessId();
+        if (businessId) {
+          app.emptyBusinessDataRefreshAt = {
+            ...(app.emptyBusinessDataRefreshAt || {}),
+            [businessId]: 0,
+          };
+          store.remoteLastError = "";
+          store.invalidateStableBusinessCache(businessId);
+          store.invalidateRemoteCache(businessId);
+          store.queueRemoteSync({
+            quiet: true,
+            force: true,
+            origin: "public-services-retry",
+            component: "BusinessRenderPublic",
+            hook: "data-retry-public-services",
+          });
         }
         scheduleRender();
         return;

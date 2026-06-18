@@ -431,6 +431,10 @@ body[data-device="mobile"] .super-admin-loading-grid {
   width: 100%;
 }
 
+.public-service-skeleton {
+  gap: 8px;
+}
+
 .business-component-skeleton span {
   min-height: 72px;
   border: 1px solid color-mix(in srgb, var(--color-border) 24%, transparent);
@@ -443,8 +447,19 @@ body[data-device="mobile"] .super-admin-loading-grid {
   animation: superAdminLoadingPulse 1.15s ease-in-out infinite;
 }
 
+.public-service-skeleton span {
+  min-height: 46px;
+  border-radius: 14px;
+  animation-duration: 1.8s;
+  opacity: 0.82;
+}
+
 body[data-device="mobile"] .business-component-skeleton span {
   min-height: 78px;
+}
+
+body[data-device="mobile"] .public-service-skeleton span {
+  min-height: 44px;
 }
 
 /* Estabilizacion SaaS: menos saltos visuales y mobile realmente usable. */
