@@ -1767,8 +1767,11 @@ class StudioStore {
 
   scopedBusinessIdForRoute(route = resolveRoute(location.pathname)) {
     if (route.view === "super-admin") return null;
-    if (route.businessSlug === DEFAULT_BUSINESS_SLUG) return DEFAULT_BUSINESS_ID;
-    return this.businessBySlug(route.businessSlug)?.id || this.businessResolution(route.businessSlug)?.business?.id || null;
+    return (
+      this.businessBySlug(route.businessSlug)?.id ||
+      this.businessResolution(route.businessSlug)?.business?.id ||
+      (route.businessSlug === DEFAULT_BUSINESS_SLUG ? this.businessById(DEFAULT_BUSINESS_ID)?.id || null : null)
+    );
   }
 
   stateWithRuntimeScope(state = this.state, route = resolveRoute(location.pathname)) {
@@ -1907,11 +1910,10 @@ class StudioStore {
   }
 
   async resolveBusinessBySlug(slug = "") {
-    const normalizedSlug = slugify(slug);
-    if (!normalizedSlug || normalizedSlug === DEFAULT_BUSINESS_SLUG) {
-      return { status: "success", business: this.businessById(DEFAULT_BUSINESS_ID) || defaultBusiness() };
-    }
-    const cachedBusiness = this.businessBySlug(normalizedSlug);
+    const normalizedSlug = slugify(slug) || DEFAULT_BUSINESS_SLUG;
+    const cachedBusiness =
+      this.businessBySlug(normalizedSlug) ||
+      (normalizedSlug === DEFAULT_BUSINESS_SLUG ? this.businessById(DEFAULT_BUSINESS_ID) || null : null);
     if (cachedBusiness) {
       const result = { status: "success", business: cachedBusiness, checkedAt: Date.now() };
       this.businessResolutionBySlug.set(normalizedSlug, result);
@@ -2085,7 +2087,6 @@ class StudioStore {
       const needsInitialBusinessResolution =
         route.view !== "super-admin" &&
         route.businessSlug &&
-        route.businessSlug !== DEFAULT_BUSINESS_SLUG &&
         !this.scopedBusinessIdForRoute(route);
       const canUseRemoteStateCache = route.view === "super-admin";
       const earlyCachedState = !force && canUseRemoteStateCache
@@ -2149,13 +2150,12 @@ class StudioStore {
         route.view === "super-admin"
           ? null
           : mergedBusinesses.find((business) => business.slug === route.businessSlug) ||
-            (route.businessSlug === DEFAULT_BUSINESS_SLUG ? defaultBusiness() : placeholderBusinessForSlug(route.businessSlug));
+            this.businessResolution(route.businessSlug)?.business ||
+            placeholderBusinessForSlug(route.businessSlug);
       const scopedBusinessId =
         route.view === "super-admin"
           ? null
-          : route.businessSlug === DEFAULT_BUSINESS_SLUG
-            ? DEFAULT_BUSINESS_ID
-            : scopedBusiness?.id || null;
+          : scopedBusiness?.id || null;
       const syncScopeView = route.shell === "internal" ? "internal" : route.view;
       const syncScopeKey = `${syncScopeView}:${scopedBusinessId || "global"}:${route.businessSlug || ""}`;
 
@@ -2490,8 +2490,8 @@ class StudioStore {
     const scopedBusinessId =
       route.view === "super-admin" ? null : this.scopedBusinessIdForRoute(route);
     if (route.view !== "super-admin" && !scopedBusinessId) {
-      const slug = route.businessSlug || "";
-      if (slug && slug !== DEFAULT_BUSINESS_SLUG) {
+      const slug = route.businessSlug || DEFAULT_BUSINESS_SLUG;
+      if (slug) {
         this.resolveBusinessBySlug(slug).then((result) => {
           if (result?.status !== "success") return;
           this.queueRemoteSync({
@@ -2784,28 +2784,16 @@ class StudioStore {
   applyDemoMaintenance() {
     const currentDay = todayISO();
     const currentWeek = getWeekKey();
-    if (this.state.meta.dayKey === currentDay) {
-      if (this.state.meta.weekKey !== currentWeek) {
-        this.state.meta.weekKey = currentWeek;
-        this.persist({ type: "SYNC", table: "meta" });
-      }
-      return;
-    }
-
-    const seededState = defaultState();
-    this.state.appointments = [
-      ...this.state.appointments.filter((appointment) => appointment.negocioId !== DEFAULT_BUSINESS_ID),
-      ...seededState.appointments,
-    ];
-    this.state.blockedDays = [
-      ...this.state.blockedDays.filter((blockedDay) => blockedDay.negocioId !== DEFAULT_BUSINESS_ID),
-      ...seededState.blockedDays,
-    ];
+    const metaChanged =
+      this.state.meta.dayKey !== currentDay ||
+      this.state.meta.weekKey !== currentWeek ||
+      this.state.meta.selectedDate !== currentDay;
+    if (!metaChanged) return;
     this.state.meta.dayKey = currentDay;
     this.state.meta.weekKey = currentWeek;
     this.state.meta.selectedDate = currentDay;
-    this.dailyResetPending = true;
-    this.persist({ type: "RESET", table: "demo", reason: "daily_reset" });
+    this.dailyResetPending = false;
+    this.persist({ type: "SYNC", table: "meta" });
   }
 
   activeBarbers() {
@@ -4069,10 +4057,9 @@ async function validateEnvironmentArchive(file) {
 }
 
 function currentBusiness() {
-  if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG) {
-    return requestedBusiness() || placeholderBusinessForSlug(app.currentBusinessSlug);
-  }
-  return store.businessById(DEFAULT_BUSINESS_ID) || defaultBusiness();
+  const slug = String(app.currentBusinessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
+  const resolution = store.businessResolution(slug);
+  return requestedBusiness() || resolution?.business || store.businessById(DEFAULT_BUSINESS_ID) || placeholderBusinessForSlug(slug);
 }
 
 function requestedBusiness() {
@@ -4080,33 +4067,34 @@ function requestedBusiness() {
 }
 
 function currentBusinessResolution() {
-  if (!app.currentBusinessSlug || app.currentBusinessSlug === DEFAULT_BUSINESS_SLUG) {
-    return { status: "success", business: store.businessById(DEFAULT_BUSINESS_ID) || defaultBusiness() };
-  }
+  const slug = String(app.currentBusinessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
   const business = requestedBusiness();
   if (business) return { status: "success", business };
-  return store.businessResolution(app.currentBusinessSlug) || { status: "idle" };
+  const resolved = store.businessResolution(slug);
+  if (resolved) return resolved;
+  if (slug === DEFAULT_BUSINESS_SLUG) {
+    const storedDefault = store.businessById(DEFAULT_BUSINESS_ID);
+    if (storedDefault) return { status: "success", business: storedDefault };
+  }
+  return { status: "idle" };
 }
 
 function ensureCurrentBusinessResolution() {
-  if (!app.currentBusinessSlug || app.currentBusinessSlug === DEFAULT_BUSINESS_SLUG) return;
   if (requestedBusiness()) return;
-  const resolution = store.businessResolution(app.currentBusinessSlug);
+  const slug = String(app.currentBusinessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
+  const resolution = store.businessResolution(slug);
   if (resolution && resolution.status !== "idle") return;
-  store.resolveBusinessBySlug(app.currentBusinessSlug).then(() => scheduleRender());
+  store.resolveBusinessBySlug(slug).then(() => scheduleRender());
 }
 
 function currentBusinessId() {
-  if (!app?.currentBusinessSlug || app.currentBusinessSlug === DEFAULT_BUSINESS_SLUG) {
-    return DEFAULT_BUSINESS_ID;
-  }
-  return requestedBusiness()?.id || null;
+  return currentBusinessResolution().business?.id || null;
 }
 
 function expectedScopeForCurrentRoute() {
   const route = resolveRoute(location.pathname);
   if (route.view === "super-admin") return `super-admin:global:${DEFAULT_BUSINESS_SLUG}`;
-  const business = route.businessSlug === DEFAULT_BUSINESS_SLUG ? defaultBusiness() : requestedBusiness();
+  const business = requestedBusiness() || store.businessResolution(route.businessSlug)?.business || (route.businessSlug === DEFAULT_BUSINESS_SLUG ? store.businessById(DEFAULT_BUSINESS_ID) || null : null);
   const scopeView = route.shell === "internal" ? "internal" : route.view;
   return `${scopeView}:${business?.id || "global"}:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
 }
@@ -4116,7 +4104,7 @@ function isCurrentBusinessLoading() {
   if (store.remoteLastError) return false;
   if (app.view === "super-admin") return store.remoteLoadedScopeKey !== expectedScopeForCurrentRoute() && !store.remoteReady;
   const route = resolveRoute(location.pathname);
-  const hasResolvedBusiness = Boolean(requestedBusiness()) || app.currentBusinessSlug === DEFAULT_BUSINESS_SLUG;
+  const hasResolvedBusiness = Boolean(requestedBusiness()) || Boolean(currentBusinessResolution().business);
   const resolution = currentBusinessResolution();
   if (!hasResolvedBusiness && (resolution.status === "idle" || resolution.status === "pending")) return true;
   if (route.shell === "internal") return !hasResolvedBusiness && !store.remoteReady;
@@ -4357,14 +4345,6 @@ async function deleteBusinessViaBackend(businessId, confirmation) {
 
 function businessUrlSet(business) {
   const slug = business?.slug || DEFAULT_BUSINESS_SLUG;
-  if (business?.id === DEFAULT_BUSINESS_ID) {
-    return {
-      public: PRODUCTION_BASE_URL,
-      panel: `${PRODUCTION_BASE_URL}/panel/${DEFAULT_BUSINESS_SLUG}`,
-      admin: `${PRODUCTION_BASE_URL}/panel/${DEFAULT_BUSINESS_SLUG}?modo=admin`,
-      barber: `${PRODUCTION_BASE_URL}/panel/${DEFAULT_BUSINESS_SLUG}?modo=barbero`,
-    };
-  }
   return {
     public: `${PRODUCTION_BASE_URL}/barberia/${slug}`,
     panel: `${PRODUCTION_BASE_URL}/panel/${slug}`,
