@@ -1768,7 +1768,7 @@ class StudioStore {
   scopedBusinessIdForRoute(route = resolveRoute(location.pathname)) {
     if (route.view === "super-admin") return null;
     if (route.businessSlug === DEFAULT_BUSINESS_SLUG) return DEFAULT_BUSINESS_ID;
-    return this.businessBySlug(route.businessSlug)?.id || null;
+    return this.businessBySlug(route.businessSlug)?.id || this.businessResolution(route.businessSlug)?.business?.id || null;
   }
 
   stateWithRuntimeScope(state = this.state, route = resolveRoute(location.pathname)) {
@@ -2082,6 +2082,11 @@ class StudioStore {
       const earlyScopeKey = this.currentRuntimeScopeKey(route);
       const duplicateGuardKey = `${earlyScopeKey}:${earlyDataRangeKey}`;
       const lastSyncAt = this.lastRemoteSyncByKey.get(duplicateGuardKey) || 0;
+      const needsInitialBusinessResolution =
+        route.view !== "super-admin" &&
+        route.businessSlug &&
+        route.businessSlug !== DEFAULT_BUSINESS_SLUG &&
+        !this.scopedBusinessIdForRoute(route);
       const canUseRemoteStateCache = route.view === "super-admin";
       const earlyCachedState = !force && canUseRemoteStateCache
         ? this.getCachedRemoteState(`${earlyScopeKey}:${earlyDataRangeKey}`, route.view === "super-admin" ? SUPER_ADMIN_CACHE_TTL_MS : REMOTE_SCOPE_CACHE_TTL_MS)
@@ -2102,7 +2107,7 @@ class StudioStore {
         perfEnd(perf, `(${route.view}:early-cache)`);
         return;
       }
-      if (lastSyncAt && Date.now() - lastSyncAt < DUPLICATE_SYNC_GUARD_MS) {
+      if (!needsInitialBusinessResolution && lastSyncAt && Date.now() - lastSyncAt < DUPLICATE_SYNC_GUARD_MS) {
         perfEnd(perf, `(${route.view}:duplicate-guard)`);
         return;
       }
@@ -2379,18 +2384,6 @@ class StudioStore {
         ? stableBucket.barberServices
         : (barberServicesResult.error ? [] : (barberServicesResult.data || []).map(mapRowToBarberService));
       const scopedBusinessSettingsRows = businessSettingsResult.fromStableCache || businessSettingsResult.error ? [] : businessSettingsResult.data || [];
-      if (route.view !== "super-admin") {
-        console.info("[BusinessDataHydration]", {
-          view: route.view,
-          slug: route.businessSlug,
-          businessId: scopedBusinessId,
-          receivedBarbers: barbersData.length,
-          receivedServices: servicesData.length,
-          receivedBarberServices: barberServicesData.length,
-          barbersError: barbersResult.error?.message || "",
-          servicesError: servicesResult.error?.message || "",
-        });
-      }
       const scopedBusinessList = mergedBusinesses.length
         ? mergedBusinesses
         : isPlaceholderBusiness(scopedBusiness)
@@ -2496,6 +2489,23 @@ class StudioStore {
     const route = resolveRoute(location.pathname);
     const scopedBusinessId =
       route.view === "super-admin" ? null : this.scopedBusinessIdForRoute(route);
+    if (route.view !== "super-admin" && !scopedBusinessId) {
+      const slug = route.businessSlug || "";
+      if (slug && slug !== DEFAULT_BUSINESS_SLUG) {
+        this.resolveBusinessBySlug(slug).then((result) => {
+          if (result?.status !== "success") return;
+          this.queueRemoteSync({
+            quiet: true,
+            force: true,
+            origin: "subscribeRemote:resolved_business",
+            component: "StudioStore",
+            hook: "subscribeRemote",
+          });
+          this.subscribeRemote();
+        });
+      }
+      return;
+    }
     const scopeKey = this.currentRealtimeScopeKey(route);
     const subscribeCount = (this.remoteSubscribeCounters.get(scopeKey) || 0) + 1;
     this.remoteSubscribeCounters.set(scopeKey, subscribeCount);
@@ -5240,12 +5250,6 @@ function renderPublic() {
   businessDataLoading = businessDataLoading || emptyDataRefreshPending;
   const publicServices = reservableServicesForBusiness(businessId);
   const activeBarbers = app.selectedServiceId ? barbersForService(app.selectedServiceId) : store.activeBarbersByBusiness(businessId);
-  console.info("[BusinessRenderPublic]", {
-    slug: app.currentBusinessSlug,
-    businessId,
-    servicesUsedForRender: publicServices.length,
-    barbersUsedForRender: store.activeBarbersByBusiness(businessId).length,
-  });
   const businessHasNoServices = !businessDataLoading && publicServices.length === 0;
   const businessHasNoBarbers = !businessDataLoading && store.activeBarbersByBusiness(businessId).length === 0;
   const selected = activeBarbers.find((barber) => barber.id === app.selectedBarberId) || null;
