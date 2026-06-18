@@ -3663,6 +3663,10 @@ function businessScopedSessionKey(baseKey, businessSlug = DEFAULT_BUSINESS_SLUG)
   return `${baseKey}:${slug}`;
 }
 
+function normalizeBusinessSlugKey(businessSlug = DEFAULT_BUSINESS_SLUG) {
+  return String(businessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
+}
+
 function visualRouteKey(view = app.view, businessSlug = app.currentBusinessSlug) {
   return `${view || "public"}:${String(businessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase()}`;
 }
@@ -3774,14 +3778,21 @@ function applyDeviceProfile() {
 
 function loadScopedBusinessSession(baseKey, businessSlug, legacyKey = baseKey) {
   const scopedKey = businessScopedSessionKey(baseKey, businessSlug);
-  const scoped =
-    readStoredJSON(localStorage, scopedKey) ||
-    readStoredJSON(sessionStorage, scopedKey) ||
-    readStoredJSON(localStorage, legacyKey) ||
-    readStoredJSON(sessionStorage, legacyKey);
-  if (!scoped) return null;
+  const scoped = readStoredJSON(localStorage, scopedKey) || readStoredJSON(sessionStorage, scopedKey);
+  const legacyScoped = !scoped && legacyKey ? readStoredJSON(localStorage, legacyKey) || readStoredJSON(sessionStorage, legacyKey) : null;
+  const requestedSlug = normalizeBusinessSlugKey(businessSlug);
+  const scopedSource =
+    scoped ||
+    (legacyScoped && normalizeBusinessSlugKey(legacyScoped.businessSlug || legacyScoped.slug || "") === requestedSlug
+      ? legacyScoped
+      : null);
+  if (!scopedSource) return null;
   const role = baseKey === BARBER_SESSION_KEY ? "barber" : "admin";
-  const normalized = normalizePersistentSession(scoped, { role, businessSlug, businessId: scoped.businessId || "" });
+  const normalized = normalizePersistentSession(scopedSource, {
+    role,
+    businessSlug,
+    businessId: scopedSource.businessId || "",
+  });
   saveScopedBusinessSession(baseKey, businessSlug, normalized, legacyKey);
   return normalized;
 }
@@ -6551,7 +6562,7 @@ function renderAdminV2() {
   if (app.adminSession.businessId && app.adminSession.businessId !== currentBusinessId()) {
     app.adminSession = null;
     clearScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug);
-    app.adminLoginError = "Tu sesion administrativa pertenece a otro negocio.";
+    app.adminLoginError = "";
     return renderAdminV2();
   }
 
@@ -6849,7 +6860,7 @@ function renderBarberV2() {
 
   if (app.barberSession.businessId && app.barberSession.businessId !== currentBusinessId()) {
     app.barberSession = null;
-    app.barberLoginError = "Tu sesion de barbero pertenece a otro negocio.";
+    app.barberLoginError = "";
     clearScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
     return renderBarber();
   }
