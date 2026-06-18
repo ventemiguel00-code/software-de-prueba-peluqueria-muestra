@@ -25,7 +25,7 @@
   --line-strong: rgba(230, 238, 239, 0.26);
   --glass: rgba(13, 17, 19, 0.74);
   --glass-soft: rgba(255, 255, 255, 0.055);
-  --shadow: 0 28px 90px rgba(0, 0, 0, 0.52);
+  --shadow: 0 18px 56px rgba(0, 0, 0, 0.42);
   --inner-light: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   color-scheme: dark;
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -67,13 +67,13 @@ body {
 .global-bg-video,
 .global-bg-image {
   object-fit: cover;
-  filter: brightness(1.12) saturate(1.04);
+  filter: brightness(1.08) saturate(1.02);
 }
 
 .global-bg-video {
-  will-change: transform, opacity;
   transform: translateZ(0);
   backface-visibility: hidden;
+  contain: paint;
 }
 
 .global-bg-image {
@@ -148,8 +148,8 @@ button:disabled {
   background:
     linear-gradient(180deg, rgba(15, 19, 22, 0.9), rgba(5, 6, 7, 0.76)),
     rgba(8, 10, 11, 0.86);
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.28);
-  backdrop-filter: blur(24px) saturate(1.15);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(14px) saturate(1.08);
 }
 
 .brand {
@@ -310,8 +310,8 @@ p {
   background:
     linear-gradient(180deg, rgba(24, 30, 34, 0.82), rgba(8, 10, 11, 0.76)),
     var(--glass);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(22px) saturate(1.16);
+  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(14px) saturate(1.08);
 }
 
 .hero-panel span,
@@ -411,7 +411,7 @@ p {
     linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.025)),
     var(--glass);
   box-shadow: var(--shadow), var(--inner-light);
-  backdrop-filter: blur(20px) saturate(1.12);
+  backdrop-filter: blur(14px) saturate(1.08);
   overflow: hidden;
   transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease, transform 150ms ease;
 }
@@ -491,7 +491,7 @@ p {
     linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.025)),
     var(--glass);
   box-shadow: var(--shadow), var(--inner-light);
-  backdrop-filter: blur(20px) saturate(1.12);
+  backdrop-filter: blur(14px) saturate(1.08);
 }
 
 .rail,
@@ -645,7 +645,7 @@ p {
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--color-button-hover) 17%, transparent), rgba(255, 255, 255, 0.035));
   box-shadow:
-    0 18px 46px color-mix(in srgb, var(--color-primary) 20%, transparent),
+    0 10px 24px color-mix(in srgb, var(--color-primary) 14%, transparent),
     var(--inner-light);
 }
 
@@ -776,7 +776,7 @@ p {
     linear-gradient(180deg, color-mix(in srgb, var(--color-button-hover) 34%, transparent), color-mix(in srgb, var(--color-primary) 82%, transparent));
   border-color: color-mix(in srgb, var(--color-button-hover) 92%, transparent);
   color: var(--white);
-  box-shadow: 0 18px 42px color-mix(in srgb, var(--color-primary) 26%, transparent), var(--inner-light);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--color-primary) 18%, transparent), var(--inner-light);
 }
 
 .date-strip button.past-date,
@@ -1647,7 +1647,7 @@ button.slot-row {
 
 .slot-row.picked {
   outline: 1px solid rgba(215, 221, 222, 0.9);
-  box-shadow: 0 18px 42px color-mix(in srgb, var(--color-button-hover) 17%, transparent), var(--inner-light);
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--color-button-hover) 12%, transparent), var(--inner-light);
 }
 
 .week-cards {
@@ -1744,7 +1744,7 @@ dialog {
 
 dialog::backdrop {
   background: rgba(0, 0, 0, 0.72);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(4px);
 }
 
 .modal-card {
@@ -2348,12 +2348,12 @@ dialog {
   background:
     radial-gradient(circle at 80% 0%, color-mix(in srgb, var(--color-primary) 16%, transparent), transparent 18rem),
     linear-gradient(180deg, #1a1a1a, #080808);
-  box-shadow: 0 40px 120px rgba(0, 0, 0, 0.72);
+  box-shadow: 0 26px 72px rgba(0, 0, 0, 0.56);
 }
 
 dialog::backdrop {
   background: rgba(0, 0, 0, 0.78);
-  backdrop-filter: blur(7px);
+  backdrop-filter: blur(3px);
 }
 
 .destructive-dialog {
@@ -2414,8 +2414,9 @@ dialog::backdrop {
   position: absolute;
   inset: 0;
   transform: translateX(-120%);
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-button-hover) 8%, transparent), transparent);
-  animation: softShimmer 3.8s ease-in-out infinite;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-button-hover) 5%, transparent), transparent);
+  animation: softShimmer 7.2s ease-in-out infinite;
+  opacity: 0.7;
 }
 
 .dashboard-cards span,
@@ -2899,6 +2900,7 @@ textarea:focus {
 .dashboard-cards div {
   content-visibility: auto;
   contain-intrinsic-size: 1px 220px;
+  contain: layout paint style;
 }
 
 .topbar,

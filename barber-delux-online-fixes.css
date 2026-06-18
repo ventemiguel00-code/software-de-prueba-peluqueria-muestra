@@ -401,7 +401,7 @@ body[data-device="desktop"] .dashboard-head > .barber-heading .avatar.lg {
     linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-primary) 12%, transparent), transparent),
     color-mix(in srgb, var(--color-card) 78%, transparent);
   background-size: 240% 100%;
-  animation: superAdminLoadingPulse 1.2s ease-in-out infinite;
+  animation: superAdminLoadingPulse 1.9s ease-in-out infinite;
 }
 
 @keyframes superAdminLoadingPulse {
@@ -444,7 +444,7 @@ body[data-device="mobile"] .super-admin-loading-grid {
     color-mix(in srgb, var(--color-card) 80%, transparent);
   background-size: 220% 100%;
   box-shadow: var(--inner-light);
-  animation: superAdminLoadingPulse 1.15s ease-in-out infinite;
+  animation: superAdminLoadingPulse 1.8s ease-in-out infinite;
 }
 
 .public-service-skeleton span {
