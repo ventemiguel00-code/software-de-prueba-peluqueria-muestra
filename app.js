@@ -6568,12 +6568,6 @@ function renderAdminV2() {
   const selected = barberById(app.adminBarberId);
   const adminDataRefreshPending = requestBusinessDataRefreshIfEmpty(currentBusinessId(), "BusinessRenderAdmin");
   const businessBarbers = [...barbersForBusiness(currentBusinessId())].sort((a, b) => a.name.localeCompare(b.name, "es"));
-  console.info("[BusinessRenderAdmin]", {
-    slug: app.currentBusinessSlug,
-    businessId: currentBusinessId(),
-    barbersUsedForRender: businessBarbers.length,
-    servicesUsedForRender: servicesForBusiness(currentBusinessId()).length,
-  });
   const counterSummary = buildCounterSummary(app.selectedDate);
   const selectedRecords = app.adminSelectedSlots
     .map((time) => selected && store.getAppointment(selected.id, app.selectedDate, time))
