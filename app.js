@@ -248,7 +248,7 @@ function slotRowsForBarberDate(barberId, date, businessId = currentBusinessId())
   if (!agendaMemo.slotRows.has(key)) {
     agendaMemo.slotRows.set(
       key,
-      baseSlots.map((time) => ({ time, ...statusFor(barberId, date, time) }))
+      baseSlots.map((time) => ({ time, ...statusFor(barberId, date, time, businessId) }))
     );
   }
   return agendaMemo.slotRows.get(key);
@@ -258,7 +258,7 @@ function publicDateAvailableMemo(barberId, date, businessId = currentBusinessId(
   ensureAgendaMemoFresh();
   const key = `${businessId || "global"}:${barberId || "sin-barbero"}:${date}:${currentAgendaTimeBucket()}`;
   if (!agendaMemo.publicDateAvailability.has(key)) {
-    agendaMemo.publicDateAvailability.set(key, isPublicDateAvailable(barberId, date));
+    agendaMemo.publicDateAvailability.set(key, isPublicDateAvailable(barberId, date, businessId));
   }
   return agendaMemo.publicDateAvailability.get(key);
 }
@@ -669,8 +669,8 @@ function slotHasPassed(date, time) {
   return start.hour * 60 + start.minute <= nowMinutes();
 }
 
-function isPublicSlotBookable(barberId, date, time) {
-  const state = statusFor(barberId, date, time);
+function isPublicSlotBookable(barberId, date, time, businessId = currentBusinessId()) {
+  const state = statusFor(barberId, date, time, businessId);
   return !isPastDate(date) && !slotHasPassed(date, time) && state.status === "available";
 }
 
@@ -3334,16 +3334,24 @@ class StudioStore {
     return this.deleteBusinessLocalOnly(businessId);
   }
 
+  barberBelongsToBusiness(barberId, negocioId = currentBusinessId()) {
+    if (!barberId || !negocioId) return false;
+    return Boolean(this.businessBucket(negocioId).barbersById.get(barberId));
+  }
+
   getAppointment(barberId, date, time, negocioId = currentBusinessId()) {
+    if (!this.barberBelongsToBusiness(barberId, negocioId)) return null;
     return this.businessBucket(negocioId).appointmentBySlot.get(`${barberId}|${date}|${time}`);
   }
 
   isDayBlocked(barberId, date, negocioId = currentBusinessId()) {
+    if (!this.barberBelongsToBusiness(barberId, negocioId)) return false;
     return this.businessBucket(negocioId).blockedDayKeys.has(`${barberId}|${date}`);
   }
 
   upsertAppointment(payload) {
     const negocioId = payload.negocioId || currentBusinessId();
+    if (!this.barberBelongsToBusiness(payload.barberId, negocioId)) return null;
     const existing = this.getAppointment(payload.barberId, payload.date, payload.time, negocioId);
     const appointment = {
       id: existing?.id || uid("apt"),
@@ -3374,6 +3382,13 @@ class StudioStore {
 
   async reservePublicAppointment(payload) {
     const negocioId = payload.negocioId || currentBusinessId();
+    if (!this.barberBelongsToBusiness(payload.barberId, negocioId)) {
+      return {
+        ok: false,
+        code: "invalid_barber",
+        message: "Este barbero no pertenece a este negocio.",
+      };
+    }
     const existing = this.getAppointment(payload.barberId, payload.date, payload.time, negocioId);
     if (existing && existing.status !== "available") {
       return {
@@ -3501,6 +3516,7 @@ class StudioStore {
   }
 
   blockDay(barberId, date) {
+    if (!this.barberBelongsToBusiness(barberId, currentBusinessId())) return;
     if (!this.isDayBlocked(barberId, date)) {
       const record = { id: uid("day"), negocioId: currentBusinessId(), barberId, date };
       this.state.blockedDays.push(record);
@@ -3509,6 +3525,7 @@ class StudioStore {
   }
 
   unblockDay(barberId, date) {
+    if (!this.barberBelongsToBusiness(barberId, currentBusinessId())) return;
     this.state.blockedDays = this.state.blockedDays.filter(
       (item) => !(item.barberId === barberId && item.date === date && item.negocioId === currentBusinessId())
     );
@@ -3516,6 +3533,7 @@ class StudioStore {
   }
 
   blockAvailableSlots(barberId, date) {
+    if (!this.barberBelongsToBusiness(barberId, currentBusinessId())) return;
     baseSlots.forEach((time) => {
       if (!this.getAppointment(barberId, date, time)) {
         this.upsertAppointment({
@@ -3533,6 +3551,7 @@ class StudioStore {
   }
 
   unblockBlockedSlots(barberId, date) {
+    if (!this.barberBelongsToBusiness(barberId, currentBusinessId())) return;
     const blocked = this.state.appointments.filter(
       (item) =>
         item.barberId === barberId &&
@@ -4836,6 +4855,10 @@ function appointmentById(id, businessId = currentBusinessId()) {
   return getBusinessBucket(businessId).appointmentsById.get(id) || null;
 }
 
+function barberOwnsAgendaScope(barberId, businessId = currentBusinessId()) {
+  return Boolean(barberById(barberId, businessId));
+}
+
 function businessSummaryById(businessId) {
   return store.state.meta?.businessSummaryById?.[businessId] || null;
 }
@@ -4884,9 +4907,10 @@ function businessTodayReservationCount(businessId) {
   ).length;
 }
 
-function statusFor(barberId, date, time) {
-  if (store.isDayBlocked(barberId, date)) return { status: "blocked", dayBlocked: true };
-  const appointment = store.getAppointment(barberId, date, time);
+function statusFor(barberId, date, time, businessId = currentBusinessId()) {
+  if (!barberOwnsAgendaScope(barberId, businessId)) return { status: "available" };
+  if (store.isDayBlocked(barberId, date, businessId)) return { status: "blocked", dayBlocked: true };
+  const appointment = store.getAppointment(barberId, date, time, businessId);
   return appointment ? { status: appointment.status, appointment } : { status: "available" };
 }
 
@@ -5287,9 +5311,9 @@ function servicesForBarber(barberId) {
   );
 }
 
-function isPublicDateAvailable(barberId, date) {
+function isPublicDateAvailable(barberId, date, businessId = currentBusinessId()) {
   if (!barberId || isPastDate(date)) return false;
-  return baseSlots.some((time) => isPublicSlotBookable(barberId, date, time));
+  return baseSlots.some((time) => isPublicSlotBookable(barberId, date, time, businessId));
 }
 
 function BusinessPublicTemplate({
@@ -5757,7 +5781,7 @@ function renderAdmin() {
   const businessAppointments = store.state.appointments.filter((appointment) => appointment.negocioId === businessId);
   const businessBlockedDays = store.state.blockedDays.filter((blockedDay) => blockedDay.negocioId === businessId);
   const rows = selected ? slotRowsForBarberDate(selected.id, app.selectedDate, businessId) : [];
-  const blocked = selected ? store.isDayBlocked(selected.id, app.selectedDate) : false;
+  const blocked = selected ? store.isDayBlocked(selected.id, app.selectedDate, businessId) : false;
 
   return appShell(`
     <section class="dashboard-head">
