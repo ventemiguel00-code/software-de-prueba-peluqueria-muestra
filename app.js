@@ -4105,6 +4105,19 @@ function currentBusinessId() {
   return currentBusinessResolution().business?.id || null;
 }
 
+function currentDocumentTitle() {
+  if (app.view === "super-admin") return "Super Admin | Vision Barber SaaS";
+  const resolution = currentBusinessResolution();
+  const scopedBusinessPending =
+    Boolean(app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG) &&
+    ["idle", "pending"].includes(resolution.status);
+  if (scopedBusinessPending) return "Cargando negocio...";
+  const businessName = resolution.business?.name || currentBusiness()?.name || "Barberia";
+  if (app.view === "public" || app.view === "business-test") return `${businessName} | Reservas`;
+  if (app.view === "admin" || app.view === "barber") return `${businessName} | Panel`;
+  return businessName;
+}
+
 function expectedScopeForCurrentRoute() {
   const route = resolveRoute(location.pathname);
   if (route.view === "super-admin") return `super-admin:global:${DEFAULT_BUSINESS_SLUG}`;
@@ -4147,6 +4160,13 @@ function publicServicesLoadState(businessId = currentBusinessId()) {
   }
   if (store.remoteLastError) {
     return { loading: false, slow: false, error: store.remoteLastError };
+  }
+  const currentScopeLoaded =
+    currentBusinessResolution().status === "success" &&
+    store.remoteLoadedScopeKey === expectedScopeForCurrentRoute() &&
+    !store.syncInFlight;
+  if (currentScopeLoaded) {
+    return { loading: false, slow: false, error: "" };
   }
   app.emptyBusinessDataRefreshAt = app.emptyBusinessDataRefreshAt || {};
   const now = Date.now();
@@ -7046,6 +7066,7 @@ function render() {
   applyDeviceProfile();
   applyVisualRouteState();
   ensureCurrentBusinessResolution();
+  document.title = currentDocumentTitle();
   const views = {
     public: renderPublic,
     admin: renderAdminV2,
