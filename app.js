@@ -32,6 +32,7 @@ const SUPER_ADMIN_CACHE_TTL_MS = 3 * 60 * 1000;
 const ADMIN_ACCOUNTS_CACHE_TTL_MS = 90 * 1000;
 const BUSINESS_IDENTITY_CACHE_TTL_MS = 5 * 60 * 1000;
 const STABLE_BUSINESS_CACHE_TTL_MS = 10 * 60 * 1000;
+const PUBLIC_SERVICES_CACHE_TTL_MS = 3 * 60 * 1000;
 const DUPLICATE_SYNC_GUARD_MS = 8 * 1000;
 
 const dayNames = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
@@ -1634,6 +1635,8 @@ class StudioStore {
     this.remoteStateCache = new Map();
     this.businessRowsCache = new Map();
     this.adminAccountsCache = new Map();
+    this.publicServicesCache = new Map();
+    this.publicServicesInFlight = new Map();
     this.sessionStableBusinessCacheById = new Map();
     this.lastRemoteSyncByKey = new Map();
     this.applyingRemote = false;
@@ -1840,6 +1843,8 @@ class StudioStore {
   invalidateStableBusinessCache(businessId = "") {
     if (!businessId) return;
     this.sessionStableBusinessCacheById.delete(businessId);
+    this.publicServicesCache.delete(businessId);
+    this.publicServicesInFlight.delete(businessId);
     if (!this.state?.meta?.stableBusinessCacheById) return;
     const nextCache = { ...this.state.meta.stableBusinessCacheById };
     delete nextCache[businessId];
@@ -1904,6 +1909,69 @@ class StudioStore {
     });
   }
 
+  getCachedPublicServices(businessId = "") {
+    if (!businessId) return null;
+    const cached = this.publicServicesCache.get(businessId);
+    if (!cached || Date.now() - cached.createdAt > PUBLIC_SERVICES_CACHE_TTL_MS) return null;
+    return cached.services || [];
+  }
+
+  setCachedPublicServices(businessId = "", services = []) {
+    if (!businessId) return;
+    this.publicServicesCache.set(businessId, {
+      createdAt: Date.now(),
+      services,
+    });
+  }
+
+  async prefetchPublicServices(businessId = "", { force = false } = {}) {
+    if (!this.supabase || !businessId) return [];
+    const cached = !force ? this.getCachedPublicServices(businessId) : null;
+    if (cached) return cached;
+    const existing = this.publicServicesInFlight.get(businessId);
+    if (existing) return existing;
+    const promise = this.trackedQuery(
+      "services:public_prefetch",
+      `public:${businessId}`,
+      this.supabase
+        .from("services")
+        .select(PUBLIC_SERVICE_SELECT_COLUMNS)
+        .eq("business_id", businessId)
+        .eq("active", true)
+        .order("created_at", { ascending: true })
+    )
+      .then(({ data, error }) => {
+        if (error) throw error;
+        const services = (data || []).map(mapRowToService);
+        this.setCachedPublicServices(businessId, services);
+        if (services.length) {
+          this.state = {
+            ...this.state,
+            services: [
+              ...this.state.services.filter((service) => service.negocioId !== businessId),
+              ...services,
+            ],
+          };
+          this.invalidateBusinessBuckets();
+          invalidateDerivedBusinessCache();
+          localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+          if (typeof scheduleRender === "function" && document.visibilityState === "visible") {
+            scheduleRender();
+          }
+        }
+        return services;
+      })
+      .catch((error) => {
+        console.warn("Public services prefetch skipped", error);
+        return [];
+      })
+      .finally(() => {
+        this.publicServicesInFlight.delete(businessId);
+      });
+    this.publicServicesInFlight.set(businessId, promise);
+    return promise;
+  }
+
   businessResolution(slug = "") {
     const normalizedSlug = slugify(slug);
     return normalizedSlug ? this.businessResolutionBySlug.get(normalizedSlug) || null : null;
@@ -1958,6 +2026,7 @@ class StudioStore {
         this.invalidateBusinessBuckets();
         this.invalidateStableBusinessCache(business.id);
         this.invalidateRemoteCache(business.id);
+        this.prefetchPublicServices(business.id).catch(() => {});
         const result = { status: "success", business, checkedAt: Date.now() };
         this.businessResolutionBySlug.set(normalizedSlug, result);
         this.emit({ type: "BUSINESS_RESOLVED", table: "businesses", businessId: business.id });
@@ -4158,6 +4227,9 @@ function publicServicesLoadState(businessId = currentBusinessId()) {
   if (businessBucketHasAnyServices(businessId)) {
     return { loading: false, slow: false, error: "" };
   }
+  if (store.getCachedPublicServices(businessId)?.length) {
+    return { loading: false, slow: false, error: "" };
+  }
   if (store.remoteLastError) {
     return { loading: false, slow: false, error: store.remoteLastError };
   }
@@ -4177,6 +4249,7 @@ function publicServicesLoadState(businessId = currentBusinessId()) {
     app.emptyBusinessDataRefreshAt[businessId] = now;
     store.invalidateStableBusinessCache(businessId);
     store.invalidateRemoteCache(businessId);
+    store.prefetchPublicServices(businessId, { force: true }).catch(() => {});
     store.queueRemoteSync({
       quiet: true,
       force: true,
@@ -4257,7 +4330,11 @@ function isReservableService(service = {}) {
 
 function getServicesByBusiness(businessId = currentBusinessId(), options = {}) {
   const { activeOnly = false, reservableOnly = false } = options || {};
-  const services = getBusinessBucket(businessId).services || [];
+  const bucketServices = getBusinessBucket(businessId).services || [];
+  const services =
+    bucketServices.length || !(app.view === "public" || app.view === "business-test")
+      ? bucketServices
+      : store.getCachedPublicServices(businessId) || [];
   return services.filter((service) => {
     if (reservableOnly) return isReservableService(service);
     if (activeOnly) return parseActiveFlag(service.active, true);
