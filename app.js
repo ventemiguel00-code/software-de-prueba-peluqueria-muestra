@@ -26,6 +26,8 @@ const PERF_QUERY_METRICS_KEY = "barber-delux-query-metrics-v1";
 const PERF_SYNC_METRICS_KEY = "barber-delux-sync-metrics-v1";
 const PERF_SUBSCRIBE_METRICS_KEY = "barber-delux-subscribe-metrics-v1";
 const THEME_CACHE_PREFIX = "theme_cache_";
+const BUSINESS_IDENTITY_CACHE_KEY = "barber-delux-business-identity-v1";
+const PUBLIC_SERVICES_LOCAL_CACHE_KEY = "barber-delux-public-services-v1";
 const REMOTE_SYNC_DEBOUNCE_MS = 650;
 const REMOTE_SCOPE_CACHE_TTL_MS = 4 * 60 * 1000;
 const SUPER_ADMIN_CACHE_TTL_MS = 3 * 60 * 1000;
@@ -731,6 +733,19 @@ function cachedThemeForBusiness(business = {}) {
   const businessId = String(business?.id || "").trim();
   const slug = slugify(business?.slug || "");
   return (businessId && themeMemoryCache.get(businessId)) || (slug && cachedThemeForSlug(slug)) || null;
+}
+
+function readCachedRecordMap(storageKey) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(storageKey) || "{}");
+    return raw && typeof raw === "object" ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCachedRecordMap(storageKey, value) {
+  localStorage.setItem(storageKey, JSON.stringify(value && typeof value === "object" ? value : {}));
 }
 
 function placeholderBusinessForSlug(slug = "") {
@@ -1845,6 +1860,11 @@ class StudioStore {
     this.sessionStableBusinessCacheById.delete(businessId);
     this.publicServicesCache.delete(businessId);
     this.publicServicesInFlight.delete(businessId);
+    const persistedServicesMap = readCachedRecordMap(PUBLIC_SERVICES_LOCAL_CACHE_KEY);
+    if (persistedServicesMap[businessId]) {
+      delete persistedServicesMap[businessId];
+      writeCachedRecordMap(PUBLIC_SERVICES_LOCAL_CACHE_KEY, persistedServicesMap);
+    }
     if (!this.state?.meta?.stableBusinessCacheById) return;
     const nextCache = { ...this.state.meta.stableBusinessCacheById };
     delete nextCache[businessId];
@@ -1909,11 +1929,56 @@ class StudioStore {
     });
   }
 
+  getPersistentBusinessIdentity(slug = "") {
+    const normalizedSlug = slugify(slug);
+    if (!normalizedSlug) return null;
+    const cachedMap = readCachedRecordMap(BUSINESS_IDENTITY_CACHE_KEY);
+    const cached = cachedMap[normalizedSlug];
+    if (!cached || Date.now() - Number(cached.createdAt || 0) > BUSINESS_IDENTITY_CACHE_TTL_MS) return null;
+    return cached.row || null;
+  }
+
+  setPersistentBusinessIdentity(slug = "", row = null) {
+    const normalizedSlug = slugify(slug || row?.slug || row?.business_name || "");
+    if (!normalizedSlug || !row) return;
+    const cachedMap = readCachedRecordMap(BUSINESS_IDENTITY_CACHE_KEY);
+    cachedMap[normalizedSlug] = {
+      createdAt: Date.now(),
+      row,
+    };
+    writeCachedRecordMap(BUSINESS_IDENTITY_CACHE_KEY, cachedMap);
+  }
+
+  seedPersistentBusinessIdentityRows(rows = []) {
+    if (!Array.isArray(rows) || !rows.length) return;
+    const cachedMap = readCachedRecordMap(BUSINESS_IDENTITY_CACHE_KEY);
+    const createdAt = Date.now();
+    rows.forEach((row) => {
+      const normalizedSlug = slugify(row?.slug || "");
+      if (!normalizedSlug) return;
+      cachedMap[normalizedSlug] = {
+        createdAt,
+        row,
+      };
+    });
+    writeCachedRecordMap(BUSINESS_IDENTITY_CACHE_KEY, cachedMap);
+  }
+
   getCachedPublicServices(businessId = "") {
     if (!businessId) return null;
     const cached = this.publicServicesCache.get(businessId);
-    if (!cached || Date.now() - cached.createdAt > PUBLIC_SERVICES_CACHE_TTL_MS) return null;
-    return cached.services || [];
+    if (cached && Date.now() - cached.createdAt <= PUBLIC_SERVICES_CACHE_TTL_MS) {
+      return cached.services || [];
+    }
+    const persistedMap = readCachedRecordMap(PUBLIC_SERVICES_LOCAL_CACHE_KEY);
+    const persisted = persistedMap[businessId];
+    if (!persisted || Date.now() - Number(persisted.createdAt || 0) > PUBLIC_SERVICES_CACHE_TTL_MS) return null;
+    const services = Array.isArray(persisted.services) ? persisted.services : [];
+    this.publicServicesCache.set(businessId, {
+      createdAt: Number(persisted.createdAt || Date.now()),
+      services,
+    });
+    return services;
   }
 
   setCachedPublicServices(businessId = "", services = []) {
@@ -1922,6 +1987,12 @@ class StudioStore {
       createdAt: Date.now(),
       services,
     });
+    const persistedMap = readCachedRecordMap(PUBLIC_SERVICES_LOCAL_CACHE_KEY);
+    persistedMap[businessId] = {
+      createdAt: Date.now(),
+      services,
+    };
+    writeCachedRecordMap(PUBLIC_SERVICES_LOCAL_CACHE_KEY, persistedMap);
   }
 
   async prefetchPublicServices(businessId = "", { force = false } = {}) {
@@ -1979,12 +2050,27 @@ class StudioStore {
 
   async resolveBusinessBySlug(slug = "") {
     const normalizedSlug = slugify(slug) || DEFAULT_BUSINESS_SLUG;
+    const persistedBusinessRow = this.getPersistentBusinessIdentity(normalizedSlug);
+    if (persistedBusinessRow) {
+      const persistedBusiness = mapRowToBusiness(persistedBusinessRow);
+      this.state = {
+        ...this.state,
+        businesses: mergeBusinessesById(
+          (this.state.businesses || []).filter((item) => !isPlaceholderBusiness(item)),
+          [persistedBusiness]
+        ),
+      };
+      localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+      this.invalidateBusinessBuckets();
+      invalidateDerivedBusinessCache();
+    }
     const cachedBusiness =
       this.businessBySlug(normalizedSlug) ||
       (normalizedSlug === DEFAULT_BUSINESS_SLUG ? this.businessById(DEFAULT_BUSINESS_ID) || null : null);
     if (cachedBusiness) {
       const result = { status: "success", business: cachedBusiness, checkedAt: Date.now() };
       this.businessResolutionBySlug.set(normalizedSlug, result);
+      if (cachedBusiness.id) this.prefetchPublicServices(cachedBusiness.id).catch(() => {});
       return result;
     }
     const current = this.businessResolutionBySlug.get(normalizedSlug);
@@ -2021,6 +2107,7 @@ class StudioStore {
         this.remoteLastError = "";
         this.remoteReady = true;
         this.setCachedBusinessRows(`business:${normalizedSlug}`, [data]);
+        this.setPersistentBusinessIdentity(normalizedSlug, data);
         localStorage.setItem(APP_KEY, JSON.stringify(this.state));
         invalidateDerivedBusinessCache();
         this.invalidateBusinessBuckets();
@@ -2200,6 +2287,9 @@ class StudioStore {
       if (businessesResult.error) throw businessesResult.error;
       if (!cachedBusinessRows && (route.view === "super-admin" || (businessesResult.data || []).length)) {
         this.setCachedBusinessRows(businessCacheKey, businessesResult.data || []);
+      }
+      if ((businessesResult.data || []).length) {
+        this.seedPersistentBusinessIdentityRows(businessesResult.data || []);
       }
       perfStep("business", businessPerf, `(${route.view}:${route.businessSlug || "global"})`);
       const deletedBusinessIds = loadDeletedBusinessIds();
@@ -2899,6 +2989,7 @@ class StudioStore {
       this.state.businesses = this.state.businesses.map((business) =>
         business.id === payload.id ? normalizeBusiness({ ...business, ...payload, updatedAt: todayISO() }) : business
       );
+      this.setPersistentBusinessIdentity(payload.slug || this.businessById(payload.id)?.slug, mapBusinessToRow(this.businessById(payload.id)));
       cacheBusinessTheme(this.businessById(payload.id));
       this.persist({ type: "UPDATE", table: "businesses", record: this.businessById(payload.id) });
       return this.businessById(payload.id);
@@ -2912,6 +3003,7 @@ class StudioStore {
       updatedAt: todayISO(),
     });
     this.state.businesses.push(created);
+    this.setPersistentBusinessIdentity(created.slug, mapBusinessToRow(created));
     cacheBusinessTheme(created);
     this.persist({ type: "INSERT", table: "businesses", record: created });
     return created;
