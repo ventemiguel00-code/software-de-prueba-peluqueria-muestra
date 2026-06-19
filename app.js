@@ -3828,6 +3828,15 @@ function normalizeBusinessSlugKey(businessSlug = DEFAULT_BUSINESS_SLUG) {
   return String(businessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
 }
 
+function sessionMatchesBusinessScope(session, businessSlug = DEFAULT_BUSINESS_SLUG, businessId = "") {
+  if (!session) return false;
+  const requestedSlug = normalizeBusinessSlugKey(businessSlug);
+  const sessionSlug = normalizeBusinessSlugKey(session.businessSlug || session.slug || "");
+  if (sessionSlug && sessionSlug !== requestedSlug) return false;
+  if (businessId && session.businessId && String(session.businessId) !== String(businessId)) return false;
+  return true;
+}
+
 function visualRouteKey(view = app.view, businessSlug = app.currentBusinessSlug) {
   return `${view || "public"}:${String(businessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase()}`;
 }
@@ -3943,10 +3952,8 @@ function loadScopedBusinessSession(baseKey, businessSlug, legacyKey = baseKey) {
   const legacyScoped = !scoped && legacyKey ? readStoredJSON(localStorage, legacyKey) || readStoredJSON(sessionStorage, legacyKey) : null;
   const requestedSlug = normalizeBusinessSlugKey(businessSlug);
   const scopedSource =
-    scoped ||
-    (legacyScoped && normalizeBusinessSlugKey(legacyScoped.businessSlug || legacyScoped.slug || "") === requestedSlug
-      ? legacyScoped
-      : null);
+    (sessionMatchesBusinessScope(scoped, requestedSlug) ? scoped : null) ||
+    (sessionMatchesBusinessScope(legacyScoped, requestedSlug) ? legacyScoped : null);
   if (!scopedSource) return null;
   const role = baseKey === BARBER_SESSION_KEY ? "barber" : "admin";
   const normalized = normalizePersistentSession(scopedSource, {
@@ -3967,8 +3974,14 @@ function saveScopedBusinessSession(baseKey, businessSlug, value, legacyKey = bas
   });
   localStorage.setItem(businessScopedSessionKey(baseKey, businessSlug), JSON.stringify(normalized));
   if (legacyKey) {
-    localStorage.removeItem(legacyKey);
-    sessionStorage.removeItem(legacyKey);
+    const legacyLocal = readStoredJSON(localStorage, legacyKey);
+    const legacySession = readStoredJSON(sessionStorage, legacyKey);
+    if (sessionMatchesBusinessScope(legacyLocal, businessSlug, normalized.businessId)) {
+      localStorage.removeItem(legacyKey);
+    }
+    if (sessionMatchesBusinessScope(legacySession, businessSlug, normalized.businessId)) {
+      sessionStorage.removeItem(legacyKey);
+    }
   }
   sessionStorage.removeItem(businessScopedSessionKey(baseKey, businessSlug));
 }
@@ -3977,8 +3990,14 @@ function clearScopedBusinessSession(baseKey, businessSlug, legacyKey = baseKey) 
   localStorage.removeItem(businessScopedSessionKey(baseKey, businessSlug));
   sessionStorage.removeItem(businessScopedSessionKey(baseKey, businessSlug));
   if (legacyKey) {
-    localStorage.removeItem(legacyKey);
-    sessionStorage.removeItem(legacyKey);
+    const legacyLocal = readStoredJSON(localStorage, legacyKey);
+    const legacySession = readStoredJSON(sessionStorage, legacyKey);
+    if (sessionMatchesBusinessScope(legacyLocal, businessSlug)) {
+      localStorage.removeItem(legacyKey);
+    }
+    if (sessionMatchesBusinessScope(legacySession, businessSlug)) {
+      sessionStorage.removeItem(legacyKey);
+    }
   }
 }
 
