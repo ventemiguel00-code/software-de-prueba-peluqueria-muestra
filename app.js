@@ -4070,7 +4070,10 @@ async function validateEnvironmentArchive(file) {
 function currentBusiness() {
   const slug = String(app.currentBusinessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
   const resolution = store.businessResolution(slug);
-  return requestedBusiness() || resolution?.business || store.businessById(DEFAULT_BUSINESS_ID) || placeholderBusinessForSlug(slug);
+  if (slug === DEFAULT_BUSINESS_SLUG) {
+    return requestedBusiness() || resolution?.business || store.businessById(DEFAULT_BUSINESS_ID) || defaultBusiness();
+  }
+  return requestedBusiness() || resolution?.business || placeholderBusinessForSlug(slug);
 }
 
 function requestedBusiness() {
@@ -5229,9 +5232,8 @@ function renderBusinessPublicTest() {
 }
 
 function renderPublic() {
-  const business = currentBusiness();
-  const requested = requestedBusiness();
   const resolution = currentBusinessResolution();
+  const requested = requestedBusiness();
   let businessDataLoading =
     (!requested && isCurrentBusinessLoading()) ||
     Boolean(app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && ["idle", "pending"].includes(resolution.status));
@@ -5260,6 +5262,7 @@ function renderPublic() {
       </section>
     `);
   }
+  const business = currentBusiness();
   if (isPastDate(app.selectedDate)) {
     app.selectedDate = todayISO();
     app.publicDaySelected = false;
@@ -7052,7 +7055,12 @@ function render() {
   };
   ensurePersistentBackground();
   app.backgroundMedia = currentBackgroundMedia();
-  const shellSignature = routeShellType();
+  const shellSignature = [
+    routeShellType(),
+    app.currentBusinessSlug || DEFAULT_BUSINESS_SLUG,
+    currentBusinessResolution().status || "idle",
+    requestedBusiness()?.id || currentBusinessId() || "pending",
+  ].join("|");
   if (root.dataset.shellReady !== "true" || root.dataset.shellSignature !== shellSignature) {
     root.innerHTML = renderLayoutShell();
     root.dataset.shellReady = "true";
