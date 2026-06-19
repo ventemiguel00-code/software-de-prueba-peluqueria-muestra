@@ -4171,6 +4171,7 @@ function publicServicesLoadState(businessId = currentBusinessId()) {
   app.emptyBusinessDataRefreshAt = app.emptyBusinessDataRefreshAt || {};
   const now = Date.now();
   const lastAttempt = app.emptyBusinessDataRefreshAt[businessId] || 0;
+  const businessResolved = currentBusinessResolution().status === "success";
   const recentlyRequested = lastAttempt && now - lastAttempt < EMPTY_BUSINESS_DATA_REFRESH_COOLDOWN_MS;
   if (!recentlyRequested) {
     app.emptyBusinessDataRefreshAt[businessId] = now;
@@ -4185,6 +4186,9 @@ function publicServicesLoadState(businessId = currentBusinessId()) {
     });
   }
   const elapsed = now - (app.emptyBusinessDataRefreshAt[businessId] || now);
+  if (businessResolved && elapsed >= PUBLIC_SERVICES_LOADING_MS) {
+    return { loading: false, slow: false, error: "" };
+  }
   return {
     loading: elapsed < PUBLIC_SERVICES_LOADING_MS || (store.syncInFlight && elapsed < EMPTY_BUSINESS_DATA_LOADING_MS),
     slow: elapsed >= PUBLIC_SERVICES_LOADING_MS && store.syncInFlight,
