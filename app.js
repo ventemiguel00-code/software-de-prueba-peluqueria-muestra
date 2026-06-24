@@ -1627,6 +1627,9 @@ function mergeBusinessSettingsMeta(currentMeta, patchMeta) {
 
 class StudioStore {
   constructor() {
+    if (typeof window !== "undefined") {
+      window.__studioStoreBootstrap = this;
+    }
     this.listeners = new Set();
     this.channel = "BroadcastChannel" in window ? new BroadcastChannel(CHANNEL) : null;
     this.supabase = createSupabaseClient();
@@ -1832,7 +1835,7 @@ class StudioStore {
   hasFreshStableBusinessData(businessId, { needsFull = false } = {}) {
     if (!businessId) return false;
     const entry = this.stableBusinessCacheEntry(businessId);
-    const cachedAt = Number(typeof entry === "object" ? entry.at : entry || 0);
+    const cachedAt = Number(entry && typeof entry === "object" ? entry.at : entry || 0);
     const hasFullData = entry && typeof entry === "object" ? Boolean(entry.full) : false;
     if (needsFull && !hasFullData) return false;
     return Boolean(cachedAt && Date.now() - cachedAt < STABLE_BUSINESS_CACHE_TTL_MS);
@@ -3627,6 +3630,16 @@ class StudioStore {
 
 let app = null;
 const store = new StudioStore();
+if (typeof window !== "undefined") {
+  window.__studioStore = store;
+  delete window.__studioStoreBootstrap;
+}
+
+function runtimeStore() {
+  if (typeof window === "undefined") return null;
+  return window.__studioStore || window.__studioStoreBootstrap || null;
+}
+
 disableTemporaryPerformanceDiagnostics();
 const ADMIN_SESSION_KEY = "barber-delux-admin-session";
 const BARBER_SESSION_KEY = "noxora-barber-session";
@@ -4267,37 +4280,51 @@ async function validateEnvironmentArchive(file) {
 }
 
 function currentBusiness() {
-  const slug = String(app.currentBusinessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
-  const resolution = store.businessResolution(slug);
+  const activeApp = app && typeof app === "object" ? app : null;
+  const activeStore = runtimeStore();
+  const slug = String(activeApp?.currentBusinessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
+  const resolution = activeStore?.businessResolution(slug) || null;
   if (slug === DEFAULT_BUSINESS_SLUG) {
-    return requestedBusiness() || resolution?.business || store.businessById(DEFAULT_BUSINESS_ID) || defaultBusiness();
+    return requestedBusiness() || resolution?.business || activeStore?.businessById(DEFAULT_BUSINESS_ID) || defaultBusiness();
   }
   return requestedBusiness() || resolution?.business || placeholderBusinessForSlug(slug);
 }
 
 function requestedBusiness() {
-  return store.businessBySlug(String(app.currentBusinessSlug || "").trim().toLowerCase()) || null;
+  const activeApp = app && typeof app === "object" ? app : null;
+  const slug = String(activeApp?.currentBusinessSlug || "").trim().toLowerCase();
+  const activeStore = runtimeStore();
+  return activeStore?.businessBySlug(slug) || null;
 }
 
 function currentBusinessResolution() {
-  const slug = String(app.currentBusinessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
+  const activeApp = app && typeof app === "object" ? app : null;
+  const slug = String(activeApp?.currentBusinessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
+  const activeStore = runtimeStore();
+  if (!activeStore) {
+    return slug === DEFAULT_BUSINESS_SLUG ? { status: "success", business: defaultBusiness() } : { status: "idle" };
+  }
   const business = requestedBusiness();
   if (business) return { status: "success", business };
-  const resolved = store.businessResolution(slug);
+  const resolved = activeStore.businessResolution(slug);
   if (resolved) return resolved;
   if (slug === DEFAULT_BUSINESS_SLUG) {
-    const storedDefault = store.businessById(DEFAULT_BUSINESS_ID);
+    const storedDefault = activeStore.businessById(DEFAULT_BUSINESS_ID);
     if (storedDefault) return { status: "success", business: storedDefault };
+    return { status: "success", business: defaultBusiness() };
   }
   return { status: "idle" };
 }
 
 function ensureCurrentBusinessResolution() {
   if (requestedBusiness()) return;
-  const slug = String(app.currentBusinessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
-  const resolution = store.businessResolution(slug);
+  const activeApp = app && typeof app === "object" ? app : null;
+  const slug = String(activeApp?.currentBusinessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
+  const activeStore = runtimeStore();
+  if (!activeStore) return;
+  const resolution = activeStore.businessResolution(slug);
   if (resolution && resolution.status !== "idle") return;
-  store.resolveBusinessBySlug(slug).then(() => scheduleRender());
+  activeStore.resolveBusinessBySlug(slug).then(() => scheduleRender());
 }
 
 function currentBusinessId() {
@@ -5071,7 +5098,7 @@ function renderLayoutShell() {
   return `
     <header class="topbar">
       <button class="brand" data-public-link aria-label="Ir a agenda publica">
-        ${businessLogoMarkup(business)}
+        ${businessLogoMarkup(business || defaultBusiness())}
         <span><strong>${escapeHTML(business?.name || "Vision")}</strong></span>
       </button>
       ${tabs.length ? `<nav class="nav-tabs internal-nav-tabs" aria-label="Navegacion interna">
@@ -5087,7 +5114,7 @@ function renderLayoutShell() {
 }
 
 function businessThemeStyle(business = currentBusiness()) {
-  const colors = visualColorsForBusiness(business);
+  const colors = visualColorsForBusiness(business || defaultBusiness());
   return [
     `--color-primary:${colors.primary}`,
     `--color-secondary:${colors.secondary}`,
@@ -5119,9 +5146,10 @@ function businessThemeStyle(business = currentBusiness()) {
 }
 
 function businessLogoMarkup(business = currentBusiness()) {
-  return business?.logoUrl
-    ? `<span class="brand-mark business-logo-mark has-logo"><img src="${escapeHTML(business.logoUrl)}" alt="Logo ${escapeHTML(business.name || "barberia")}" loading="eager" decoding="async" fetchpriority="high" /></span>`
-    : `<span class="brand-mark business-logo-mark empty-logo">${escapeHTML((business?.name || "B").slice(0, 1).toUpperCase())}</span>`;
+  const safeBusiness = business || defaultBusiness();
+  return safeBusiness?.logoUrl
+    ? `<span class="brand-mark business-logo-mark has-logo"><img src="${escapeHTML(safeBusiness.logoUrl)}" alt="Logo ${escapeHTML(safeBusiness.name || "barberia")}" loading="eager" decoding="async" fetchpriority="high" /></span>`
+    : `<span class="brand-mark business-logo-mark empty-logo">${escapeHTML((safeBusiness?.name || "B").slice(0, 1).toUpperCase())}</span>`;
 }
 
 function refreshPersistentShellBrand() {
