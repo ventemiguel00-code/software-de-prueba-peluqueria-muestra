@@ -6165,13 +6165,6 @@ function servicesSection() {
 
 function renderSuperAdmin() {
   const businesses = [...store.state.businesses].sort((a, b) => a.name.localeCompare(b.name, "es"));
-  const totalBusinesses = businesses.length;
-  const activeBusinesses = businesses.filter((item) => item.active).length;
-  const totalBarbers = businesses.reduce((sum, business) => sum + businessBarberCount(business.id), 0);
-  const totalServices = businesses.reduce((sum, business) => sum + businessServiceCount(business.id), 0);
-  const reservationsToday = businesses.reduce((sum, business) => sum + businessTodayReservationCount(business.id), 0);
-  const globalStatusLabel =
-    totalBusinesses === 1 ? "1 negocio sincronizado" : `${totalBusinesses} negocios sincronizados`;
   const credentialReveal = app.superAdminCredentialReveal
     ? `<div class="editor-card credential-reveal-card">
         <p class="eyebrow">Credenciales temporales</p>
@@ -6272,9 +6265,6 @@ function renderSuperAdmin() {
           <div class="super-business-summary__copy">
             <h3>Crear barberia</h3>
             <p>Nuevo entorno independiente con plantilla base dinamica</p>
-            <div class="super-business-summary__meta-row">
-              <span class="super-status-pill is-draft">Preparar alta</span>
-            </div>
           </div>
         </div>
         <div class="super-business-summary__stats">
@@ -6288,22 +6278,8 @@ function renderSuperAdmin() {
       </div>
     </div>
     <div class="super-business-panel" ${app.superAdminCreateOpen ? "" : "hidden"}>
-      <div class="super-admin-create-form">
-        <div class="super-admin-create-head">
-          <div>
-            <p class="eyebrow">Alta guiada</p>
-            <h3>Nuevo entorno listo para operar</h3>
-            <p class="microcopy">Configura la barberia, el tema visual y el acceso inicial sin salir del centro de mando.</p>
-          </div>
-          <div class="super-admin-create-badges">
-            <span>Slug automatico</span>
-            <span>Sesion independiente</span>
-            <span>Base dinamica</span>
-          </div>
-        </div>
-        ${app.superAdminMessage ? `<p class="form-note super-admin-global-message-inline">${escapeHTML(app.superAdminMessage)}</p>` : ""}
-        ${credentialReveal}
-      </div>
+      ${app.superAdminMessage ? `<p class="form-note">${escapeHTML(app.superAdminMessage)}</p>` : ""}
+      ${credentialReveal}
       <form id="super-business-create" class="editor-card">
         <div class="form-grid">
           <label>Nombre del negocio<input name="name" required placeholder="Barberia Elite" /></label>
@@ -6420,19 +6396,12 @@ function renderSuperAdminV2() {
   const expectedSuperAdminScope = `super-admin:global:${DEFAULT_BUSINESS_SLUG}`;
   if (app.superAdminSession && store.supabase && (!store.remoteReady || store.remoteLoadedScopeKey !== expectedSuperAdminScope)) {
     return appShell(`
-      <section class="dashboard-head super-admin-hero">
-        <div class="super-admin-hero__copy">
+      <section class="dashboard-head">
+        <div>
           <p class="eyebrow">Control SaaS</p>
           <h1>SUPER ADMINISTRADOR</h1>
-          <span>Sincronizando el centro de mando global de tus barberias.</span>
         </div>
-        <div class="super-admin-hero__actions">
-          <div class="super-admin-hero__pulse">
-            <span>Estado global</span>
-            <strong>Conectando negocios</strong>
-          </div>
-          <button class="secondary-action" data-super-logout>Cerrar sesion</button>
-        </div>
+        <button class="secondary-action" data-super-logout>Cerrar sesion</button>
       </section>
       <section class="admin-stack">
         <section class="admin-main super-admin-loading">
@@ -6465,9 +6434,7 @@ function renderSuperAdminV2() {
       const urls = businessUrlSet(business);
       const isOpen = app.superAdminOpenBusinessId === business.id;
       const barberCount = businessBarberCount(business.id);
-      const totalServiceCount = businessServiceCount(business.id);
-      const activeServiceCount = businessActiveServiceCount(business.id);
-      const serviceLabel = `<strong>${activeServiceCount}</strong> servicios`;
+      const serviceLabel = serviceCountLabel(business.id);
       const reservationCount = businessTodayReservationCount(business.id);
       const environmentAttachment = businessEnvironmentAttachment(business.id);
       const admins = loadAdminAccounts().filter(
@@ -6664,38 +6631,29 @@ function renderSuperAdminV2() {
   }
 
   return appShell(`
-    <section class="dashboard-head super-admin-hero">
-      <div class="super-admin-hero__copy">
+    <section class="dashboard-head">
+      <div>
         <p class="eyebrow">Control SaaS</p>
         <h1>SUPER ADMINISTRADOR</h1>
-        <span>Administra negocios, accesos, entornos y operaciones desde un centro de mando visual, claro y preparado para crecer.</span>
       </div>
-      <div class="super-admin-hero__actions">
-        <div class="super-admin-hero__pulse">
-          <span>Estado global</span>
-          <strong>${globalStatusLabel}</strong>
-        </div>
-        <button class="secondary-action" data-super-logout>Cerrar sesion</button>
-      </div>
+      <button class="secondary-action" data-super-logout>Cerrar sesion</button>
     </section>
     <section class="admin-stack">
-      <section class="admin-main dashboard-lite super-admin-command-board">
+      <section class="admin-main dashboard-lite">
         <div class="section-title"><span>N</span><h2>Negocios registrados</h2></div>
-        <div class="dashboard-cards super-admin-metrics">
-          <div><span>Total negocios</span><strong>${totalBusinesses}</strong></div>
-          <div><span>Negocios activos</span><strong>${activeBusinesses}</strong></div>
-          <div><span>Servicios totales</span><strong>${totalServices}</strong></div>
-          <div><span>Barberos totales</span><strong>${totalBarbers}</strong></div>
-          <div><span>Reservas de hoy</span><strong>${reservationsToday}</strong></div>
+        <div class="dashboard-cards">
+          <div><span>Total negocios</span><strong>${businesses.length}</strong></div>
+          <div><span>Negocios activos</span><strong>${businesses.filter((item) => item.active).length}</strong></div>
+          <div><span>URL base</span><strong>/barberia/:slug</strong></div>
         </div>
       </section>
-      <section class="admin-main super-admin-create-shell">
+      <section class="admin-main">
         <div class="section-title"><span>+</span><h2>Nuevo negocio</h2></div>
         ${createBusinessPanel}
       </section>
-      <section class="admin-main super-admin-list-shell">
+      <section class="admin-main">
         <div class="section-title"><span>L</span><h2>Listado de negocios</h2></div>
-        <div class="admin-account-list super-admin-business-list">
+        <div class="admin-account-list">
           ${businessCards || `<p class="microcopy">Aun no hay negocios registrados.</p>`}
         </div>
       </section>
