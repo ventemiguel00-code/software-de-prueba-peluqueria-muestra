@@ -6475,6 +6475,13 @@ function renderSuperAdminV2() {
   }
 
   const businesses = [...store.state.businesses].sort((a, b) => a.name.localeCompare(b.name, "es"));
+  const totalBusinesses = businesses.length;
+  const activeBusinesses = businesses.filter((item) => item.active).length;
+  const totalBarbers = businesses.reduce((sum, business) => sum + businessBarberCount(business.id), 0);
+  const totalServices = businesses.reduce((sum, business) => sum + businessServiceCount(business.id), 0);
+  const reservationsToday = businesses.reduce((sum, business) => sum + businessTodayReservationCount(business.id), 0);
+  const globalStatusLabel =
+    activeBusinesses === 1 ? "1 negocio activo" : `${activeBusinesses} negocios activos`;
   const credentialReveal = app.superAdminCredentialReveal
     ? `<div class="editor-card credential-reveal-card">
         <p class="eyebrow">Credenciales temporales</p>
