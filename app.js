@@ -2334,7 +2334,13 @@ class StudioStore {
           return;
         }
         const settingsPerf = perfMark("super-admin settings+summary");
-        const [businessSettingsResult, summaryRpcResult, servicesStatusResult] = await Promise.all([
+        const [
+          businessSettingsResult,
+          summaryRpcResult,
+          servicesStatusResult,
+          barbersSummaryResult,
+          appointmentsSummaryResult,
+        ] = await Promise.all([
           this.trackedQuery(
             "business_settings",
             "super-admin",
@@ -2350,6 +2356,15 @@ class StudioStore {
             "super-admin",
             this.supabase.from("services").select("id,business_id,service_name,service_value,active")
           ),
+          this.trackedQuery("summary:barbers", "super-admin", this.supabase.from("barbers").select("id,business_id")),
+          this.trackedQuery(
+            "summary:appointments_today",
+            "super-admin",
+            this.supabase
+              .from("appointments")
+              .select("id,business_id,date,status")
+              .eq("date", todayISO())
+          ),
         ]);
         perfStep("super-admin settings+summary", settingsPerf);
 
@@ -2358,37 +2373,37 @@ class StudioStore {
         }
 
         let businessSummaryById = {};
-        if (!summaryRpcResult.error && Array.isArray(summaryRpcResult.data)) {
-          businessSummaryById = buildBusinessSummaryMapFromRpcRows(mergedBusinesses, summaryRpcResult.data || []);
-        } else {
-          const [barbersSummaryResult, servicesSummaryResult, appointmentsSummaryResult] = await Promise.all([
-            this.trackedQuery("summary:barbers", "super-admin", this.supabase.from("barbers").select("id,business_id")),
-            this.trackedQuery("summary:services", "super-admin", this.supabase.from("services").select("id,business_id")),
-            this.trackedQuery(
-              "summary:appointments_today",
-              "super-admin",
-              this.supabase
-                .from("appointments")
-                .select("id,business_id,date,status")
-                .eq("date", todayISO())
-            ),
-          ]);
-          if (barbersSummaryResult.error) throw barbersSummaryResult.error;
-          if (servicesSummaryResult.error && servicesSummaryResult.error.code !== "42P01") throw servicesSummaryResult.error;
-          if (appointmentsSummaryResult.error) throw appointmentsSummaryResult.error;
+        const canBuildDirectSummary =
+          !barbersSummaryResult.error &&
+          !appointmentsSummaryResult.error &&
+          !servicesStatusResult.error;
+
+        if (canBuildDirectSummary) {
           businessSummaryById = buildBusinessSummaryMap(mergedBusinesses, {
             barbers: (barbersSummaryResult.data || []).map((row) => ({ negocioId: row.business_id })),
-            services: (servicesSummaryResult.data || []).map((row) => ({ negocioId: row.business_id })),
+            services: (servicesStatusResult.data || []).map((row) => ({
+              negocioId: row.business_id,
+              active: row.active,
+              name: row.service_name,
+              value: row.service_value,
+            })),
             appointments: (appointmentsSummaryResult.data || []).map((row) => ({
               negocioId: row.business_id,
               date: row.date,
               status: row.status,
             })),
           });
+        } else if (!summaryRpcResult.error && Array.isArray(summaryRpcResult.data)) {
+          businessSummaryById = buildBusinessSummaryMapFromRpcRows(mergedBusinesses, summaryRpcResult.data || []);
+          if (!servicesStatusResult.error) {
+            businessSummaryById = applyActiveServiceCounts(businessSummaryById, servicesStatusResult.data || []);
+          }
+        } else {
+          if (barbersSummaryResult.error) throw barbersSummaryResult.error;
+          if (appointmentsSummaryResult.error) throw appointmentsSummaryResult.error;
+          if (servicesStatusResult.error && servicesStatusResult.error.code !== "42P01") throw servicesStatusResult.error;
         }
-        if (!servicesStatusResult.error) {
-          businessSummaryById = applyActiveServiceCounts(businessSummaryById, servicesStatusResult.data || []);
-        } else if (servicesStatusResult.error.code !== "42P01") {
+        if (servicesStatusResult.error && servicesStatusResult.error.code !== "42P01") {
           console.warn("Service active summary skipped", servicesStatusResult.error);
         }
 
