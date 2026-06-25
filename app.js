@@ -3745,6 +3745,28 @@ function saveAdminAccounts(accounts) {
   localStorage.setItem(ADMIN_ACCOUNTS_KEY, JSON.stringify(normalized));
 }
 
+function upsertLocalAdminAccount(account) {
+  if (!account?.id) return null;
+  const normalizedAccount = {
+    id: account.id,
+    businessId: account.businessId || currentBusinessId() || DEFAULT_BUSINESS_ID,
+    businessSlug: account.businessSlug || currentBusiness()?.slug || "",
+    name: account.name || "",
+    user: account.user || "",
+    password: account.password || "",
+    passwordHash: account.passwordHash || "",
+    role: account.role || "admin_negocio",
+    active: account.active !== false,
+    createdAt: account.createdAt || todayISO(),
+  };
+  const existing = loadAdminAccounts().filter((item) => item.id !== PRINCIPAL_ADMIN.id);
+  const nextAccounts = existing.some((item) => item.id === normalizedAccount.id)
+    ? existing.map((item) => (item.id === normalizedAccount.id ? { ...item, ...normalizedAccount } : item))
+    : [...existing, normalizedAccount];
+  saveAdminAccounts(nextAccounts);
+  return normalizedAccount;
+}
+
 function loadVisibleAdminPasswords() {
   const raw = localStorage.getItem(SUPER_ADMIN_VISIBLE_PASSWORDS_KEY);
   try {
@@ -8337,11 +8359,17 @@ function bindEvents() {
     const account = backendAuth.ok ? backendAuth.account : await findAdminAccount(user, password, currentBusiness()?.id);
 
     if (account) {
+      const hydratedAccount = upsertLocalAdminAccount({
+        ...account,
+        businessId: account.businessId || currentBusinessId(),
+        businessSlug: account.businessSlug || app.currentBusinessSlug,
+        active: account.active !== false,
+      }) || account;
       app.adminSession = {
-        id: account.id,
-        user: account.user,
-        name: account.name,
-        role: account.role,
+        id: hydratedAccount.id,
+        user: hydratedAccount.user,
+        name: hydratedAccount.name,
+        role: hydratedAccount.role,
         businessId: currentBusinessId(),
         token: randomSessionToken("admin"),
         deviceId: getDeviceId(),
