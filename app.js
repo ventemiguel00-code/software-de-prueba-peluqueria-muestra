@@ -6905,7 +6905,7 @@ function renderAdminV2() {
   );
 
   const selected = barberById(app.adminBarberId);
-  const adminDataRefreshPending = requestBusinessDataRefreshIfEmpty(currentBusinessId(), "BusinessRenderAdmin");
+  requestBusinessDataRefreshIfEmpty(currentBusinessId(), "BusinessRenderAdmin");
   const businessBarbers = [...barbersForBusiness(currentBusinessId())].sort((a, b) => a.name.localeCompare(b.name, "es"));
   const counterSummary = buildCounterSummary(app.selectedDate);
   const selectedRecords = app.adminSelectedSlots
@@ -6931,9 +6931,7 @@ function renderAdminV2() {
           <div class="section-title"><span>A</span><h2>Barberos</h2></div>
           <p class="microcopy">Selecciona un barbero para abrir automaticamente su agenda del dia actual.</p>
           ${
-            adminDataRefreshPending
-              ? `<div class="business-component-skeleton"><span></span><span></span><span></span></div>`
-              : businessBarbers.length
+            businessBarbers.length
               ? `<div class="admin-barber-grid">
             ${businessBarbers
               .map(
@@ -9126,6 +9124,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 render();
+
 
 
 
