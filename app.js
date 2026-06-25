@@ -1740,7 +1740,7 @@ class StudioStore {
     localStorage.setItem(APP_KEY, JSON.stringify(this.state));
     this.emit(event);
     this.channel?.postMessage(event);
-    if (this.supabase && !this.applyingRemote) {
+    if (!event.skipRemote && this.supabase && !this.applyingRemote) {
       this.persistRemote(event)
         .then(() => {
           if (
@@ -3490,29 +3490,27 @@ class StudioStore {
     this.persist({ type: "DELETE", table: "barbers", id, businessId: negocioId });
   }
 
-  saveBarber(payload) {
+  saveBarber(payload, options = {}) {
+    const businessId = payload.negocioId || currentWritableBusinessId() || currentBusinessId();
     if (payload.id) {
       this.state.barbers = this.state.barbers.map((barber) =>
-        barber.id === payload.id && barber.negocioId === (payload.negocioId || currentBusinessId())
-          ? { ...barber, ...payload }
+        barber.id === payload.id && barber.negocioId === businessId
+          ? { ...barber, ...payload, negocioId: businessId }
           : barber
       );
       this.persist({
         type: "UPDATE",
         table: "barbers",
-        record: this.state.barbers.find(
-          (barber) => barber.id === payload.id && barber.negocioId === (payload.negocioId || currentBusinessId())
-        ),
+        record: this.state.barbers.find((barber) => barber.id === payload.id && barber.negocioId === businessId),
+        skipRemote: Boolean(options.skipRemote),
       });
-      return this.state.barbers.find(
-        (barber) => barber.id === payload.id && barber.negocioId === (payload.negocioId || currentBusinessId())
-      );
+      return this.state.barbers.find((barber) => barber.id === payload.id && barber.negocioId === businessId);
     }
 
     const { id, ...barberPayload } = payload;
     const created = {
       id: uid("barber"),
-      negocioId: payload.negocioId || currentBusinessId(),
+      negocioId: businessId,
       gradient: avatarGradients[this.state.barbers.length % avatarGradients.length],
       photo: "",
       active: true,
@@ -3520,7 +3518,7 @@ class StudioStore {
       ...barberPayload,
     };
     this.state.barbers.push(created);
-    this.persist({ type: "INSERT", table: "barbers", record: created });
+    this.persist({ type: "INSERT", table: "barbers", record: created, skipRemote: Boolean(options.skipRemote) });
     return created;
   }
 
@@ -3616,7 +3614,7 @@ class StudioStore {
       .map((item) => item.serviceId);
   }
 
-  saveBarberServices(barberId, serviceIds, negocioId = currentBusinessId()) {
+  saveBarberServices(barberId, serviceIds, negocioId = currentWritableBusinessId() || currentBusinessId(), options = {}) {
     const uniqueIds = [...new Set((serviceIds || []).filter(Boolean))];
     this.state.barberServices = this.state.barberServices.filter(
       (item) => !(item.barberId === barberId && item.negocioId === negocioId)
@@ -3629,7 +3627,14 @@ class StudioStore {
       active: true,
     }));
     this.state.barberServices.push(...records);
-    this.persist({ type: "REPLACE", table: "barber_services", barberId, businessId: negocioId, records });
+    this.persist({
+      type: "REPLACE",
+      table: "barber_services",
+      barberId,
+      businessId: negocioId,
+      records,
+      skipRemote: Boolean(options.skipRemote),
+    });
     return records;
   }
 }
@@ -4335,6 +4340,19 @@ function ensureCurrentBusinessResolution() {
 
 function currentBusinessId() {
   return currentBusinessResolution().business?.id || null;
+}
+
+function currentWritableBusinessId() {
+  const directBusiness = requestedBusiness();
+  if (directBusiness?.id && !isPlaceholderBusiness(directBusiness)) return directBusiness.id;
+  const resolvedBusiness = currentBusinessResolution().business;
+  if (resolvedBusiness?.id && !isPlaceholderBusiness(resolvedBusiness)) return resolvedBusiness.id;
+  const route = resolveRoute(location.pathname);
+  if (route.businessSlug === DEFAULT_BUSINESS_SLUG) return DEFAULT_BUSINESS_ID;
+  const activeStore = runtimeStore();
+  const cachedBusiness = activeStore?.businessBySlug(route.businessSlug || "");
+  if (cachedBusiness?.id && !isPlaceholderBusiness(cachedBusiness)) return cachedBusiness.id;
+  return null;
 }
 
 function currentDocumentTitle() {
@@ -8650,6 +8668,13 @@ function bindEvents() {
     const form = event.currentTarget;
     const data = new FormData(form);
     const editingExistingBarber = Boolean(data.get("id"));
+    const business = currentBusiness();
+    const businessId = currentWritableBusinessId();
+    if (!businessId || isPlaceholderBusiness(business)) {
+      app.adminBarberMessage = "El negocio aun se esta cargando. Intenta nuevamente en unos segundos.";
+      render();
+      return;
+    }
     const payload = {
       id: data.get("id") || "",
       name: String(data.get("name") || "").trim(),
@@ -8665,34 +8690,70 @@ function bindEvents() {
       render();
       return;
     }
-    const selected = barberById(data.get("id"));
-    const file = data.get("photo");
-    const photo = file?.size ? await fileToDataURL(file) : selected?.photo || "";
-    const passwordHash = payload.password ? await sha256(payload.password) : selected?.passwordHash || "";
-    const barberRecord = store.saveBarber({
-      id: payload.id || undefined,
-      name: payload.name,
-      user: payload.user,
-      password: payload.password ? "" : selected?.password || "",
-      passwordHash,
-      whatsapp: payload.whatsapp,
-      specialty: payload.specialty,
-      active: payload.active,
-      photo,
-    });
-    const selectedServiceIds = data.getAll("serviceIds").map(String);
-    if (barberRecord?.id) {
-      store.saveBarberServices(barberRecord.id, selectedServiceIds);
-    }
-    if (editingExistingBarber && barberRecord?.id) {
-      app.adminBarberId = barberRecord.id;
-      app.adminView = "profile";
-      app.adminBarberMessage = "Perfil del barbero actualizado correctamente.";
-    } else {
-      app.adminBarberId = "";
-      app.adminView = "home";
-      app.adminOpenPanel = "";
-      app.adminBarberMessage = "Barbero creado correctamente.";
+    try {
+      const selected = barberById(data.get("id"), businessId);
+      const file = data.get("photo");
+      const photo = file?.size ? await fileToDataURL(file) : selected?.photo || "";
+      const passwordHash = payload.password ? await sha256(payload.password) : selected?.passwordHash || "";
+      const barberRecord = store.saveBarber({
+        id: payload.id || undefined,
+        negocioId: businessId,
+        name: payload.name,
+        user: payload.user,
+        password: payload.password ? "" : selected?.password || "",
+        passwordHash,
+        whatsapp: payload.whatsapp,
+        specialty: payload.specialty,
+        active: payload.active,
+        photo,
+      }, { skipRemote: true });
+      const selectedServiceIds = data.getAll("serviceIds").map(String);
+      const barberServiceRecords = barberRecord?.id
+        ? store.saveBarberServices(barberRecord.id, selectedServiceIds, businessId, { skipRemote: true })
+        : [];
+
+      if (store.supabase && barberRecord?.id) {
+        await store.persistRemote({
+          type: editingExistingBarber ? "UPDATE" : "INSERT",
+          table: "barbers",
+          record: barberRecord,
+        });
+        await store.persistRemote({
+          type: "REPLACE",
+          table: "barber_services",
+          barberId: barberRecord.id,
+          businessId,
+          records: barberServiceRecords,
+        });
+        store.invalidateStableBusinessCache(businessId);
+        store.invalidateRemoteCache(businessId);
+        store.queueRemoteSync({
+          quiet: true,
+          force: true,
+          origin: editingExistingBarber ? "admin-barber-update" : "admin-barber-create",
+          component: "AdminBarbers",
+          hook: "barberFormSubmit",
+        });
+      }
+
+      if (editingExistingBarber && barberRecord?.id) {
+        app.adminBarberId = barberRecord.id;
+        app.adminView = "profile";
+        app.adminBarberMessage = "Perfil del barbero actualizado correctamente.";
+      } else {
+        app.adminBarberId = "";
+        app.adminView = "home";
+        app.adminOpenPanel = "";
+        app.adminBarberMessage = "Barbero creado correctamente.";
+      }
+    } catch (error) {
+      app.adminBarberMessage = "No fue posible guardar el barbero en este negocio.";
+      console.error("Admin barber save failed", {
+        business_id: businessId,
+        slug: app.currentBusinessSlug,
+        editingExistingBarber,
+        error,
+      });
     }
     render();
   });
@@ -9124,6 +9185,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 render();
+
 
 
 
