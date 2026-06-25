@@ -3285,23 +3285,10 @@ class StudioStore {
 
     this.clearBusinessOperationalDataLocal(businessId);
     this.emit({ type: "SYNC", table: "businesses", reason: "empty_business_bootstrap" });
-
-    if (!this.supabase) return true;
-
-    const deletions = await Promise.all([
-      this.supabase.from("appointments").delete().eq("business_id", businessId),
-      this.supabase.from("blocked_days").delete().eq("business_id", businessId),
-      this.supabase.from("barber_services").delete().eq("business_id", businessId),
-      this.supabase.from("services").delete().eq("business_id", businessId),
-      this.supabase.from("barbers").delete().eq("business_id", businessId),
-    ]);
-
-    deletions.forEach((result) => {
-      if (result.error && result.error.code !== "42P01") {
-        throw result.error;
-      }
-    });
-
+    // Seguridad SaaS multi-negocio:
+    // un negocio nuevo debe iniciar vacio por definicion, no vaciarse mediante
+    // borrados remotos automáticos. Esto evita que un id incorrecto o una
+    // llamada accidental toque datos operativos de otra barbería.
     return true;
   }
 
