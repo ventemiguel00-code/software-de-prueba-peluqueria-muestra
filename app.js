@@ -4451,7 +4451,9 @@ function requestBusinessDataRefreshIfEmpty(businessId = currentBusinessId(), com
       hook: "requestBusinessDataRefreshIfEmpty",
     });
   }
-  return now - (app.emptyBusinessDataRefreshAt[businessId] || now) < EMPTY_BUSINESS_DATA_LOADING_MS || store.syncInFlight;
+  const elapsed = now - (app.emptyBusinessDataRefreshAt[businessId] || now);
+  if (elapsed >= EMPTY_BUSINESS_DATA_LOADING_MS) return false;
+  return true;
 }
 
 function businessLoadingShell(title = "Preparando entorno") {
@@ -9124,4 +9126,5 @@ document.addEventListener("visibilitychange", () => {
 });
 
 render();
+
 
