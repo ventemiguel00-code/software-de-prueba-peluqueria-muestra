@@ -3571,31 +3571,32 @@ class StudioStore {
     this.unblockDay(barberId, date);
   }
 
-  saveService(payload) {
+  saveService(payload, options = {}) {
+    const businessId = payload.negocioId || currentWritableBusinessId() || currentBusinessId();
     if (payload.id) {
       this.state.services = this.state.services.map((service) =>
-        service.id === payload.id && service.negocioId === (payload.negocioId || currentBusinessId())
-          ? { ...service, ...payload }
+        service.id === payload.id && service.negocioId === businessId
+          ? { ...service, ...payload, negocioId: businessId }
           : service
       );
       this.persist({
         type: "UPDATE",
         table: "services",
-        record: this.state.services.find(
-          (service) => service.id === payload.id && service.negocioId === (payload.negocioId || currentBusinessId())
-        ),
+        record: this.state.services.find((service) => service.id === payload.id && service.negocioId === businessId),
+        skipRemote: Boolean(options.skipRemote),
       });
-      return;
+      return this.state.services.find((service) => service.id === payload.id && service.negocioId === businessId);
     }
 
     const created = {
       id: uid("service"),
-      negocioId: payload.negocioId || currentBusinessId(),
+      negocioId: businessId,
       active: true,
       ...payload,
     };
     this.state.services.push(created);
-    this.persist({ type: "INSERT", table: "services", record: created });
+    this.persist({ type: "INSERT", table: "services", record: created, skipRemote: Boolean(options.skipRemote) });
+    return created;
   }
 
   deleteService(id, negocioId = currentBusinessId()) {
@@ -8427,8 +8428,15 @@ function bindEvents() {
     render();
   });
 
-  document.querySelector("#service-create-form")?.addEventListener("submit", (event) => {
+  document.querySelector("#service-create-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    const business = currentBusiness();
+    const businessId = currentWritableBusinessId();
+    if (!businessId || isPlaceholderBusiness(business)) {
+      app.adminServiceMessage = "El negocio aun se esta cargando. Intenta nuevamente en unos segundos.";
+      render();
+      return;
+    }
     const form = new FormData(event.currentTarget);
     const payload = {
       name: String(form.get("name") || "").trim(),
@@ -8443,17 +8451,53 @@ function bindEvents() {
       render();
       return;
     }
-    store.saveService({
-      ...payload,
-      value: Number(payload.value),
-    });
-    app.adminServiceMessage = "Servicio creado correctamente.";
+    try {
+      const serviceRecord = store.saveService(
+        {
+          ...payload,
+          negocioId: businessId,
+          value: Number(payload.value),
+        },
+        { skipRemote: true }
+      );
+      if (store.supabase && serviceRecord?.id) {
+        await store.persistRemote({
+          type: "INSERT",
+          table: "services",
+          record: serviceRecord,
+        });
+        store.invalidateStableBusinessCache(businessId);
+        store.invalidateRemoteCache(businessId);
+        store.queueRemoteSync({
+          quiet: true,
+          force: true,
+          origin: "admin-service-create",
+          component: "AdminServices",
+          hook: "serviceCreateSubmit",
+        });
+      }
+      app.adminServiceMessage = "Servicio creado correctamente.";
+    } catch (saveError) {
+      app.adminServiceMessage = "No fue posible guardar el servicio en este negocio.";
+      console.error("Admin service create failed", {
+        business_id: businessId,
+        slug: app.currentBusinessSlug,
+        error: saveError,
+      });
+    }
     render();
   });
 
   document.querySelectorAll(".service-edit-form").forEach((formElement) => {
-    formElement.addEventListener("submit", (event) => {
+    formElement.addEventListener("submit", async (event) => {
       event.preventDefault();
+      const business = currentBusiness();
+      const businessId = currentWritableBusinessId();
+      if (!businessId || isPlaceholderBusiness(business)) {
+        app.adminServiceMessage = "El negocio aun se esta cargando. Intenta nuevamente en unos segundos.";
+        render();
+        return;
+      }
       const form = new FormData(event.currentTarget);
       const payload = {
         id: event.currentTarget.dataset.serviceId,
@@ -8469,11 +8513,41 @@ function bindEvents() {
         render();
         return;
       }
-      store.saveService({
-        ...payload,
-        value: Number(payload.value),
-      });
-      app.adminServiceMessage = "Servicio actualizado correctamente.";
+      try {
+        const serviceRecord = store.saveService(
+          {
+            ...payload,
+            negocioId: businessId,
+            value: Number(payload.value),
+          },
+          { skipRemote: true }
+        );
+        if (store.supabase && serviceRecord?.id) {
+          await store.persistRemote({
+            type: "UPDATE",
+            table: "services",
+            record: serviceRecord,
+          });
+          store.invalidateStableBusinessCache(businessId);
+          store.invalidateRemoteCache(businessId);
+          store.queueRemoteSync({
+            quiet: true,
+            force: true,
+            origin: "admin-service-update",
+            component: "AdminServices",
+            hook: "serviceEditSubmit",
+          });
+        }
+        app.adminServiceMessage = "Servicio actualizado correctamente.";
+      } catch (saveError) {
+        app.adminServiceMessage = "No fue posible actualizar el servicio en este negocio.";
+        console.error("Admin service update failed", {
+          business_id: businessId,
+          slug: app.currentBusinessSlug,
+          service_id: payload.id,
+          error: saveError,
+        });
+      }
       render();
     });
   });
