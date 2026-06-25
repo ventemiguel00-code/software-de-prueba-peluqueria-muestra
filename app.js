@@ -849,7 +849,11 @@ function normalizeTenantState(state = {}) {
   const business = normalizeBusiness((state.businesses || [defaultBusiness()])[0] || defaultBusiness());
   const businesses = (state.businesses?.length ? state.businesses : [business]).map(normalizeBusiness);
   const currentBusinessId = state.meta?.currentBusinessId || businesses[0]?.id || DEFAULT_BUSINESS_ID;
-  const attachBusiness = (item) => ({ ...item, negocioId: item.negocioId || DEFAULT_BUSINESS_ID });
+  const fallbackBusinessId = businesses.length === 1 ? businesses[0]?.id || currentBusinessId || DEFAULT_BUSINESS_ID : "";
+  const attachBusiness = (item) => {
+    const resolvedBusinessId = item?.negocioId || item?.businessId || item?.business_id || fallbackBusinessId;
+    return resolvedBusinessId ? { ...item, negocioId: resolvedBusinessId } : { ...item };
+  };
   return {
     ...state,
     meta: {
@@ -9105,3 +9109,4 @@ document.addEventListener("visibilitychange", () => {
 });
 
 render();
+
