@@ -4438,8 +4438,7 @@ function requestBusinessDataRefreshIfEmpty(businessId = currentBusinessId(), com
   app.emptyBusinessDataRefreshAt = app.emptyBusinessDataRefreshAt || {};
   const now = Date.now();
   const lastAttempt = app.emptyBusinessDataRefreshAt[businessId] || 0;
-  const recentlyRequested = lastAttempt && now - lastAttempt < EMPTY_BUSINESS_DATA_REFRESH_COOLDOWN_MS;
-  if (!recentlyRequested) {
+  if (!lastAttempt) {
     app.emptyBusinessDataRefreshAt[businessId] = now;
     store.invalidateStableBusinessCache(businessId);
     store.invalidateRemoteCache(businessId);
@@ -4450,8 +4449,9 @@ function requestBusinessDataRefreshIfEmpty(businessId = currentBusinessId(), com
       component,
       hook: "requestBusinessDataRefreshIfEmpty",
     });
+    return true;
   }
-  const elapsed = now - (app.emptyBusinessDataRefreshAt[businessId] || now);
+  const elapsed = now - lastAttempt;
   if (elapsed >= EMPTY_BUSINESS_DATA_LOADING_MS) return false;
   return true;
 }
@@ -9126,5 +9126,6 @@ document.addEventListener("visibilitychange", () => {
 });
 
 render();
+
 
 
