@@ -56,7 +56,7 @@ const BUSINESS_SELECT_COLUMNS =
 const BUSINESS_SETTINGS_SELECT_COLUMNS =
   "business_id,environment_archive_meta,theme_override,environment_archive_url,environment_archive_name,public_path,custom_domain,notes,created_at";
 const BUSINESS_SETTINGS_LIGHT_SELECT_COLUMNS =
-  "business_id,theme_override,created_at";
+  "business_id,environment_archive_meta,theme_override,created_at";
 const BARBER_SELECT_COLUMNS =
   "id,business_id,name,user,password,password_hash,whatsapp,active,photo,gradient,specialty,created_at";
 const PUBLIC_BARBER_SELECT_COLUMNS =
