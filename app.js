@@ -45,6 +45,7 @@ const SLOT_MINUTES = 60;
 const DEFAULT_BUSINESS_ID = "business_principal";
 const DEFAULT_BUSINESS_SLUG = "barberia-principal";
 const PRODUCTION_BASE_URL = "https://software-de-prueba-peluqueria-muest.vercel.app";
+const BUSINESS_TIMEZONE = "America/Bogota";
 const SUPER_ADMIN_USER = "SDMcompany";
 const SUPER_ADMIN_PASSWORD_HASH = "9c92c00e241ec0c78798834456113f123762afcb4ef84e337eafbcf7d372f2fc";
 const baseSlots = Array.from({ length: CLOSE_HOUR - OPEN_HOUR }, (_, index) =>
@@ -106,6 +107,28 @@ const LOADING_BUSINESS_PALETTE = {
   border: "#334452",
   icon: "#9EDDFB",
   badge: "#9EDDFB",
+};
+const BOGOTA_DATE_PARTS_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: BUSINESS_TIMEZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+const BOGOTA_WEEKDAY_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: BUSINESS_TIMEZONE,
+  weekday: "short",
+});
+const BOGOTA_WEEKDAY_INDEX = {
+  sun: 0,
+  mon: 1,
+  tue: 2,
+  wed: 3,
+  thu: 4,
+  fri: 5,
+  sat: 6,
 };
 const themeMemoryCache = new Map();
 let lastAppliedThemeSignature = "";
@@ -180,37 +203,97 @@ function uid(prefix = "id") {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
 }
 
+function bogotaNowParts(date = new Date()) {
+  const parts = Object.fromEntries(
+    BOGOTA_DATE_PARTS_FORMATTER
+      .formatToParts(date)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value])
+  );
+  return {
+    year: Number(parts.year || 0),
+    month: Number(parts.month || 0),
+    day: Number(parts.day || 0),
+    hour: Number(parts.hour || 0),
+    minute: Number(parts.minute || 0),
+  };
+}
+
+function parseISODateParts(date) {
+  const match = String(date || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return { year: 0, month: 0, day: 0 };
+  }
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+  };
+}
+
+function isoFromDateParts({ year, month, day }) {
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function addDaysISO(date, days) {
+  const { year, month, day } = parseISODateParts(date);
+  const shifted = new Date(Date.UTC(year, month - 1, day + days, 12, 0, 0));
+  return isoFromDateParts({
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1,
+    day: shifted.getUTCDate(),
+  });
+}
+
+function weekdayIndexForISODate(date) {
+  const normalized = String(date || "").slice(0, 10);
+  if (!normalized) return 0;
+  const weekdayKey = BOGOTA_WEEKDAY_FORMATTER.format(new Date(`${normalized}T12:00:00-05:00`)).toLowerCase();
+  return BOGOTA_WEEKDAY_INDEX[weekdayKey] ?? 0;
+}
+
+function dayNameForISODate(date, long = false) {
+  const index = weekdayIndexForISODate(date);
+  return long ? longDayNames[index] : dayNames[index];
+}
+
+function dayNumberForISODate(date) {
+  return String(parseISODateParts(date).day || 0).padStart(2, "0");
+}
+
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  const { year, month, day } = bogotaNowParts();
+  return isoFromDateParts({ year, month, day });
 }
 
 function nowMinutes() {
-  const now = new Date();
-  return now.getHours() * 60 + now.getMinutes();
+  const { hour, minute } = bogotaNowParts();
+  return hour * 60 + minute;
 }
 
 function toISO(date) {
-  return date.toISOString().slice(0, 10);
+  if (typeof date === "string") return String(date).slice(0, 10);
+  const { year, month, day } = bogotaNowParts(date instanceof Date ? date : new Date(date));
+  return isoFromDateParts({ year, month, day });
 }
 
 function getWeekKey(date = new Date()) {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const day = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const anchor = toISO(date);
+  const { year, month, day: monthDay } = parseISODateParts(anchor);
+  const d = new Date(Date.UTC(year, month - 1, monthDay, 12, 0, 0));
+  const isoWeekday = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - isoWeekday);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
   const weekNo = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
   return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
 }
 
 function getWeekDates(anchor = new Date()) {
-  const date = new Date(anchor);
-  const day = date.getDay() || 7;
-  date.setDate(date.getDate() - day + 1);
-  return Array.from({ length: 7 }, (_, index) => {
-    const next = new Date(date);
-    next.setDate(date.getDate() + index);
-    return toISO(next);
-  });
+  const anchorISO = toISO(anchor);
+  const weekdayIndex = weekdayIndexForISODate(anchorISO);
+  const mondayOffset = weekdayIndex === 0 ? -6 : 1 - weekdayIndex;
+  const monday = addDaysISO(anchorISO, mondayOffset);
+  return Array.from({ length: 7 }, (_, index) => addDaysISO(monday, index));
 }
 
 const agendaMemo = {
@@ -1657,6 +1740,7 @@ class StudioStore {
     this.remoteStateCache = new Map();
     this.businessRowsCache = new Map();
     this.adminAccountsCache = new Map();
+    this.businessSettingsByBusiness = new Map();
     this.publicServicesCache = new Map();
     this.publicServicesInFlight = new Map();
     this.sessionStableBusinessCacheById = new Map();
@@ -2236,7 +2320,7 @@ class StudioStore {
       const earlyRangeAnchor = /^\d{4}-\d{2}-\d{2}$/.test(this.state.meta?.selectedDate || "")
         ? this.state.meta.selectedDate
         : todayISO();
-      const earlyWeekDates = getWeekDates(new Date(`${earlyRangeAnchor}T00:00:00`));
+      const earlyWeekDates = getWeekDates(dateAnchor(earlyRangeAnchor));
       const earlyIsPublicRoute = route.view === "public" || route.view === "business-test";
       const earlyDataRangeKey =
         route.view === "super-admin"
@@ -2443,7 +2527,7 @@ class StudioStore {
         ? this.state.meta.selectedDate
         : todayISO();
       const publicDate = rangeAnchor;
-      const activeWeekDates = getWeekDates(new Date(`${rangeAnchor}T00:00:00`));
+      const activeWeekDates = getWeekDates(dateAnchor(rangeAnchor));
       const weekStartDate = activeWeekDates[0];
       const weekEndDate = activeWeekDates[activeWeekDates.length - 1];
       const isPublicRoute = route.view === "public" || route.view === "business-test";
@@ -3104,6 +3188,17 @@ class StudioStore {
     const rowsByBusiness = new Map(
       (rows || []).map((row) => [row.business_id || DEFAULT_BUSINESS_ID, row])
     );
+    rowsByBusiness.forEach((row, businessId) => {
+      const meta = row?.environment_archive_meta || {};
+      this.businessSettingsByBusiness.set(businessId, {
+        businessId,
+        row,
+        meta,
+        showPublicPrices: parseShowPublicPricesSetting(
+          row?.show_public_prices ?? meta?.showPublicPrices ?? meta?.show_public_prices
+        ),
+      });
+    });
 
     if (scopedBusinessId) {
       const row = rowsByBusiness.get(scopedBusinessId);
@@ -3155,6 +3250,18 @@ class StudioStore {
 
     this.state.businesses = [...businessesById.values()];
     localStorage.setItem(BACKGROUND_MEDIA_BY_BUSINESS_KEY, JSON.stringify(map));
+  }
+
+  businessSettingsForBusiness(businessId = currentBusinessId()) {
+    const id = businessId || DEFAULT_BUSINESS_ID;
+    return (
+      this.businessSettingsByBusiness.get(id) || {
+        businessId: id,
+        row: null,
+        meta: {},
+        showPublicPrices: true,
+      }
+    );
   }
 
   async uploadBusinessLogo(businessId, file) {
@@ -3218,6 +3325,7 @@ class StudioStore {
       if (error.code === "42P01") return false;
       throw error;
     }
+    this.syncBusinessSettingsToLocal([{ ...existingRow, ...payload }], businessId);
     return true;
   }
 
@@ -3366,7 +3474,7 @@ class StudioStore {
       id: existing?.id || uid("apt"),
       negocioId,
       source: payload.source || "admin",
-      weekKey: payload.status === "reserved" ? getWeekKey(new Date(`${payload.date}T00:00:00`)) : "permanent",
+      weekKey: payload.status === "reserved" ? getWeekKey(dateAnchor(payload.date)) : "permanent",
       blockOrigin:
         payload.status === "blocked"
           ? payload.blockOrigin || existing?.blockOrigin || "manual"
@@ -3411,7 +3519,7 @@ class StudioStore {
       id: uid("apt"),
       negocioId,
       source: "public",
-      weekKey: getWeekKey(new Date(`${payload.date}T00:00:00`)),
+      weekKey: getWeekKey(dateAnchor(payload.date)),
       clientName: payload.clientName || "",
       whatsapp: payload.whatsapp || "",
       ...payload,
@@ -4530,6 +4638,24 @@ function activeServicesForBusiness(businessId = currentBusinessId()) {
   return getServicesByBusiness(businessId, { activeOnly: true });
 }
 
+function parseShowPublicPricesSetting(source = null) {
+  if (source === false) return false;
+  if (source === true) return true;
+  return true;
+}
+
+function publicPricesVisibleForBusiness(businessId = currentBusinessId()) {
+  return store.businessSettingsForBusiness(businessId).showPublicPrices !== false;
+}
+
+function publicServicePriceMarkup(service, businessId = currentBusinessId()) {
+  return publicPricesVisibleForBusiness(businessId) ? `<small>${formatCOP(service.value)}</small>` : "";
+}
+
+function publicServiceBadgeLabel(businessId = currentBusinessId()) {
+  return publicPricesVisibleForBusiness(businessId) ? "$" : "S";
+}
+
 function isReservableService(service = {}) {
   return parseActiveFlag(service.active, true) && Boolean(String(service.name || "").trim()) && Number(service.value) > 0;
 }
@@ -5008,7 +5134,7 @@ function publicSlotStateTag(status, dayBlocked, expired) {
 }
 
 function dateAnchor(date) {
-  return new Date(`${date}T00:00:00`);
+  return new Date(`${String(date).slice(0, 10)}T12:00:00-05:00`);
 }
 
 function isCountableAppointment(item) {
@@ -5225,11 +5351,10 @@ function barberWhatsappLink(barber) {
 function weekButtons(selected, attr = "data-admin-date") {
   return `<div class="week-cards">${getWeekDatesMemo()
     .map((date) => {
-      const d = new Date(`${date}T00:00:00`);
       const past = isPastDate(date);
       return `<button class="${date === selected ? "active" : ""} ${past ? "past-date" : ""}" ${attr}="${date}">
-        <span>${longDayNames[d.getDay()]}</span>
-        <strong>${String(d.getDate()).padStart(2, "0")}</strong>
+        <span>${dayNameForISODate(date, true)}</span>
+        <strong>${dayNumberForISODate(date)}</strong>
       </button>`;
     })
     .join("")}</div>`;
@@ -5237,11 +5362,10 @@ function weekButtons(selected, attr = "data-admin-date") {
 
 function dateStrip(selected, onClickAttr = "data-date") {
   return `<div class="date-strip">${getWeekDatesMemo().map((date) => {
-    const d = new Date(`${date}T00:00:00`);
     const disabled = onClickAttr === "data-date" && isPastDate(date);
     return `<button class="${date === selected ? "active" : ""} ${disabled ? "past-date" : ""}" ${onClickAttr}="${date}" ${disabled ? "disabled" : ""}>
-      <span>${dayNames[d.getDay()]}</span>
-      <strong>${String(d.getDate()).padStart(2, "0")}</strong>
+      <span>${dayNameForISODate(date)}</span>
+      <strong>${dayNumberForISODate(date)}</strong>
     </button>`;
   }).join("")}</div>`;
 }
@@ -5342,7 +5466,7 @@ function buildBarberSummary(barberId, anchorDate) {
       COUNTABLE_STATUSES.has(item.status)
   );
   const realizedToday = todayReservations.filter(isRealizedAppointment);
-  const weekDates = new Set(getWeekDatesMemo(new Date(`${anchorDate}T00:00:00`)).filter((date) => date <= anchorDate));
+  const weekDates = new Set(getWeekDatesMemo(dateAnchor(anchorDate)).filter((date) => date <= anchorDate));
   const weekAppointments = appointments.filter(
     (item) =>
       item.barberId === barberId &&
@@ -5583,6 +5707,7 @@ function renderPublic() {
   }
   const businessId = business.id;
   const publicServices = reservableServicesForBusiness(businessId);
+  const showPublicPrices = publicPricesVisibleForBusiness(businessId);
   const servicesLoadState = publicServices.length ? { loading: false, slow: false, error: "" } : publicServicesLoadState(businessId);
   const servicesLoading = !publicServices.length && servicesLoadState.loading;
   businessDataLoading = businessDataLoading || servicesLoading;
@@ -5606,8 +5731,9 @@ function renderPublic() {
           ? "barbers"
           : "services";
   const selectedDayLabel = hasSelectedDay
-    ? `${longDayNames[new Date(`${app.selectedDate}T00:00:00`).getDay()]} · ${app.selectedDate}`
+    ? `${dayNameForISODate(app.selectedDate, true)} · ${app.selectedDate}`
     : "";
+  const bookingDayLabel = hasSelectedDay ? `${dayNameForISODate(app.selectedDate, true)} · ${app.selectedDate}` : "";
   const bookingStepper = `<div class="booking-stepper">
       <span class="${currentStep === "services" ? "active" : hasSelectedService ? "done" : ""}">1</span>
       <span class="${currentStep === "barbers" ? "active" : hasSelectedBarber ? "done" : ""}">2</span>
@@ -5638,8 +5764,8 @@ function renderPublic() {
           (service) => `
           <div class="barber-option">
             <button class="barber-card ${service.id === app.selectedServiceId ? "active" : ""}" data-select-service="${service.id}">
-              <div class="summary-badge service-badge">$</div>
-              <span><strong>${escapeHTML(service.name)}</strong><small>${formatCOP(service.value)}</small></span>
+              <div class="summary-badge service-badge">${publicServiceBadgeLabel(businessId)}</div>
+              <span><strong>${escapeHTML(service.name)}</strong>${publicServicePriceMarkup(service, businessId)}</span>
             </button>
           </div>`
         )
@@ -5656,10 +5782,10 @@ function renderPublic() {
     bookingCardTitle = "Elegir barbero";
     bookingCardMicrocopy = "Selecciona el profesional disponible para este servicio.";
     bookingCardSummary = `<div class="selected-card compact-selected">
-      <div class="summary-badge service-badge">$</div>
+      <div class="summary-badge service-badge">${publicServiceBadgeLabel(businessId)}</div>
       <div>
         <strong>${escapeHTML(selectedService?.name || "")}</strong>
-        <small>${selectedService ? formatCOP(selectedService.value) : ""}</small>
+        ${selectedService ? publicServicePriceMarkup(selectedService, businessId) : ""}
       </div>
     </div>`;
     bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button>`;
@@ -5687,10 +5813,10 @@ function renderPublic() {
     bookingCardMicrocopy = "Elige el dia para consultar horarios disponibles.";
     bookingCardSummary = `<div class="booking-selection-stack">
       <div class="selected-card compact-selected">
-        <div class="summary-badge service-badge">$</div>
+        <div class="summary-badge service-badge">${publicServiceBadgeLabel(businessId)}</div>
         <div>
           <strong>${escapeHTML(selectedService?.name || "")}</strong>
-          <small>${selectedService ? formatCOP(selectedService.value) : ""}</small>
+          ${selectedService ? publicServicePriceMarkup(selectedService, businessId) : ""}
         </div>
       </div>
       <div class="selected-card compact-selected">
@@ -5704,11 +5830,10 @@ function renderPublic() {
     bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button>`;
     bookingCardBody = `<div class="date-strip">${getWeekDatesMemo()
       .map((date) => {
-        const d = new Date(`${date}T00:00:00`);
         const disabled = !publicDateAvailableMemo(selected.id, date, businessId);
         return `<button class="${date === app.selectedDate ? "active" : ""} ${disabled ? "past-date" : ""}" data-public-date="${date}" ${disabled ? "disabled" : ""}>
-          <span>${dayNames[d.getDay()]}</span>
-          <strong>${String(d.getDate()).padStart(2, "0")}</strong>
+          <span>${dayNameForISODate(date)}</span>
+          <strong>${dayNumberForISODate(date)}</strong>
         </button>`;
       })
       .join("")}</div>`;
@@ -5716,13 +5841,13 @@ function renderPublic() {
 
   if (currentStep === "slots") {
     bookingCardTitle = "Seleccionar horario";
-    bookingCardMicrocopy = selectedDayLabel;
+    bookingCardMicrocopy = bookingDayLabel;
     bookingCardSummary = `<div class="booking-selection-stack">
       <div class="selected-card compact-selected">
-        <div class="summary-badge service-badge">$</div>
+        <div class="summary-badge service-badge">${publicServiceBadgeLabel(businessId)}</div>
         <div>
           <strong>${escapeHTML(selectedService?.name || "")}</strong>
-          <small>${selectedService ? formatCOP(selectedService.value) : ""}</small>
+          ${selectedService ? publicServicePriceMarkup(selectedService, businessId) : ""}
         </div>
       </div>
       <div class="selected-card compact-selected">
@@ -5733,9 +5858,9 @@ function renderPublic() {
         </div>
       </div>
       <div class="selected-card compact-selected">
-        <div class="summary-badge">${dayNames[new Date(`${app.selectedDate}T00:00:00`).getDay()]}</div>
+        <div class="summary-badge">${dayNameForISODate(app.selectedDate)}</div>
         <div>
-          <strong>${escapeHTML(selectedDayLabel)}</strong>
+          <strong>${escapeHTML(bookingDayLabel)}</strong>
           <small>Dia seleccionado</small>
         </div>
       </div>
@@ -5761,17 +5886,17 @@ function renderPublic() {
     bookingCardMicrocopy = "Completa tus datos para confirmar la reserva.";
     bookingCardSummary = `<div class="booking-selection-stack">
       <div class="selected-card compact-selected">
-        <div class="summary-badge service-badge">$</div>
+        <div class="summary-badge service-badge">${publicServiceBadgeLabel(businessId)}</div>
         <div>
           <strong>${escapeHTML(selectedService?.name || "")}</strong>
-          <small>${selectedService ? formatCOP(selectedService.value) : ""}</small>
+          ${selectedService ? publicServicePriceMarkup(selectedService, businessId) : ""}
         </div>
       </div>
       <div class="selected-card compact-selected">
         ${selected ? avatar(selected, "md") : ""}
         <div>
           <strong>${escapeHTML(selected?.name || "")}</strong>
-          <small>${escapeHTML(selectedDayLabel)}</small>
+          <small>${escapeHTML(bookingDayLabel)}</small>
         </div>
       </div>
       <div class="selected-card compact-selected">
@@ -5989,7 +6114,7 @@ function renderBarber() {
         <div>
           <p class="eyebrow">Agenda del dia actual</p>
           <h1>${escapeHTML(barber.name)}</h1>
-          <span>${longDayNames[new Date(`${date}T00:00:00`).getDay()]} · ${date}</span>
+          <span>${dayNameForISODate(date, true)} · ${date}</span>
         </div>
       </div>
       <button class="secondary-action" data-logout>Salir</button>
@@ -6214,10 +6339,23 @@ function serviceEditorCard(service) {
 
 function servicesSection() {
   const services = [...servicesForBusiness(currentBusinessId())].sort((a, b) => a.name.localeCompare(b.name, "es"));
+  const showPublicPrices = publicPricesVisibleForBusiness(currentBusinessId());
   return `<section class="admin-main">
     <div class="section-title"><span>S</span><h2>Servicios</h2></div>
     <p class="microcopy">Crea y administra servicios sin tocar todavia el flujo actual de reservas.</p>
     ${app.adminServiceMessage ? `<p class="form-note">${escapeHTML(app.adminServiceMessage)}</p>` : ""}
+    <form id="public-price-visibility-form" class="editor-card compact-form">
+      <div class="split-inline">
+        <div>
+          <strong>Mostrar precios al cliente</strong>
+          <p class="microcopy">Controla si la agenda publica muestra el valor de cada servicio.</p>
+        </div>
+        <label class="toggle-line"><input name="showPublicPrices" type="checkbox" ${showPublicPrices ? "checked" : ""} /> Visible en agenda publica</label>
+      </div>
+      <div class="button-row">
+        <button class="primary-action">Guardar preferencia</button>
+      </div>
+    </form>
     <form id="service-create-form" class="editor-card">
       <div class="form-grid">
         <label>Nombre del servicio<input name="name" required placeholder="Corte clasico" /></label>
@@ -6815,7 +6953,7 @@ function adminDashboardSection() {
   const today = todayISO();
   const businessAppointments = store.state.appointments.filter((item) => item.negocioId === businessId);
   const todayAppointments = businessAppointments.filter((item) => item.date === today);
-  const currentWeekDates = getWeekDatesMemo(new Date(`${today}T00:00:00`)).filter((date) => date <= today);
+  const currentWeekDates = getWeekDatesMemo(dateAnchor(today)).filter((date) => date <= today);
   const currentWeekSet = new Set(currentWeekDates);
   const reservedToday = todayAppointments.filter((item) => COUNTABLE_STATUSES.has(item.status)).length;
   const realizedToday = todayAppointments.filter(isRealizedAppointment);
@@ -7108,7 +7246,7 @@ function adminHoursView(barber) {
   return `<div class="agenda-toolbar">
     <div>
       <div class="section-title"><span>H</span><h2>Horarios del dia</h2></div>
-      <p class="microcopy">${longDayNames[new Date(`${app.selectedDate}T00:00:00`).getDay()]} · ${app.selectedDate}</p>
+      <p class="microcopy">${dayNameForISODate(app.selectedDate, true)} · ${app.selectedDate}</p>
     </div>
     <div class="button-row">
       <button class="secondary-action" data-admin-days>Retroceder</button>
@@ -7269,7 +7407,7 @@ function renderBarberV2() {
           : `<div class="agenda-toolbar">
             <div>
               <div class="section-title"><span>H</span><h2>Agenda del dia actual</h2></div>
-              <p class="microcopy">${longDayNames[new Date(`${app.barberDate}T00:00:00`).getDay()]} · ${app.barberDate}</p>
+              <p class="microcopy">${dayNameForISODate(app.barberDate, true)} · ${app.barberDate}</p>
             </div>
             <button class="secondary-action" data-barber-days>Retroceder</button>
           </div>
@@ -8456,6 +8594,31 @@ function bindEvents() {
     render();
   });
 
+  document.querySelector("#public-price-visibility-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const business = currentBusiness();
+    const businessId = currentWritableBusinessId();
+    if (!businessId || isPlaceholderBusiness(business)) {
+      app.adminServiceMessage = "El negocio aun se esta cargando. Intenta nuevamente en unos segundos.";
+      render();
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    const showPublicPrices = form.get("showPublicPrices") === "on";
+    try {
+      await store.upsertBusinessSettingsRemote(businessId, {
+        environment_archive_meta: { showPublicPrices },
+      });
+      app.adminServiceMessage = showPublicPrices
+        ? "Los precios volveran a mostrarse en la agenda publica."
+        : "Los precios se ocultaron en la agenda publica de esta barberia.";
+    } catch (error) {
+      app.adminServiceMessage = "No fue posible guardar la visibilidad de precios.";
+      console.error("Public price visibility save failed", error);
+    }
+    render();
+  });
+
   document.querySelector("#service-create-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const business = currentBusiness();
@@ -9287,6 +9450,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 render();
+
 
 
 
