@@ -1780,6 +1780,7 @@ class StudioStore {
     this.sessionStableBusinessCacheById = new Map();
     this.lastRemoteSyncByKey = new Map();
     this.activeSessionsSupported = null;
+    this.transientEmptyResourceGuards = new Map();
     this.applyingRemote = false;
     this.dailyResetPending = false;
     this.state = this.load();
@@ -2010,6 +2011,7 @@ class StudioStore {
       this.adminAccountsCache.clear();
       this.lastRemoteSyncByKey.clear();
       this.remoteScopeLoadRequestedAt.clear();
+      this.transientEmptyResourceGuards.clear();
       return;
     }
     [...this.remoteStateCache.keys()].forEach((key) => {
@@ -2027,6 +2029,111 @@ class StudioStore {
     [...this.remoteScopeLoadRequestedAt.keys()].forEach((key) => {
       if (key.includes(scopePrefix)) this.remoteScopeLoadRequestedAt.delete(key);
     });
+    [...this.transientEmptyResourceGuards.keys()].forEach((key) => {
+      if (key.includes(scopePrefix)) this.transientEmptyResourceGuards.delete(key);
+    });
+  }
+
+  transientResourceGuardKey(businessId, syncScopeKey, resourceKey) {
+    return `${businessId || "global"}:${syncScopeKey || "scope"}:${resourceKey}`;
+  }
+
+  stabilizeScopedBusinessResource(nextState, {
+    businessId,
+    syncScopeKey,
+    resourceKey,
+    routeView = "",
+    force = false,
+    allowScopeSensitivePreserve = false,
+  } = {}) {
+    if (!businessId || !resourceKey) return nextState;
+    const previousBucket = buildBusinessBucketFromState(this.state, businessId);
+    const nextBucket = buildBusinessBucketFromState(nextState, businessId);
+    const previousRows = previousBucket[resourceKey] || [];
+    const nextRows = nextBucket[resourceKey] || [];
+    const guardKey = this.transientResourceGuardKey(businessId, syncScopeKey, resourceKey);
+    const previousScopeMatches = String(this.state?.meta?.remoteScopeKey || "") === String(syncScopeKey || "");
+
+    if (force || nextRows.length > 0 || previousRows.length === 0) {
+      this.transientEmptyResourceGuards.delete(guardKey);
+      return nextState;
+    }
+
+    if (allowScopeSensitivePreserve && !previousScopeMatches) {
+      this.transientEmptyResourceGuards.delete(guardKey);
+      return nextState;
+    }
+
+    const nextGuardCount = Number(this.transientEmptyResourceGuards.get(guardKey) || 0) + 1;
+    this.transientEmptyResourceGuards.set(guardKey, nextGuardCount);
+
+    if (nextGuardCount >= 2) {
+      this.transientEmptyResourceGuards.delete(guardKey);
+      return nextState;
+    }
+
+    const nextRowsForState = nextState[resourceKey] || [];
+    const mergedRows = [
+      ...nextRowsForState.filter((item) => (item?.negocioId || DEFAULT_BUSINESS_ID) !== businessId),
+      ...previousRows,
+    ];
+
+    console.warn("Transient empty resource prevented", {
+      businessId,
+      resourceKey,
+      routeView,
+      syncScopeKey,
+      previousCount: previousRows.length,
+      guardAttempt: nextGuardCount,
+    });
+
+    return {
+      ...nextState,
+      [resourceKey]: mergedRows,
+    };
+  }
+
+  stabilizeScopedBusinessState(nextState, { businessId, syncScopeKey, route, force = false } = {}) {
+    if (!businessId) return nextState;
+    let stableState = nextState;
+    stableState = this.stabilizeScopedBusinessResource(stableState, {
+      businessId,
+      syncScopeKey,
+      resourceKey: "barbers",
+      routeView: route?.view || "",
+      force,
+    });
+    stableState = this.stabilizeScopedBusinessResource(stableState, {
+      businessId,
+      syncScopeKey,
+      resourceKey: "services",
+      routeView: route?.view || "",
+      force,
+    });
+    stableState = this.stabilizeScopedBusinessResource(stableState, {
+      businessId,
+      syncScopeKey,
+      resourceKey: "barberServices",
+      routeView: route?.view || "",
+      force,
+    });
+    stableState = this.stabilizeScopedBusinessResource(stableState, {
+      businessId,
+      syncScopeKey,
+      resourceKey: "appointments",
+      routeView: route?.view || "",
+      force,
+      allowScopeSensitivePreserve: true,
+    });
+    stableState = this.stabilizeScopedBusinessResource(stableState, {
+      businessId,
+      syncScopeKey,
+      resourceKey: "blockedDays",
+      routeView: route?.view || "",
+      force,
+      allowScopeSensitivePreserve: true,
+    });
+    return stableState;
   }
 
   getCachedRemoteState(cacheKey, ttlMs) {
@@ -2721,9 +2828,16 @@ class StudioStore {
         barberServices: barberServicesData,
       };
 
-      let stampedState = nextState;
+      const stabilizedState = this.stabilizeScopedBusinessState(nextState, {
+        businessId: scopedBusinessId,
+        syncScopeKey,
+        route,
+        force,
+      });
+
+      let stampedState = stabilizedState;
       try {
-        stampedState = this.withStableBusinessCacheStamp(nextState, scopedBusinessId, { full: route.view === "admin" });
+        stampedState = this.withStableBusinessCacheStamp(stabilizedState, scopedBusinessId, { full: route.view === "admin" });
       } catch (cacheError) {
         console.warn("Stable business cache stamp skipped", cacheError);
       }
@@ -4937,6 +5051,13 @@ function requestBusinessDataRefreshIfEmpty(businessId = currentBusinessId(), com
   return true;
 }
 
+function isBusinessDataRefreshPending(businessId = currentBusinessId()) {
+  if (!businessId || !app.emptyBusinessDataRefreshAt) return false;
+  const startedAt = app.emptyBusinessDataRefreshAt[businessId] || 0;
+  if (!startedAt) return false;
+  return Date.now() - startedAt < EMPTY_BUSINESS_DATA_LOADING_MS;
+}
+
 function businessLoadingShell(title = "Preparando entorno") {
   return appShell(`
     <section class="admin-main business-component-loading">
@@ -6044,6 +6165,7 @@ function renderPublic() {
   const servicesLoading = !publicServices.length && servicesLoadState.loading;
   businessDataLoading = businessDataLoading || servicesLoading;
   const activeBarbers = app.selectedServiceId ? barbersForService(app.selectedServiceId) : store.activeBarbersByBusiness(businessId);
+  const waitingBarbersForPublic = !activeBarbers.length && isBusinessDataRefreshPending(businessId);
   const selected = activeBarbers.find((barber) => barber.id === app.selectedBarberId) || null;
   const hasSelectedBarber = Boolean(selected);
   const selectedService = publicServices.find((service) => service.id === app.selectedServiceId) || null;
@@ -6135,7 +6257,9 @@ function renderPublic() {
           </button>`
               )
               .join("")
-          : `<div class="empty-state-card"><p>No hay barberos disponibles para este servicio.</p><button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button></div>`
+          : waitingBarbersForPublic
+            ? `<div class="empty-state-card"><p>Sincronizando barberos disponibles...</p></div>`
+            : `<div class="empty-state-card"><p>No hay barberos disponibles para este servicio.</p><button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button></div>`
       }
     </div>`;
   }
@@ -6672,6 +6796,7 @@ function serviceEditorCard(service) {
 function servicesSection() {
   const services = [...servicesForBusiness(currentBusinessId())].sort((a, b) => a.name.localeCompare(b.name, "es"));
   const showPublicPrices = publicPricesVisibleForBusiness(currentBusinessId());
+  const waitingServices = !services.length && isBusinessDataRefreshPending(currentBusinessId());
   return `<section class="admin-main">
     <div class="section-title"><span>S</span><h2>Servicios</h2></div>
     <p class="microcopy">Crea y administra servicios sin tocar todavia el flujo actual de reservas.</p>
@@ -6704,7 +6829,9 @@ function servicesSection() {
       ${
         services.length
           ? services.map(serviceEditorCard).join("")
-          : `<p class="microcopy">Aun no hay servicios creados.</p>`
+          : waitingServices
+            ? `<p class="microcopy">Sincronizando servicios del negocio...</p>`
+            : `<p class="microcopy">Aun no hay servicios creados.</p>`
       }
     </div>
   </section>`;
@@ -7420,6 +7547,7 @@ function renderAdminV2() {
   const selected = barberById(app.adminBarberId);
   requestBusinessDataRefreshIfEmpty(currentBusinessId(), "BusinessRenderAdmin");
   const businessBarbers = [...barbersForBusiness(currentBusinessId())].sort((a, b) => a.name.localeCompare(b.name, "es"));
+  const waitingBarbers = !businessBarbers.length && isBusinessDataRefreshPending(currentBusinessId());
   const counterSummary = buildCounterSummary(app.selectedDate);
   const selectedRecords = app.adminSelectedSlots
     .map((time) => selected && store.getAppointment(selected.id, app.selectedDate, time))
@@ -7460,7 +7588,12 @@ function renderAdminV2() {
               )
               .join("")}
           </div>`
-              : `<div class="empty-state-card">
+              : waitingBarbers
+                ? `<div class="empty-state-card">
+                  <p>Sincronizando barberos del negocio...</p>
+                  <p>Estamos validando la informacion mas reciente antes de mostrar un estado vacio.</p>
+                </div>`
+                : `<div class="empty-state-card">
                   <p>Aun no hay barberos creados en este negocio.</p>
                   <p>Crea el primer barbero desde el modulo Nuevo barbero para empezar a gestionar la agenda.</p>
                 </div>`
