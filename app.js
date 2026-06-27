@@ -7139,11 +7139,13 @@ function renderSuperAdmin() {
                   <label>Usuario<input name="user" required value="${escapeHTML(account.user || "")}" /></label>
                   <label>Creado<input value="${escapeHTML(account.createdAt || todayISO())}" disabled /></label>
                 </div>
-                ${
-                  visiblePassword
-                    ? `<p class="form-note">Clave visible: <strong>${escapeHTML(visiblePassword.password || "")}</strong> · Usuario: <strong>${escapeHTML(visiblePassword.user || account.user || "")}</strong></p>`
-                    : `<p class="microcopy">No hay clave temporal visible guardada para este administrador.</p>`
-                }
+                <label data-admin-password-row="true">Contrasena fija
+                  <div class="password-inline">
+                    <input name="password" type="${passwordVisible ? "text" : "password"}" value="${escapeHTML(currentPassword)}" autocomplete="new-password" placeholder="Define una clave fija" />
+                    <button class="secondary-action inline-action" type="button" data-toggle-admin-password="${escapeHTML(account.id)}">${passwordVisible ? "Ocultar" : "Mostrar"}</button>
+                  </div>
+                </label>
+                <p class="microcopy">${currentPassword ? "La clave visible pertenece solo a esta barberia y se valida con el login actual." : "Si la clave actual solo existe como hash, define una nueva clave fija para poder verla aqui."}</p>
                 <label class="toggle-line"><input name="active" type="checkbox" ${account.active ? "checked" : ""} /> Activo</label>
                 <div class="button-row">
                   <button class="primary-action">Guardar admin</button>
@@ -7431,11 +7433,13 @@ function renderSuperAdminV2() {
                   <label>Usuario<input name="user" required value="${escapeHTML(account.user || "")}" /></label>
                   <label>Creado<input value="${escapeHTML(account.createdAt || todayISO())}" disabled /></label>
                 </div>
-                ${
-                  visiblePassword
-                    ? `<p class="form-note">Clave visible: <strong>${escapeHTML(visiblePassword.password || "")}</strong> · Usuario: <strong>${escapeHTML(visiblePassword.user || account.user || "")}</strong></p>`
-                    : `<p class="microcopy">No hay clave temporal visible guardada para este administrador.</p>`
-                }
+                <label data-admin-password-row="true">Contrasena fija
+                  <div class="password-inline">
+                    <input name="password" type="${passwordVisible ? "text" : "password"}" value="${escapeHTML(currentPassword)}" autocomplete="new-password" placeholder="Define una clave fija" />
+                    <button class="secondary-action inline-action" type="button" data-toggle-admin-password="${escapeHTML(account.id)}">${passwordVisible ? "Ocultar" : "Mostrar"}</button>
+                  </div>
+                </label>
+                <p class="microcopy">${currentPassword ? "La clave visible pertenece solo a esta barberia y se valida con el login actual." : "Si la clave actual solo existe como hash, define una nueva clave fija para poder verla aqui."}</p>
                 <label class="toggle-line"><input name="active" type="checkbox" ${account.active ? "checked" : ""} /> Activo</label>
                 <div class="button-row">
                   <button class="primary-action">Guardar admin</button>
