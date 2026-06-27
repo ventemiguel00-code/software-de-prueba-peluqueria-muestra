@@ -39,18 +39,16 @@ const DUPLICATE_SYNC_GUARD_MS = 8 * 1000;
 
 const dayNames = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
 const longDayNames = ["Domingo", "Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"];
-const OPEN_HOUR = 8;
-const CLOSE_HOUR = 20;
-const SLOT_MINUTES = 60;
+const DEFAULT_OPENING_TIME = "08:00";
+const DEFAULT_CLOSING_TIME = "20:00";
+const DEFAULT_SLOT_DURATION_MINUTES = 60;
+const ALLOWED_SLOT_DURATIONS = [30, 45, 60];
 const DEFAULT_BUSINESS_ID = "business_principal";
 const DEFAULT_BUSINESS_SLUG = "barberia-principal";
 const PRODUCTION_BASE_URL = "https://software-de-prueba-peluqueria-muest.vercel.app";
 const BUSINESS_TIMEZONE = "America/Bogota";
 const SUPER_ADMIN_USER = "SDMcompany";
 const SUPER_ADMIN_PASSWORD_HASH = "9c92c00e241ec0c78798834456113f123762afcb4ef84e337eafbcf7d372f2fc";
-const baseSlots = Array.from({ length: CLOSE_HOUR - OPEN_HOUR }, (_, index) =>
-  `${String(OPEN_HOUR + index).padStart(2, "0")}:00`
-);
 const BUSINESS_SELECT_COLUMNS =
   "id,business_name,slug,logo_url,theme,primary_color,secondary_color,background_url,active,created_at,updated_at";
 const BUSINESS_SETTINGS_SELECT_COLUMNS =
@@ -365,11 +363,11 @@ function getWeekDatesMemo(anchor = new Date()) {
 
 function slotRowsForBarberDate(barberId, date, businessId = currentBusinessId()) {
   ensureAgendaMemoFresh();
-  const key = `${businessId || "global"}:${barberId || "sin-barbero"}:${date}`;
+  const key = `${businessId || "global"}:${businessScheduleSignature(businessId)}:${barberId || "sin-barbero"}:${date}`;
   if (!agendaMemo.slotRows.has(key)) {
     agendaMemo.slotRows.set(
       key,
-      baseSlots.map((time) => ({ time, ...statusFor(barberId, date, time, businessId) }))
+      slotsForBusiness(businessId).map((time) => ({ time, ...statusFor(barberId, date, time, businessId) }))
     );
   }
   return agendaMemo.slotRows.get(key);
@@ -419,6 +417,76 @@ function parseSlotTime(time) {
   return { hour: hour || 0, minute: minute || 0 };
 }
 
+function slotTimeToMinutes(time) {
+  const parsed = parseSlotTime(time);
+  return parsed.hour * 60 + parsed.minute;
+}
+
+function minutesToSlotTime(minutes) {
+  const normalized = Math.max(0, Math.min(24 * 60, Number(minutes) || 0));
+  const hour = Math.floor(normalized / 60);
+  const minute = normalized % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function normalizeScheduleTime(value, fallback) {
+  const clean = String(value || "").trim();
+  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(clean) ? clean : fallback;
+}
+
+function normalizeSlotDuration(value) {
+  const duration = Number(value);
+  return ALLOWED_SLOT_DURATIONS.includes(duration) ? duration : DEFAULT_SLOT_DURATION_MINUTES;
+}
+
+function normalizeBusinessScheduleConfig(source = {}) {
+  const openingTime = normalizeScheduleTime(
+    source.openingTime ?? source.opening_time,
+    DEFAULT_OPENING_TIME
+  );
+  const closingTime = normalizeScheduleTime(
+    source.closingTime ?? source.closing_time,
+    DEFAULT_CLOSING_TIME
+  );
+  const slotDurationMinutes = normalizeSlotDuration(
+    source.slotDurationMinutes ?? source.slot_duration_minutes
+  );
+  const opensAt = slotTimeToMinutes(openingTime);
+  const closesAt = slotTimeToMinutes(closingTime);
+  if (closesAt <= opensAt || closesAt - opensAt < slotDurationMinutes) {
+    return {
+      openingTime: DEFAULT_OPENING_TIME,
+      closingTime: DEFAULT_CLOSING_TIME,
+      slotDurationMinutes: DEFAULT_SLOT_DURATION_MINUTES,
+    };
+  }
+  return { openingTime, closingTime, slotDurationMinutes };
+}
+
+function buildBusinessSlots(config = {}) {
+  const normalized = normalizeBusinessScheduleConfig(config);
+  const startsAt = slotTimeToMinutes(normalized.openingTime);
+  const endsAt = slotTimeToMinutes(normalized.closingTime);
+  const slots = [];
+  for (let current = startsAt; current + normalized.slotDurationMinutes <= endsAt; current += normalized.slotDurationMinutes) {
+    slots.push(minutesToSlotTime(current));
+  }
+  return slots.length ? slots : [DEFAULT_OPENING_TIME];
+}
+
+function businessScheduleConfig(businessId = currentBusinessId()) {
+  return store.businessSettingsForBusiness(businessId).schedule;
+}
+
+function businessScheduleSignature(businessId = currentBusinessId()) {
+  const schedule = businessScheduleConfig(businessId);
+  return `${schedule.openingTime}-${schedule.closingTime}-${schedule.slotDurationMinutes}`;
+}
+
+function slotsForBusiness(businessId = currentBusinessId()) {
+  return buildBusinessSlots(businessScheduleConfig(businessId));
+}
+
 function formatAmPm(hour, minute = 0) {
   const suffix = hour >= 12 ? "PM" : "AM";
   const normalized = hour % 12 || 12;
@@ -431,9 +499,9 @@ function addMinutesToSlot(time, minutesToAdd) {
   return { hour: Math.floor(total / 60), minute: total % 60 };
 }
 
-function slotRange(time) {
+function slotRange(time, businessId = currentBusinessId()) {
   const start = parseSlotTime(time);
-  const end = addMinutesToSlot(time, SLOT_MINUTES);
+  const end = addMinutesToSlot(time, businessScheduleConfig(businessId).slotDurationMinutes);
   return `${formatAmPm(start.hour, start.minute)} - ${formatAmPm(end.hour, end.minute)}`;
 }
 
@@ -3460,6 +3528,9 @@ class StudioStore {
       environment_archive_meta: {
         ...(environmentAttachment || { mode: "dynamic_base" }),
         themeColors: colorsForBusiness(business),
+        openingTime: DEFAULT_OPENING_TIME,
+        closingTime: DEFAULT_CLOSING_TIME,
+        slotDurationMinutes: DEFAULT_SLOT_DURATION_MINUTES,
       },
       theme_override: business.theme || "",
       custom_domain: "",
@@ -3702,15 +3773,28 @@ class StudioStore {
     );
     rowsByBusiness.forEach((row, businessId) => {
       const meta = row?.environment_archive_meta || {};
+      const hasPublicPriceSetting =
+        Object.prototype.hasOwnProperty.call(row || {}, "show_public_prices") ||
+        Object.prototype.hasOwnProperty.call(meta, "showPublicPrices") ||
+        Object.prototype.hasOwnProperty.call(meta, "show_public_prices");
       this.businessSettingsByBusiness.set(businessId, {
         businessId,
         row,
         meta,
+        publicPricesResolved: hasPublicPriceSetting,
         showPublicPrices: parseShowPublicPricesSetting(
           row?.show_public_prices ?? meta?.showPublicPrices ?? meta?.show_public_prices
         ),
+        schedule: normalizeBusinessScheduleConfig({
+          openingTime: row?.opening_time ?? meta?.openingTime ?? meta?.opening_time,
+          closingTime: row?.closing_time ?? meta?.closingTime ?? meta?.closing_time,
+          slotDurationMinutes:
+            row?.slot_duration_minutes ?? meta?.slotDurationMinutes ?? meta?.slot_duration_minutes,
+        }),
       });
     });
+    agendaMemo.slotRows.clear();
+    agendaMemo.publicDateAvailability.clear();
 
     if (scopedBusinessId) {
       const row = rowsByBusiness.get(scopedBusinessId);
@@ -3771,7 +3855,9 @@ class StudioStore {
         businessId: id,
         row: null,
         meta: {},
-        showPublicPrices: true,
+        publicPricesResolved: false,
+        showPublicPrices: false,
+        schedule: normalizeBusinessScheduleConfig(),
       }
     );
   }
@@ -4176,7 +4262,7 @@ class StudioStore {
 
   blockAvailableSlots(barberId, date) {
     if (!this.barberBelongsToBusiness(barberId, currentBusinessId())) return;
-    baseSlots.forEach((time) => {
+    slotsForBusiness(currentBusinessId()).forEach((time) => {
       if (!this.getAppointment(barberId, date, time)) {
         this.upsertAppointment({
           barberId,
@@ -5352,11 +5438,15 @@ function activeServicesForBusiness(businessId = currentBusinessId()) {
 function parseShowPublicPricesSetting(source = null) {
   if (source === false) return false;
   if (source === true) return true;
-  return true;
+  const normalized = String(source ?? "").trim().toLowerCase();
+  if (["true", "1", "si", "yes"].includes(normalized)) return true;
+  if (["false", "0", "no"].includes(normalized)) return false;
+  return false;
 }
 
 function publicPricesVisibleForBusiness(businessId = currentBusinessId()) {
-  return store.businessSettingsForBusiness(businessId).showPublicPrices !== false;
+  const settings = store.businessSettingsForBusiness(businessId);
+  return settings.publicPricesResolved && settings.showPublicPrices === true;
 }
 
 function publicServicePriceMarkup(service, businessId = currentBusinessId()) {
@@ -5753,6 +5843,7 @@ app = {
   adminActionMessage: "",
   adminBarberMessage: "",
   adminServiceMessage: "",
+  adminScheduleMessage: "",
   backgroundMedia: loadBackgroundMedia(DEFAULT_BUSINESS_ID),
   backgroundMessage: "",
   pendingBackgroundVideo: null,
@@ -6230,7 +6321,7 @@ function servicesForBarber(barberId) {
 
 function isPublicDateAvailable(barberId, date, businessId = currentBusinessId()) {
   if (!barberId || isPastDate(date)) return false;
-  return baseSlots.some((time) => isPublicSlotBookable(barberId, date, time, businessId));
+  return slotsForBusiness(businessId).some((time) => isPublicSlotBookable(barberId, date, time, businessId));
 }
 
 function BusinessPublicTemplate({
@@ -6633,7 +6724,7 @@ function renderPublic() {
           <span>Servicio</span><strong>${escapeHTML(selectedService?.name || "")}</strong>
           <span>Barbero</span><strong>${escapeHTML(selected?.name || "")}</strong>
           <span>Fecha</span><strong>${escapeHTML(app.selectedDate)}</strong>
-          <span>Hora</span><strong>${slotRange(app.selectedSlot || "08:00")}</strong>
+          <span>Hora</span><strong>${slotRange(app.selectedSlot || businessScheduleConfig(businessId).openingTime, businessId)}</strong>
         </div>
         <label>Nombre<input name="clientName" required placeholder="Tu nombre" /></label>
         <label>WhatsApp<input name="whatsapp" required inputmode="tel" placeholder="300 123 4567" /></label>
@@ -7096,6 +7187,35 @@ function servicesSection() {
             ? `<p class="microcopy">Sincronizando servicios del negocio...</p>`
             : `<p class="microcopy">Aun no hay servicios creados.</p>`
       }
+    </div>
+  </section>`;
+}
+
+function attentionHoursSection() {
+  const businessId = currentBusinessId();
+  const schedule = businessScheduleConfig(businessId);
+  const previewSlots = slotsForBusiness(businessId);
+  return `<section class="admin-main">
+    <div class="section-title"><span>H</span><h2>Horarios de atencion</h2></div>
+    <p class="microcopy">Configura las franjas que usara esta barberia en agenda publica, panel administrador y panel barbero.</p>
+    ${app.adminScheduleMessage ? `<p class="form-note">${escapeHTML(app.adminScheduleMessage)}</p>` : ""}
+    <form id="business-schedule-form" class="editor-card compact-form">
+      <div class="form-grid">
+        <label>Hora de apertura<input name="openingTime" type="time" required value="${escapeHTML(schedule.openingTime)}" /></label>
+        <label>Hora de cierre<input name="closingTime" type="time" required value="${escapeHTML(schedule.closingTime)}" /></label>
+        <label>Duracion del intervalo
+          <select name="slotDurationMinutes">
+            ${ALLOWED_SLOT_DURATIONS.map((duration) => `<option value="${duration}" ${duration === schedule.slotDurationMinutes ? "selected" : ""}>${duration} minutos</option>`).join("")}
+          </select>
+        </label>
+      </div>
+      <div class="button-row">
+        <button class="primary-action">Guardar horarios</button>
+      </div>
+    </form>
+    <div class="empty-state-card">
+      <p>Vista previa: ${previewSlots.length} franjas activas.</p>
+      <p>${escapeHTML(slotRange(previewSlots[0] || schedule.openingTime, businessId))} hasta ${escapeHTML(slotRange(previewSlots[previewSlots.length - 1] || schedule.openingTime, businessId))}</p>
     </div>
   </section>`;
 }
@@ -7869,6 +7989,7 @@ function renderAdminV2() {
           }
         </section>
         ${renderAccordionPanel("new-barber", "+", "Nuevo barbero", app.adminOpenPanel === "new-barber" ? barberEditorForm(null, "Crear barbero") : "", app.adminOpenPanel === "new-barber")}
+        ${renderAccordionPanel("attention-hours", "H", "Horarios de atencion", app.adminOpenPanel === "attention-hours" ? attentionHoursSection() : "", app.adminOpenPanel === "attention-hours")}
         ${renderAccordionPanel("services", "S", "Servicios", app.adminOpenPanel === "services" ? servicesSection() : "", app.adminOpenPanel === "services")}
         ${renderAccordionPanel("dynamic-bg", "U", "Fondo dinamico", app.adminOpenPanel === "dynamic-bg" ? backgroundSettingsSection() : "", app.adminOpenPanel === "dynamic-bg")}
         ${isPrincipalAdmin() ? renderAccordionPanel("admin-accounts", "U", "Gestionar administradores", app.adminOpenPanel === "admin-accounts" ? adminAccountsSection() : "", app.adminOpenPanel === "admin-accounts") : ""}
@@ -9418,6 +9539,57 @@ function bindEvents() {
     } catch (error) {
       app.adminServiceMessage = "No fue posible guardar la visibilidad de precios.";
       console.error("Public price visibility save failed", error);
+    }
+    render();
+  });
+
+  document.querySelector("#business-schedule-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const business = currentBusiness();
+    const businessId = currentWritableBusinessId();
+    if (!businessId || isPlaceholderBusiness(business)) {
+      app.adminScheduleMessage = "El negocio aun se esta cargando. Intenta nuevamente en unos segundos.";
+      render();
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    const openingTime = normalizeScheduleTime(form.get("openingTime"), "");
+    const closingTime = normalizeScheduleTime(form.get("closingTime"), "");
+    const slotDurationMinutes = normalizeSlotDuration(form.get("slotDurationMinutes"));
+    if (!openingTime || !closingTime) {
+      app.adminScheduleMessage = "Ingresa una hora de apertura y cierre validas.";
+      render();
+      return;
+    }
+    if (slotTimeToMinutes(closingTime) - slotTimeToMinutes(openingTime) < slotDurationMinutes) {
+      app.adminScheduleMessage = "El rango debe permitir al menos una franja completa.";
+      render();
+      return;
+    }
+    const nextSchedule = normalizeBusinessScheduleConfig({
+      openingTime,
+      closingTime,
+      slotDurationMinutes,
+    });
+    const openingMinutes = slotTimeToMinutes(nextSchedule.openingTime);
+    const closingMinutes = slotTimeToMinutes(nextSchedule.closingTime);
+    if (closingMinutes <= openingMinutes) {
+      app.adminScheduleMessage = "La hora de cierre debe ser mayor a la hora de apertura.";
+      render();
+      return;
+    }
+    try {
+      await store.upsertBusinessSettingsRemote(businessId, {
+        environment_archive_meta: nextSchedule,
+      });
+      agendaMemo.slotRows.clear();
+      agendaMemo.publicDateAvailability.clear();
+      app.adminSelectedSlots = [];
+      app.selectedSlot = "";
+      app.adminScheduleMessage = "Horarios de atencion actualizados para esta barberia.";
+    } catch (error) {
+      app.adminScheduleMessage = "No fue posible guardar los horarios de atencion.";
+      console.error("Business schedule save failed", error);
     }
     render();
   });
