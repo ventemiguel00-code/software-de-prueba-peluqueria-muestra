@@ -72,6 +72,8 @@ const PUBLIC_SERVICE_SELECT_COLUMNS =
   "id,business_id,service_name,service_value,active,created_at";
 const BARBER_SERVICE_SELECT_COLUMNS = "id,business_id,barber_id,service_id,active,created_at";
 const ADMIN_ACCOUNT_SELECT_COLUMNS =
+  "id,business_id,admin_name,admin_user,password,password_hash,role,active,created_at,updated_at";
+const ADMIN_ACCOUNT_SELECT_COLUMNS_LEGACY =
   "id,business_id,admin_name,admin_user,password_hash,role,active,created_at,updated_at";
 
 const avatarGradients = [
@@ -1729,6 +1731,7 @@ function mapAdminAccountToRow(account) {
     business_id: account.businessId || DEFAULT_BUSINESS_ID,
     admin_name: account.name || "",
     admin_user: account.user || "",
+    password: account.password || "",
     password_hash: account.passwordHash || "",
     role: account.role || "admin_negocio",
     active: account.active !== false,
@@ -1746,7 +1749,7 @@ function mapRowToAdminAccount(row, businesses = []) {
     businessSlug: business?.slug || "",
     name: row.admin_name || "",
     user: row.admin_user || "",
-    password: "",
+    password: row.password || "",
     passwordHash: row.password_hash || "",
     role: row.role || "admin_negocio",
     active: row.active !== false,
@@ -3482,17 +3485,43 @@ class StudioStore {
       saveAdminAccounts(cached.accounts);
       return true;
     }
-    let query = this.supabase.from("admin_accounts").select(ADMIN_ACCOUNT_SELECT_COLUMNS).order("created_at", { ascending: true });
-    if (businessId) {
-      query = query.eq("business_id", businessId);
+    const buildAdminAccountsQuery = (columns) => {
+      let query = this.supabase.from("admin_accounts").select(columns).order("created_at", { ascending: true });
+      if (businessId) {
+        query = query.eq("business_id", businessId);
+      }
+      return query;
+    };
+    let { data, error } = await this.trackedQuery(
+      "admin_accounts",
+      `admin-accounts:${businessId || "global"}`,
+      buildAdminAccountsQuery(ADMIN_ACCOUNT_SELECT_COLUMNS)
+    );
+    if (error && ["42703", "PGRST204", "PGRST205"].includes(error.code || "")) {
+      const legacyResult = await this.trackedQuery(
+        "admin_accounts:legacy",
+        `admin-accounts:${businessId || "global"}`,
+        buildAdminAccountsQuery(ADMIN_ACCOUNT_SELECT_COLUMNS_LEGACY)
+      );
+      data = legacyResult.data;
+      error = legacyResult.error;
     }
-    const { data, error } = await this.trackedQuery("admin_accounts", `admin-accounts:${businessId || "global"}`, query);
     if (error) {
       if (error.code === "42P01") return false;
       throw error;
     }
 
     const remoteAccounts = (data || []).map((row) => mapRowToAdminAccount(row, businesses));
+    remoteAccounts.forEach((account) => {
+      if (account.password) {
+        setVisibleAdminPassword(account.id, {
+          businessId: account.businessId,
+          businessName: businesses.find((item) => item.id === account.businessId)?.name || "Barberia",
+          user: account.user,
+          password: account.password,
+        });
+      }
+    });
     const localAccounts = loadAdminAccounts().filter((account) => account.id !== PRINCIPAL_ADMIN.id);
     const preservedAccounts = businessId
       ? localAccounts.filter((account) => account.businessId !== businessId)
@@ -3814,12 +3843,27 @@ class StudioStore {
 
   async upsertAdminAccountRemote(account) {
     if (!this.supabase || !account?.id || account.id === PRINCIPAL_ADMIN.id) return true;
-    const { error } = await this.supabase
+    let { error } = await this.supabase
       .from("admin_accounts")
       .upsert(mapAdminAccountToRow(account), { onConflict: "id" });
+    if (error && ["42703", "PGRST204", "PGRST205"].includes(error.code || "")) {
+      const legacyPayload = mapAdminAccountToRow({ ...account, password: "" });
+      delete legacyPayload.password;
+      ({ error } = await this.supabase
+        .from("admin_accounts")
+        .upsert(legacyPayload, { onConflict: "id" }));
+    }
     if (error) {
       if (error.code === "42P01") return false;
       throw error;
+    }
+    if (account.password) {
+      setVisibleAdminPassword(account.id, {
+        businessId: account.businessId,
+        businessName: this.businessById(account.businessId)?.name || "Barberia",
+        user: account.user,
+        password: account.password,
+      });
     }
     return true;
   }
@@ -4329,7 +4373,12 @@ function loadAdminAccounts() {
     accounts = [];
   }
 
-  const secondary = accounts.filter((account) => account.id !== PRINCIPAL_ADMIN.id);
+  const secondary = accounts
+    .filter((account) => account.id !== PRINCIPAL_ADMIN.id)
+    .map((account) => ({
+      ...account,
+      password: "",
+    }));
   return [PRINCIPAL_ADMIN, ...secondary];
 }
 
@@ -4340,20 +4389,26 @@ function adminAccountsForBusiness(businessId = currentBusinessId()) {
 function saveAdminAccounts(accounts) {
   const normalized = [
     PRINCIPAL_ADMIN,
-    ...accounts.filter((account) => account.id !== PRINCIPAL_ADMIN.id),
+    ...accounts
+      .filter((account) => account.id !== PRINCIPAL_ADMIN.id)
+      .map((account) => ({
+        ...account,
+        password: "",
+      })),
   ];
   localStorage.setItem(ADMIN_ACCOUNTS_KEY, JSON.stringify(normalized));
 }
 
 function upsertLocalAdminAccount(account) {
   if (!account?.id) return null;
+  const visiblePassword = String(account.password || "").trim();
   const normalizedAccount = {
     id: account.id,
     businessId: account.businessId || currentBusinessId() || DEFAULT_BUSINESS_ID,
     businessSlug: account.businessSlug || currentBusiness()?.slug || "",
     name: account.name || "",
     user: account.user || "",
-    password: account.password || "",
+    password: "",
     passwordHash: account.passwordHash || "",
     role: account.role || "admin_negocio",
     active: account.active !== false,
@@ -4361,23 +4416,31 @@ function upsertLocalAdminAccount(account) {
   };
   const existing = loadAdminAccounts().filter((item) => item.id !== PRINCIPAL_ADMIN.id);
   const nextAccounts = existing.some((item) => item.id === normalizedAccount.id)
-    ? existing.map((item) => (item.id === normalizedAccount.id ? { ...item, ...normalizedAccount } : item))
-    : [...existing, normalizedAccount];
+      ? existing.map((item) => (item.id === normalizedAccount.id ? { ...item, ...normalizedAccount } : item))
+      : [...existing, normalizedAccount];
   saveAdminAccounts(nextAccounts);
+  if (visiblePassword) {
+    setVisibleAdminPassword(normalizedAccount.id, {
+      businessId: normalizedAccount.businessId,
+      businessName: store?.businessById?.(normalizedAccount.businessId)?.name || currentBusiness()?.name || "Barberia",
+      user: normalizedAccount.user,
+      password: visiblePassword,
+    });
+  }
   return normalizedAccount;
 }
 
 function loadVisibleAdminPasswords() {
-  const raw = localStorage.getItem(SUPER_ADMIN_VISIBLE_PASSWORDS_KEY);
-  try {
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
+  if (typeof window === "undefined") return {};
+  return window.__superAdminVisiblePasswords || {};
 }
 
 function saveVisibleAdminPasswords(map) {
-  localStorage.setItem(SUPER_ADMIN_VISIBLE_PASSWORDS_KEY, JSON.stringify(map || {}));
+  if (typeof window === "undefined") return;
+  window.__superAdminVisiblePasswords = { ...(map || {}) };
+  if (typeof app === "object" && app) {
+    app.superAdminVisiblePasswords = window.__superAdminVisiblePasswords;
+  }
 }
 
 function loadDeletedBusinessIds() {
@@ -4410,6 +4473,25 @@ function setVisibleAdminPassword(accountId, payload) {
 
 function visibleAdminPassword(accountId) {
   return loadVisibleAdminPasswords()[accountId] || null;
+}
+
+function adminPasswordValue(account) {
+  if (!account?.id) return "";
+  const visible = visibleAdminPassword(account.id);
+  if (visible?.password) return visible.password;
+  return String(account.password || "");
+}
+
+function isAdminPasswordVisible(accountId) {
+  return Boolean(app?.superAdminPasswordVisibility?.[accountId]);
+}
+
+function setAdminPasswordVisibility(accountId, visible) {
+  if (!accountId || !app) return;
+  app.superAdminPasswordVisibility = {
+    ...(app.superAdminPasswordVisibility || {}),
+    [accountId]: Boolean(visible),
+  };
 }
 
 function readStoredJSON(storage, key) {
@@ -5480,8 +5562,10 @@ async function findAdminAccount(user, password, businessId = null) {
     candidates.find(
       (account) =>
         String(account.user || "").trim().toLowerCase() === normalizedUser &&
-        account.password &&
-        account.password === password
+        (
+          (account.password && account.password === password) ||
+          visibleAdminPassword(account.id)?.password === password
+        )
     ) || null;
   if (!legacyMatch) return null;
 
@@ -5654,6 +5738,8 @@ app = {
   superAdminLoginError: "",
   superAdminMessage: "",
   superAdminCredentialReveal: null,
+  superAdminVisiblePasswords: loadVisibleAdminPasswords(),
+  superAdminPasswordVisibility: {},
   superAdminPendingLogos: {},
   superAdminPendingLogoFiles: {},
   superAdminPendingEnvironmentArchives: {},
@@ -7045,7 +7131,9 @@ function renderSuperAdmin() {
         ? admins
             .map(
               (account) => {
-                const visiblePassword = visibleAdminPassword(account.id);
+                const currentPassword = adminPasswordValue(account);
+                const passwordVisible = isAdminPasswordVisible(account.id);
+                const visiblePassword = currentPassword ? { password: currentPassword, user: account.user } : null;
                 return `<form class="super-admin-account-edit form-stack" data-admin-account-id="${escapeHTML(account.id)}">
                 <div class="form-grid">
                   <label>Nombre<input name="name" required value="${escapeHTML(account.name || "")}" /></label>
@@ -7336,7 +7424,9 @@ function renderSuperAdminV2() {
         ? admins
             .map(
               (account) => {
-                const visiblePassword = visibleAdminPassword(account.id);
+                const currentPassword = adminPasswordValue(account);
+                const passwordVisible = isAdminPasswordVisible(account.id);
+                const visiblePassword = currentPassword ? { password: currentPassword, user: account.user } : null;
                 return `<form class="super-admin-account-edit form-stack" data-admin-account-id="${escapeHTML(account.id)}">
                 <div class="form-grid">
                   <label>Nombre<input name="name" required value="${escapeHTML(account.name || "")}" /></label>
@@ -8630,6 +8720,7 @@ function bindEvents() {
       businessSlug: business.slug,
       name: adminName,
       user: "Desarrollo",
+      password: generatedPassword,
       passwordHash: "",
       role: "admin_negocio",
       active: true,
@@ -8836,6 +8927,7 @@ function bindEvents() {
         businessSlug: business.slug,
         name,
         user,
+        password: generatedPassword,
         passwordHash: "",
         role: "admin_negocio",
         active: form.get("active") === "on",
@@ -8873,6 +8965,40 @@ function bindEvents() {
   });
 
   document.querySelectorAll(".super-admin-account-edit").forEach((formEl) => {
+    const accountId = formEl.dataset.adminAccountId;
+    const account = loadAdminAccounts().find((item) => item.id === accountId);
+    const currentPassword = adminPasswordValue(account);
+    const passwordVisible = isAdminPasswordVisible(accountId);
+    if (account && !formEl.querySelector("[data-admin-password-row]")) {
+      const toggleLine = formEl.querySelector(".toggle-line");
+      const helperNote = formEl.querySelector(".form-note, .microcopy");
+      const passwordBlock = document.createElement("label");
+      passwordBlock.setAttribute("data-admin-password-row", "true");
+      passwordBlock.innerHTML = `Contrasena fija
+        <div class="password-inline">
+          <input name="password" type="${passwordVisible ? "text" : "password"}" value="${escapeHTML(currentPassword)}" autocomplete="new-password" placeholder="Define una clave fija" />
+          <button class="secondary-action inline-action" type="button" data-toggle-admin-password="${escapeHTML(account.id)}">${passwordVisible ? "Ocultar" : "Mostrar"}</button>
+        </div>`;
+      toggleLine?.before(passwordBlock);
+      if (helperNote) {
+        helperNote.className = "microcopy";
+        helperNote.textContent = currentPassword
+          ? "La clave visible pertenece solo a esta barberia y se valida con el login actual."
+          : "Si la clave actual solo existe como hash, define una nueva contrasena fija para poder verla aqui.";
+      }
+    }
+  });
+
+  document.querySelectorAll("[data-toggle-admin-password]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const accountId = button.dataset.toggleAdminPassword;
+      if (!accountId) return;
+      setAdminPasswordVisibility(accountId, !isAdminPasswordVisible(accountId));
+      render();
+    });
+  });
+
+  document.querySelectorAll(".super-admin-account-edit").forEach((formEl) => {
     formEl.addEventListener("submit", async (event) => {
       event.preventDefault();
       const form = new FormData(event.currentTarget);
@@ -8893,6 +9019,23 @@ function bindEvents() {
       account.name = String(form.get("name") || "").trim();
       account.user = nextUser;
       account.active = form.get("active") === "on";
+      const submittedPassword = String(form.get("password") || "").trim();
+      const resolvedPassword = submittedPassword || adminPasswordValue(account);
+      if (submittedPassword) {
+        account.password = submittedPassword;
+        account.passwordHash = await sha256(submittedPassword);
+      } else {
+        account.password = resolvedPassword || "";
+      }
+      if (resolvedPassword) {
+        const business = store.businessById(account.businessId);
+        setVisibleAdminPassword(account.id, {
+          businessId: account.businessId,
+          businessName: business?.name || "Barberia",
+          user: account.user,
+          password: resolvedPassword,
+        });
+      }
       saveAdminAccounts(allAccounts);
       try {
         await store.upsertAdminAccountRemote(account);
@@ -8915,7 +9058,7 @@ function bindEvents() {
       try {
         const hash = await sha256(generatedPassword);
         const business = store.businessById(account.businessId);
-        account.password = "";
+        account.password = generatedPassword;
         account.passwordHash = hash;
         saveAdminAccounts(accounts);
         setVisibleAdminPassword(account.id, {
