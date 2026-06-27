@@ -770,6 +770,21 @@ function getBusinessBucket(businessId = currentBusinessId()) {
   const id = businessId || DEFAULT_BUSINESS_ID;
   if (derivedBusinessCache.buckets.has(id)) return derivedBusinessCache.buckets.get(id);
   const bucket = buildBusinessBucketFromState(store.state, id);
+  const liveStore = runtimeStore();
+  if (liveStore?.renderableResourceRows) {
+    bucket.barbers = liveStore.renderableResourceRows("barbers", id, bucket.barbers);
+    bucket.activeBarbers = bucket.barbers.filter((barber) => barber.active);
+    bucket.services = liveStore.renderableResourceRows("services", id, bucket.services);
+    bucket.activeServices = bucket.services.filter((service) => service.active);
+    bucket.appointments = liveStore.renderableResourceRows("appointments", id, bucket.appointments);
+    bucket.barbersById = new Map(bucket.barbers.map((barber) => [barber.id, barber]));
+    bucket.servicesById = new Map(bucket.services.map((service) => [service.id, service]));
+    bucket.appointmentsById = new Map(bucket.appointments.map((appointment) => [appointment.id, appointment]));
+    bucket.appointmentBySlot = new Map();
+    bucket.appointments.forEach((appointment) => {
+      bucket.appointmentBySlot.set(`${appointment.barberId}|${appointment.date}|${appointment.time}`, appointment);
+    });
+  }
   derivedBusinessCache.buckets.set(id, bucket);
   return bucket;
 }
@@ -1781,6 +1796,11 @@ class StudioStore {
     this.lastRemoteSyncByKey = new Map();
     this.activeSessionsSupported = null;
     this.transientEmptyResourceGuards = new Map();
+    this.resourceViewState = {
+      barbers: new Map(),
+      services: new Map(),
+      appointments: new Map(),
+    };
     this.applyingRemote = false;
     this.dailyResetPending = false;
     this.state = this.load();
@@ -1858,6 +1878,17 @@ class StudioStore {
     }
     this.state = this.stateWithRuntimeScope(this.state);
     localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+    if (changedBusinessId) {
+      const currentScopeKey = this.currentRuntimeScopeKey(resolveRoute(location.pathname));
+      if (event.table === "barbers") {
+        this.syncResourceViewFromState("barbers", changedBusinessId, currentScopeKey);
+        this.syncResourceViewFromState("appointments", changedBusinessId, currentScopeKey);
+      } else if (event.table === "services") {
+        this.syncResourceViewFromState("services", changedBusinessId, currentScopeKey);
+      } else if (event.table === "appointments") {
+        this.syncResourceViewFromState("appointments", changedBusinessId, currentScopeKey);
+      }
+    }
     this.emit(event);
     this.channel?.postMessage(event);
     if (!event.skipRemote && this.supabase && !this.applyingRemote) {
@@ -2134,6 +2165,98 @@ class StudioStore {
       allowScopeSensitivePreserve: true,
     });
     return stableState;
+  }
+
+  resourceViewScopeKey(businessId = "", syncScopeKey = "") {
+    return `${businessId || "global"}:${syncScopeKey || this.currentRuntimeScopeKey(resolveRoute(location.pathname))}`;
+  }
+
+  resourceViewEntry(resourceKey, businessId = "", syncScopeKey = "") {
+    const map = this.resourceViewState?.[resourceKey];
+    if (!map) return null;
+    return map.get(this.resourceViewScopeKey(businessId, syncScopeKey)) || null;
+  }
+
+  setResourceViewEntry(resourceKey, businessId = "", syncScopeKey = "", entry = null) {
+    const map = this.resourceViewState?.[resourceKey];
+    if (!map) return;
+    const key = this.resourceViewScopeKey(businessId, syncScopeKey);
+    if (!entry) {
+      map.delete(key);
+      return;
+    }
+    map.set(key, entry);
+  }
+
+  snapshotResourceRows(resourceKey, businessId, state = this.state) {
+    const bucket = buildBusinessBucketFromState(state, businessId);
+    return [...(bucket[resourceKey] || [])];
+  }
+
+  beginResourceLoading(resourceKey, businessId, syncScopeKey = "") {
+    if (!RESOURCE_VIEW_KEYS.includes(resourceKey) || !businessId) return;
+    const currentRows = this.snapshotResourceRows(resourceKey, businessId, this.state);
+    const previous = this.resourceViewEntry(resourceKey, businessId, syncScopeKey);
+    this.setResourceViewEntry(resourceKey, businessId, syncScopeKey, {
+      loading: true,
+      data: previous?.data?.length ? previous.data : currentRows,
+      lastValidData: previous?.lastValidData?.length ? previous.lastValidData : currentRows,
+      confirmedEmpty: false,
+      error: "",
+      updatedAt: Date.now(),
+    });
+  }
+
+  commitResourceLoading(resourceKey, businessId, rows = [], { syncScopeKey = "", success = true, error = "" } = {}) {
+    if (!RESOURCE_VIEW_KEYS.includes(resourceKey) || !businessId) return;
+    const previous = this.resourceViewEntry(resourceKey, businessId, syncScopeKey);
+    const normalizedRows = Array.isArray(rows) ? rows : [];
+    const nextLastValidData =
+      success && normalizedRows.length
+        ? normalizedRows
+        : previous?.lastValidData?.length
+          ? previous.lastValidData
+          : [];
+    const nextData =
+      success
+        ? normalizedRows
+        : previous?.data?.length
+          ? previous.data
+          : nextLastValidData;
+    this.setResourceViewEntry(resourceKey, businessId, syncScopeKey, {
+      loading: false,
+      data: nextData,
+      lastValidData: nextLastValidData,
+      confirmedEmpty: Boolean(success && normalizedRows.length === 0),
+      error: success ? "" : String(error || ""),
+      updatedAt: Date.now(),
+    });
+  }
+
+  syncResourceViewFromState(resourceKey, businessId, syncScopeKey = "") {
+    if (!RESOURCE_VIEW_KEYS.includes(resourceKey) || !businessId) return;
+    const rows = this.snapshotResourceRows(resourceKey, businessId, this.state);
+    const previous = this.resourceViewEntry(resourceKey, businessId, syncScopeKey);
+    this.setResourceViewEntry(resourceKey, businessId, syncScopeKey, {
+      loading: false,
+      data: rows,
+      lastValidData: rows.length ? rows : previous?.lastValidData || [],
+      confirmedEmpty: rows.length === 0,
+      error: "",
+      updatedAt: Date.now(),
+    });
+  }
+
+  renderableResourceRows(resourceKey, businessId, fallbackRows = []) {
+    if (!RESOURCE_VIEW_KEYS.includes(resourceKey) || !businessId) return fallbackRows;
+    const entry = this.resourceViewEntry(resourceKey, businessId);
+    if (!entry) return fallbackRows;
+    if (entry.loading) {
+      if (Array.isArray(entry.lastValidData) && entry.lastValidData.length) return entry.lastValidData;
+      if (Array.isArray(entry.data) && entry.data.length) return entry.data;
+      return Array.isArray(fallbackRows) ? fallbackRows : [];
+    }
+    return Array.isArray(entry.data) ? entry.data : Array.isArray(fallbackRows) ? fallbackRows : [];
   }
 
   getCachedRemoteState(cacheKey, ttlMs) {
@@ -2454,10 +2577,14 @@ class StudioStore {
     this.syncInFlight = true;
     this.remoteAttemptedAt = Date.now();
     this.remoteLastError = "";
+    let activeRoute = null;
+    let activeSyncScopeKey = "";
+    let activeScopedBusinessId = "";
 
     try {
       const localState = this.loadLocalState();
       const route = resolveRoute(location.pathname);
+      activeRoute = route;
       const queryScope = `${route.view}:${route.businessSlug || "global"}`;
       const earlyRangeAnchor = /^\d{4}-\d{2}-\d{2}$/.test(this.state.meta?.selectedDate || "")
         ? this.state.meta.selectedDate
@@ -2550,6 +2677,8 @@ class StudioStore {
           : scopedBusiness?.id || null;
       const syncScopeView = route.shell === "internal" ? "internal" : route.view;
       const syncScopeKey = `${syncScopeView}:${scopedBusinessId || "global"}:${route.businessSlug || ""}`;
+      activeSyncScopeKey = syncScopeKey;
+      activeScopedBusinessId = scopedBusinessId || "";
 
       if (route.view === "super-admin") {
         const cacheKey = `${syncScopeKey}:${todayISO()}`;
@@ -2734,6 +2863,11 @@ class StudioStore {
         scopedBusinessId &&
         stableBucketHasBusinessData &&
         this.hasFreshStableBusinessData(scopedBusinessId, { needsFull: route.view === "admin" });
+      if (scopedBusinessId) {
+        this.beginResourceLoading("barbers", scopedBusinessId, syncScopeKey);
+        this.beginResourceLoading("services", scopedBusinessId, syncScopeKey);
+        this.beginResourceLoading("appointments", scopedBusinessId, syncScopeKey);
+      }
       const stableQueryResult = { data: null, error: null, fromStableCache: true };
       const scopedDataPerf = perfMark("business scoped data");
       const [barbersResult, appointmentsBaseResult, blockedDaysResult, servicesResult, barberServicesResult, businessSettingsResult] = await Promise.all([
@@ -2791,6 +2925,31 @@ class StudioStore {
         ? stableBucket.barberServices
         : (barberServicesResult.error ? [] : (barberServicesResult.data || []).map(mapRowToBarberService));
       const scopedBusinessSettingsRows = businessSettingsResult.fromStableCache || businessSettingsResult.error ? [] : businessSettingsResult.data || [];
+      const currentWeek = getWeekKey();
+      if (scopedBusinessId) {
+        this.commitResourceLoading("barbers", scopedBusinessId, barbersData, {
+          syncScopeKey,
+          success: !barbersResult.error,
+          error: barbersResult.error?.message || "",
+        });
+        this.commitResourceLoading("services", scopedBusinessId, servicesData, {
+          syncScopeKey,
+          success: !servicesResult.error,
+          error: servicesResult.error?.message || "",
+        });
+        this.commitResourceLoading(
+          "appointments",
+          scopedBusinessId,
+          (appointmentsResult.data || [])
+            .map(mapRowToAppointment)
+            .filter((item) => item.status !== "reserved" || item.weekKey === currentWeek),
+          {
+            syncScopeKey,
+            success: !appointmentsBaseResult.error,
+            error: appointmentsBaseResult.error?.message || "",
+          }
+        );
+      }
       const scopedBusinessList = mergedBusinesses.length
         ? mergedBusinesses
         : isPlaceholderBusiness(scopedBusiness)
@@ -2802,7 +2961,6 @@ class StudioStore {
         this.syncBusinessSettingsToLocal(scopedBusinessSettingsRows, route.view === "super-admin" ? null : scopedBusinessId);
       }
 
-      const currentWeek = getWeekKey();
       const nextState = {
         meta: {
           ...this.state.meta,
@@ -2845,6 +3003,23 @@ class StudioStore {
 
       perfEnd(perf, `(${route.view}:${scopedBusinessId || "global"})`);
     } catch (error) {
+      if (activeScopedBusinessId) {
+        this.commitResourceLoading("barbers", activeScopedBusinessId, [], {
+          syncScopeKey: activeSyncScopeKey,
+          success: false,
+          error: error?.message || "",
+        });
+        this.commitResourceLoading("services", activeScopedBusinessId, [], {
+          syncScopeKey: activeSyncScopeKey,
+          success: false,
+          error: error?.message || "",
+        });
+        this.commitResourceLoading("appointments", activeScopedBusinessId, [], {
+          syncScopeKey: activeSyncScopeKey,
+          success: false,
+          error: error?.message || "",
+        });
+      }
       this.remoteReady = true;
       this.remoteLastError = error?.message || "No fue posible cargar los datos remotos.";
       console.error("Supabase sync failed", error);
@@ -4116,6 +4291,7 @@ const remoteSessionMonitorState = {
   admin: { validating: false, lastValidatedAt: 0, lastHeartbeatAt: 0, lastToken: "" },
   barber: { validating: false, lastValidatedAt: 0, lastHeartbeatAt: 0, lastToken: "" },
 };
+const RESOURCE_VIEW_KEYS = ["barbers", "services", "appointments"];
 
 function resolveRoute(pathname = location.pathname) {
   const parts = pathname.split("/").filter(Boolean);
