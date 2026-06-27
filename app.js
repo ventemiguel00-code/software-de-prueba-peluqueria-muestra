@@ -1779,6 +1779,7 @@ class StudioStore {
     this.publicServicesInFlight = new Map();
     this.sessionStableBusinessCacheById = new Map();
     this.lastRemoteSyncByKey = new Map();
+    this.activeSessionsSupported = null;
     this.applyingRemote = false;
     this.dailyResetPending = false;
     this.state = this.load();
@@ -3216,6 +3217,165 @@ class StudioStore {
     return true;
   }
 
+  isActiveSessionsTableUnavailable(error) {
+    return ["42P01", "PGRST204", "PGRST205", "42703"].includes(error?.code || "");
+  }
+
+  markActiveSessionsUnsupported(error) {
+    if (this.isActiveSessionsTableUnavailable(error)) {
+      this.activeSessionsSupported = false;
+      return true;
+    }
+    return false;
+  }
+
+  activeSessionBaseQuery(payload) {
+    let query = this.supabase.from(ACTIVE_SESSIONS_TABLE).select("*");
+    query = query.eq("role", payload.role).eq("user_id", payload.userId);
+    query = payload.businessId ? query.eq("business_id", payload.businessId) : query.is("business_id", null);
+    return query;
+  }
+
+  async claimActiveSessionRemote(payload) {
+    if (!this.supabase || !payload?.sessionToken) return { ok: true, skipped: true };
+    if (this.activeSessionsSupported === false) return { ok: true, skipped: true };
+    const now = new Date().toISOString();
+    try {
+      const existingResult = await this.trackedQuery(
+        "active_sessions:existing",
+        `active-session:${payload.role}:${payload.businessId || "global"}:${payload.userId}`,
+        this.activeSessionBaseQuery(payload).eq("active", true)
+      );
+      if (existingResult.error) {
+        if (this.markActiveSessionsUnsupported(existingResult.error)) return { ok: true, skipped: true };
+        throw existingResult.error;
+      }
+
+      const existing = existingResult.data || [];
+      const otherIds = existing
+        .filter((row) => row.session_token !== payload.sessionToken)
+        .map((row) => row.id)
+        .filter(Boolean);
+
+      if (otherIds.length) {
+        const { error: closeError } = await this.supabase
+          .from(ACTIVE_SESSIONS_TABLE)
+          .update({
+            active: false,
+            closed_at: now,
+            closed_reason: "replaced_by_new_login",
+          })
+          .in("id", otherIds);
+        if (closeError && !this.markActiveSessionsUnsupported(closeError)) {
+          throw closeError;
+        }
+      }
+
+      const row = {
+        session_token: payload.sessionToken,
+        device_id: payload.deviceId || getDeviceId(),
+        role: payload.role,
+        business_id: payload.businessId || null,
+        user_id: payload.userId,
+        user_label: payload.userLabel || "",
+        active: true,
+        created_at: payload.startedAt || now,
+        last_seen_at: now,
+        closed_at: null,
+        closed_reason: null,
+      };
+      const { error: upsertError } = await this.supabase
+        .from(ACTIVE_SESSIONS_TABLE)
+        .upsert(row, { onConflict: "session_token" });
+      if (upsertError) {
+        if (this.markActiveSessionsUnsupported(upsertError)) return { ok: true, skipped: true };
+        throw upsertError;
+      }
+      this.activeSessionsSupported = true;
+      return { ok: true, replaced: otherIds.length > 0 };
+    } catch (error) {
+      console.warn("Claim active session skipped", error);
+      return { ok: true, skipped: true, error };
+    }
+  }
+
+  async validateActiveSessionRemote(payload) {
+    if (!this.supabase || !payload?.sessionToken) return { ok: true, active: true, skipped: true };
+    if (this.activeSessionsSupported === false) return { ok: true, active: true, skipped: true };
+    try {
+      const { data, error } = await this.supabase
+        .from(ACTIVE_SESSIONS_TABLE)
+        .select("id,session_token,device_id,role,business_id,user_id,active,closed_reason")
+        .eq("session_token", payload.sessionToken)
+        .maybeSingle();
+      if (error) {
+        if (this.markActiveSessionsUnsupported(error)) return { ok: true, active: true, skipped: true };
+        throw error;
+      }
+      this.activeSessionsSupported = true;
+      if (!data?.id || data.active === false) {
+        return {
+          ok: false,
+          active: false,
+          message: remoteSessionClosedMessage(payload.role),
+        };
+      }
+      if (String(data.role || "") !== String(payload.role || "")) {
+        return { ok: false, active: false, message: remoteSessionClosedMessage(payload.role) };
+      }
+      if (String(data.user_id || "") !== String(payload.userId || "")) {
+        return { ok: false, active: false, message: remoteSessionClosedMessage(payload.role) };
+      }
+      if ((payload.businessId || null) !== (data.business_id || null)) {
+        return { ok: false, active: false, message: remoteSessionClosedMessage(payload.role) };
+      }
+      if (String(data.device_id || "") !== String(payload.deviceId || "")) {
+        return { ok: false, active: false, message: remoteSessionClosedMessage(payload.role) };
+      }
+      return { ok: true, active: true };
+    } catch (error) {
+      console.warn("Validate active session skipped", error);
+      return { ok: true, active: true, skipped: true, error };
+    }
+  }
+
+  async touchActiveSessionRemote(payload) {
+    if (!this.supabase || !payload?.sessionToken) return { ok: true, skipped: true };
+    if (this.activeSessionsSupported === false) return { ok: true, skipped: true };
+    const { error } = await this.supabase
+      .from(ACTIVE_SESSIONS_TABLE)
+      .update({ last_seen_at: new Date().toISOString() })
+      .eq("session_token", payload.sessionToken)
+      .eq("active", true);
+    if (error) {
+      if (this.markActiveSessionsUnsupported(error)) return { ok: true, skipped: true };
+      console.warn("Touch active session skipped", error);
+      return { ok: true, skipped: true, error };
+    }
+    this.activeSessionsSupported = true;
+    return { ok: true };
+  }
+
+  async closeActiveSessionRemote(payload, reason = "manual_logout") {
+    if (!this.supabase || !payload?.sessionToken) return { ok: true, skipped: true };
+    if (this.activeSessionsSupported === false) return { ok: true, skipped: true };
+    const { error } = await this.supabase
+      .from(ACTIVE_SESSIONS_TABLE)
+      .update({
+        active: false,
+        closed_at: new Date().toISOString(),
+        closed_reason: reason || "manual_logout",
+      })
+      .eq("session_token", payload.sessionToken);
+    if (error) {
+      if (this.markActiveSessionsUnsupported(error)) return { ok: true, skipped: true };
+      console.warn("Close active session skipped", error);
+      return { ok: true, skipped: true, error };
+    }
+    this.activeSessionsSupported = true;
+    return { ok: true };
+  }
+
   syncBusinessSettingsToLocal(rows = [], scopedBusinessId = null) {
     const map = loadBackgroundMediaMap();
     const businessesById = new Map(this.state.businesses.map((business) => [business.id, business]));
@@ -3811,6 +3971,9 @@ const DEVICE_ID_KEY = "barber-delux-device-id-v1";
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const SESSION_IDLE_TTL_MS = 45 * 60 * 1000;
 const SESSION_HEARTBEAT_MS = 60 * 1000;
+const REMOTE_SESSION_VALIDATE_MS = 45 * 1000;
+const REMOTE_SESSION_HEARTBEAT_MS = 90 * 1000;
+const ACTIVE_SESSIONS_TABLE = "active_sessions";
 const EMPTY_BUSINESS_DATA_REFRESH_COOLDOWN_MS = 12 * 1000;
 const EMPTY_BUSINESS_DATA_LOADING_MS = 3500;
 const PUBLIC_SERVICES_LOADING_MS = 2000;
@@ -3833,6 +3996,11 @@ const PRINCIPAL_ADMIN = {
   role: "administrador_principal",
   businessId: DEFAULT_BUSINESS_ID,
   active: true,
+};
+const remoteSessionMonitorState = {
+  super_admin: { validating: false, lastValidatedAt: 0, lastHeartbeatAt: 0, lastToken: "" },
+  admin: { validating: false, lastValidatedAt: 0, lastHeartbeatAt: 0, lastToken: "" },
+  barber: { validating: false, lastValidatedAt: 0, lastHeartbeatAt: 0, lastToken: "" },
 };
 
 function resolveRoute(pathname = location.pathname) {
@@ -4257,6 +4425,136 @@ function refreshSessionHeartbeat(baseKey, businessSlug, session, context = {}, l
     }
   }
   return nextSession;
+}
+
+function sessionMonitorFor(role = "admin") {
+  return remoteSessionMonitorState[role] || remoteSessionMonitorState.admin;
+}
+
+function resetRemoteSessionMonitor(role = "admin", token = "") {
+  const monitor = sessionMonitorFor(role);
+  monitor.validating = false;
+  monitor.lastValidatedAt = 0;
+  monitor.lastHeartbeatAt = 0;
+  monitor.lastToken = token || "";
+}
+
+function remoteSessionContext(kind, session = null) {
+  const activeSession = session || (kind === "super_admin" ? app.superAdminSession : kind === "admin" ? app.adminSession : app.barberSession);
+  if (!activeSession?.token) return null;
+  const role = kind === "super_admin" ? "super_admin" : kind === "barber" ? "barber" : "admin";
+  const businessSlug = role === "super_admin" ? DEFAULT_BUSINESS_SLUG : activeSession.businessSlug || app.currentBusinessSlug || DEFAULT_BUSINESS_SLUG;
+  const businessId = role === "super_admin" ? null : activeSession.businessId || currentBusinessId() || null;
+  const userId = activeSession.id || (role === "super_admin" ? "super_admin" : "");
+  const userLabel =
+    role === "super_admin"
+      ? activeSession.user || SUPER_ADMIN_USER
+      : activeSession.name || activeSession.user || userId;
+  if (!userId) return null;
+  return {
+    role,
+    sessionToken: activeSession.token,
+    deviceId: activeSession.deviceId || getDeviceId(),
+    businessId,
+    businessSlug,
+    userId,
+    userLabel,
+    startedAt: activeSession.startedAt || new Date().toISOString(),
+    lastSeenAt: activeSession.lastSeenAt || new Date().toISOString(),
+  };
+}
+
+function clearLocalSessionByKind(kind, { message = "" } = {}) {
+  if (kind === "super_admin") {
+    app.superAdminSession = null;
+    app.superAdminLoginError = message || "";
+    clearSuperAdminSession();
+    resetRemoteSessionMonitor("super_admin");
+    return;
+  }
+  if (kind === "admin") {
+    app.adminSession = null;
+    app.adminLoginError = message || "";
+    clearScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug);
+    resetRemoteSessionMonitor("admin");
+    return;
+  }
+  app.barberSession = null;
+  app.barberLoginError = message || "";
+  clearScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
+  resetRemoteSessionMonitor("barber");
+}
+
+function remoteSessionClosedMessage(role = "admin") {
+  if (role === "super_admin") {
+    return "Tu sesion de Super Admin fue cerrada porque se inicio sesion en otro dispositivo.";
+  }
+  if (role === "barber") {
+    return "Tu sesion de barbero fue cerrada porque se inicio sesion en otro dispositivo.";
+  }
+  return "Tu sesion administrativa fue cerrada porque se inicio sesion en otro dispositivo.";
+}
+
+function ensureRemoteSessionHealth(kind, session) {
+  if (!store?.supabase || !session?.token) return;
+  const context = remoteSessionContext(kind, session);
+  if (!context) return;
+  const monitor = sessionMonitorFor(context.role);
+  if (monitor.lastToken !== context.sessionToken) {
+    resetRemoteSessionMonitor(context.role, context.sessionToken);
+  }
+  if (monitor.validating) return;
+  const now = Date.now();
+  const needsValidation = !monitor.lastValidatedAt || now - monitor.lastValidatedAt >= REMOTE_SESSION_VALIDATE_MS;
+  const needsHeartbeat = !monitor.lastHeartbeatAt || now - monitor.lastHeartbeatAt >= REMOTE_SESSION_HEARTBEAT_MS;
+  if (!needsValidation && !needsHeartbeat) return;
+
+  monitor.validating = true;
+  Promise.resolve()
+    .then(async () => {
+      const validation = needsValidation
+        ? await store.validateActiveSessionRemote(context)
+        : { ok: true, active: true, skipped: false };
+      monitor.lastValidatedAt = Date.now();
+      if (validation?.skipped) {
+        monitor.lastHeartbeatAt = Date.now();
+        return;
+      }
+      if (!validation?.ok || validation?.active === false) {
+        const currentContext = remoteSessionContext(kind);
+        if (currentContext?.sessionToken === context.sessionToken) {
+          clearLocalSessionByKind(kind, { message: validation?.message || remoteSessionClosedMessage(context.role) });
+          scheduleRender();
+        }
+        return;
+      }
+      if (needsHeartbeat) {
+        await store.touchActiveSessionRemote(context);
+        monitor.lastHeartbeatAt = Date.now();
+      }
+    })
+    .catch((error) => {
+      console.warn("Remote session health skipped", error);
+    })
+    .finally(() => {
+      monitor.validating = false;
+    });
+}
+
+async function claimRemoteSession(kind, session) {
+  const context = remoteSessionContext(kind, session);
+  if (!context || !store?.supabase) return { ok: true, skipped: true };
+  const result = await store.claimActiveSessionRemote(context);
+  resetRemoteSessionMonitor(context.role, context.sessionToken);
+  return result;
+}
+
+async function closeRemoteSession(kind, session, reason = "manual_logout") {
+  const context = remoteSessionContext(kind, session);
+  if (!context || !store?.supabase) return { ok: true, skipped: true };
+  const result = await store.closeActiveSessionRemote(context, reason);
+  resetRemoteSessionMonitor(context.role);
+  return result;
 }
 
 function loadAuthAttempts() {
@@ -6665,6 +6963,7 @@ function renderSuperAdminV2() {
     app.superAdminSession,
     { role: "super_admin", businessSlug: DEFAULT_BUSINESS_SLUG }
   );
+  ensureRemoteSessionHealth("super_admin", app.superAdminSession);
 
   const expectedSuperAdminScope = `super-admin:global:${DEFAULT_BUSINESS_SLUG}`;
   if (app.superAdminSession && store.supabase && (!store.remoteReady || store.remoteLoadedScopeKey !== expectedSuperAdminScope)) {
@@ -7116,6 +7415,7 @@ function renderAdminV2() {
     app.adminSession,
     { role: "admin", businessSlug: app.currentBusinessSlug, businessId: currentBusinessId() }
   );
+  ensureRemoteSessionHealth("admin", app.adminSession);
 
   const selected = barberById(app.adminBarberId);
   requestBusinessDataRefreshIfEmpty(currentBusinessId(), "BusinessRenderAdmin");
@@ -7413,6 +7713,7 @@ function renderBarberV2() {
     app.barberSession,
     { role: "barber", businessSlug: app.currentBusinessSlug, businessId: currentBusinessId() }
   );
+  ensureRemoteSessionHealth("barber", app.barberSession);
   const rows = slotRowsForBarberDate(barber.id, app.barberDate, currentBusinessId());
   const counterSummary = buildCounterSummary(app.barberDate);
   const hasOperationalRows = rows.some(({ status, dayBlocked, appointment }) => dayBlocked || status !== "available" || appointment);
@@ -7792,6 +8093,7 @@ function bindEvents() {
       };
       app.superAdminLoginError = "";
       clearAuthAttemptState("super_admin", DEFAULT_BUSINESS_SLUG, user);
+      await claimRemoteSession("super_admin", app.superAdminSession);
       saveSuperAdminSession(app.superAdminSession);
       render();
       return;
@@ -7806,7 +8108,8 @@ function bindEvents() {
     render();
   });
 
-  document.querySelector("[data-super-logout]")?.addEventListener("click", () => {
+  document.querySelector("[data-super-logout]")?.addEventListener("click", async () => {
+    await closeRemoteSession("super_admin", app.superAdminSession, "manual_logout");
     app.superAdminSession = null;
     app.superAdminLoginError = "";
     clearSuperAdminSession();
@@ -8559,6 +8862,7 @@ function bindEvents() {
       app.adminSession.businessSlug = app.currentBusinessSlug;
       app.adminSession.fingerprint = buildSessionFingerprint("admin", app.currentBusinessSlug, currentBusinessId());
       clearAuthAttemptState("admin", app.currentBusinessSlug, user);
+      await claimRemoteSession("admin", app.adminSession);
       saveScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug, app.adminSession);
       render();
       return;
@@ -8570,7 +8874,8 @@ function bindEvents() {
     render();
   });
 
-  document.querySelector("[data-admin-logout]")?.addEventListener("click", () => {
+  document.querySelector("[data-admin-logout]")?.addEventListener("click", async () => {
+    await closeRemoteSession("admin", app.adminSession, "manual_logout");
     app.adminSession = null;
     app.adminLoginError = "";
     app.adminAccountMessage = "";
@@ -9382,11 +9687,13 @@ function bindEvents() {
     app.barberDate = todayISO();
     store.state.meta.selectedDate = app.barberDate;
     app.barberScheduleView = "hours";
+    await claimRemoteSession("barber", app.barberSession);
     saveScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug, app.barberSession);
     render();
   });
 
-  document.querySelector("[data-logout]")?.addEventListener("click", () => {
+  document.querySelector("[data-logout]")?.addEventListener("click", async () => {
+    await closeRemoteSession("barber", app.barberSession, "manual_logout");
     app.barberSession = null;
     app.barberLoginError = "";
     clearScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
@@ -9480,8 +9787,15 @@ window.addEventListener("resize", () => {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     ensureBackgroundPlayback();
+    scheduleRender();
   }
 });
+
+window.setInterval(() => {
+  if (document.visibilityState !== "visible") return;
+  if (!app?.superAdminSession && !app?.adminSession && !app?.barberSession) return;
+  scheduleRender();
+}, REMOTE_SESSION_VALIDATE_MS);
 
 render();
 
