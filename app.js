@@ -7133,7 +7133,6 @@ function renderSuperAdmin() {
               (account) => {
                 const currentPassword = adminPasswordValue(account);
                 const passwordVisible = isAdminPasswordVisible(account.id);
-                const visiblePassword = currentPassword ? { password: currentPassword, user: account.user } : null;
                 return `<form class="super-admin-account-edit form-stack" data-admin-account-id="${escapeHTML(account.id)}">
                 <div class="form-grid">
                   <label>Nombre<input name="name" required value="${escapeHTML(account.name || "")}" /></label>
@@ -7426,7 +7425,6 @@ function renderSuperAdminV2() {
               (account) => {
                 const currentPassword = adminPasswordValue(account);
                 const passwordVisible = isAdminPasswordVisible(account.id);
-                const visiblePassword = currentPassword ? { password: currentPassword, user: account.user } : null;
                 return `<form class="super-admin-account-edit form-stack" data-admin-account-id="${escapeHTML(account.id)}">
                 <div class="form-grid">
                   <label>Nombre<input name="name" required value="${escapeHTML(account.name || "")}" /></label>
@@ -8990,11 +8988,18 @@ function bindEvents() {
   });
 
   document.querySelectorAll("[data-toggle-admin-password]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
       const accountId = button.dataset.toggleAdminPassword;
       if (!accountId) return;
-      setAdminPasswordVisibility(accountId, !isAdminPasswordVisible(accountId));
-      render();
+      const nextVisible = !isAdminPasswordVisible(accountId);
+      setAdminPasswordVisibility(accountId, nextVisible);
+      const form = button.closest(".super-admin-account-edit");
+      const input = form?.querySelector('input[name="password"]');
+      if (input) {
+        input.type = nextVisible ? "text" : "password";
+      }
+      button.textContent = nextVisible ? "Ocultar" : "Mostrar";
     });
   });
 
