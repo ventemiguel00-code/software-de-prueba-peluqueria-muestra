@@ -271,10 +271,46 @@ function nowMinutes() {
   return hour * 60 + minute;
 }
 
-function toISO(date) {
+function getBogotaNow() {
+  return bogotaNowParts();
+}
+
+function getBogotaDateKey(date = new Date()) {
   if (typeof date === "string") return String(date).slice(0, 10);
   const { year, month, day } = bogotaNowParts(date instanceof Date ? date : new Date(date));
   return isoFromDateParts({ year, month, day });
+}
+
+function compareBogotaDateKeys(left, right) {
+  return String(left || "").localeCompare(String(right || ""));
+}
+
+function isPastDateInBogota(date) {
+  const dateKey = getBogotaDateKey(date);
+  if (!dateKey) return false;
+  return compareBogotaDateKeys(dateKey, getBogotaDateKey()) < 0;
+}
+
+function isFutureDateInBogota(date) {
+  const dateKey = getBogotaDateKey(date);
+  if (!dateKey) return false;
+  return compareBogotaDateKeys(dateKey, getBogotaDateKey()) > 0;
+}
+
+function isTodayInBogota(date) {
+  const dateKey = getBogotaDateKey(date);
+  if (!dateKey) return false;
+  return compareBogotaDateKeys(dateKey, getBogotaDateKey()) === 0;
+}
+
+function isPastTimeSlotInBogota(date, time) {
+  if (!isTodayInBogota(date)) return false;
+  const start = parseSlotTime(time);
+  return start.hour * 60 + start.minute <= nowMinutes();
+}
+
+function toISO(date) {
+  return getBogotaDateKey(date);
 }
 
 function getWeekKey(date = new Date()) {
@@ -739,17 +775,15 @@ function getBusinessBucket(businessId = currentBusinessId()) {
 }
 
 function isPastDate(date) {
-  return date < todayISO();
+  return isPastDateInBogota(date);
 }
 
 function isTodayDate(date) {
-  return date === todayISO();
+  return isTodayInBogota(date);
 }
 
 function slotHasPassed(date, time) {
-  if (!isTodayDate(date)) return false;
-  const start = parseSlotTime(time);
-  return start.hour * 60 + start.minute <= nowMinutes();
+  return isPastTimeSlotInBogota(date, time);
 }
 
 function isPublicSlotBookable(barberId, date, time, businessId = currentBusinessId()) {
