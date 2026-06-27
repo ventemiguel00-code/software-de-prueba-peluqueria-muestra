@@ -5558,8 +5558,9 @@ async function findAdminAccount(user, password, businessId = null) {
     ) || null;
   if (hashedMatch) return hashedMatch;
 
+  const legacyCandidates = candidates.filter((account) => !account.passwordHash);
   const legacyMatch =
-    candidates.find(
+    legacyCandidates.find(
       (account) =>
         String(account.user || "").trim().toLowerCase() === normalizedUser &&
         (
@@ -9048,7 +9049,9 @@ function bindEvents() {
       saveAdminAccounts(allAccounts);
       try {
         await store.upsertAdminAccountRemote(account);
-        app.superAdminMessage = `Administrador actualizado: ${account.name}`;
+        app.superAdminMessage = submittedPassword
+          ? `Administrador actualizado: ${account.name}. La nueva clave fija reemplazo la anterior.`
+          : `Administrador actualizado: ${account.name}`;
       } catch (error) {
         app.superAdminMessage = `No fue posible actualizar el administrador ${account.name}.`;
         console.error("Remote business admin update failed", error);
