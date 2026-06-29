@@ -5838,6 +5838,7 @@ app = {
   superAdminDeleteTarget: null,
   superAdminDeleting: false,
   superAdminCreateOpen: false,
+  superAdminView: "home",
   adminLoginError: "",
   adminAccountMessage: "",
   adminActionMessage: "",
@@ -7324,7 +7325,132 @@ function renderSuperAdmin() {
       </article>`;
     })
     .join("");
-  const createBusinessPanel = `<article class="admin-account-card super-business-card ${app.superAdminCreateOpen ? "is-open" : ""}">
+  const renderSuperBusinessDetailPanel = (business) => {
+    if (!business) {
+      return `<section class="admin-main super-admin-list-shell">
+        <div class="section-title"><span>!</span><h2>Negocio no encontrado</h2></div>
+        <p class="microcopy">Selecciona un negocio del listado para ver su detalle.</p>
+      </section>`;
+    }
+    const urls = businessUrlSet(business);
+    const barberCount = businessBarberCount(business.id);
+    const activeServiceCount = businessActiveServiceCount(business.id);
+    const reservationCount = businessTodayReservationCount(business.id);
+    const environmentAttachment = businessEnvironmentAttachment(business.id);
+    const admins = loadAdminAccounts().filter(
+      (account) => account.businessId === business.id && account.role !== PRINCIPAL_ADMIN.role
+    );
+    const admin = admins[0] || null;
+    const adminList = admins.length
+      ? admins
+          .map((account) => {
+            const currentPassword = adminPasswordValue(account);
+            const passwordVisible = isAdminPasswordVisible(account.id);
+            return `<form class="super-admin-account-edit form-stack" data-admin-account-id="${escapeHTML(account.id)}">
+              <div class="form-grid">
+                <label>Nombre<input name="name" required value="${escapeHTML(account.name || "")}" /></label>
+                <label>Usuario<input name="user" required value="${escapeHTML(account.user || "")}" /></label>
+                <label>Creado<input value="${escapeHTML(account.createdAt || todayISO())}" disabled /></label>
+              </div>
+              <label data-admin-password-row="true">Contrasena fija
+                <div class="password-inline">
+                  <input name="password" type="${passwordVisible ? "text" : "password"}" value="${escapeHTML(currentPassword)}" autocomplete="new-password" placeholder="Define una clave fija" />
+                  <button class="secondary-action inline-action" type="button" data-toggle-admin-password="${escapeHTML(account.id)}">${passwordVisible ? "Ocultar" : "Mostrar"}</button>
+                </div>
+              </label>
+              <p class="microcopy">${currentPassword ? "La clave visible pertenece solo a esta barberia y se valida con el login actual." : "Si la clave actual solo existe como hash, define una nueva clave fija para poder verla aqui."}</p>
+              <label class="toggle-line"><input name="active" type="checkbox" ${account.active ? "checked" : ""} /> Activo</label>
+              <div class="button-row">
+                <button class="primary-action">Guardar admin</button>
+                <button class="secondary-action" type="button" data-regenerate-admin-password="${escapeHTML(account.id)}">Regenerar contrasena</button>
+              </div>
+            </form>`;
+          })
+          .join("")
+      : `<p class="microcopy">Aun no hay administradores registrados para esta barberia.</p>`;
+
+    return `<section class="admin-main super-admin-list-shell super-admin-detail-shell">
+      <div class="super-admin-view-toolbar">
+        <button class="secondary-action" type="button" data-super-admin-back>Volver al panel principal</button>
+        <div>
+          <p class="eyebrow">Detalle del negocio</p>
+          <h2>${escapeHTML(business.name)}</h2>
+        </div>
+      </div>
+      <article class="admin-account-card super-business-card is-open">
+        <div class="super-business-summary">
+          <div class="super-business-summary__trigger super-business-summary__trigger--static">
+            <div class="super-business-summary__brand">
+              <div class="super-business-summary__logo">
+                ${business.logoUrl || app.superAdminPendingLogos[business.id] ? `<img src="${escapeHTML(app.superAdminPendingLogos[business.id] || business.logoUrl)}" alt="Logo ${escapeHTML(business.name)}" loading="lazy" decoding="async" />` : `<span>${escapeHTML((business.name || "B").slice(0, 1).toUpperCase())}</span>`}
+              </div>
+              <div class="super-business-summary__copy">
+                <h3>${escapeHTML(business.name)}</h3>
+                <p>${business.active ? "Activa" : "Inactiva"} · /barberia/${escapeHTML(business.slug)}</p>
+              </div>
+            </div>
+            <div class="super-business-summary__stats">
+              <span><strong>${barberCount}</strong> barberos</span>
+              <span><strong>${activeServiceCount}</strong> servicios</span>
+              <span><strong>${reservationCount}</strong> reservas hoy</span>
+              <span><strong>${environmentAttachment?.mode === "attached_archive" ? "ZIP/RAR" : "Base"}</strong> entorno</span>
+            </div>
+          </div>
+          <div class="super-business-summary__actions">
+            <a class="secondary-action inline-action" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">Cliente / Reservas</a>
+            <a class="secondary-action inline-action" href="${escapeHTML(urls.panel)}" target="_blank" rel="noreferrer">Admin / Barbero</a>
+          </div>
+        </div>
+        <div class="super-business-panel">
+          <div class="super-business-panel__meta">
+            <p class="eyebrow">${business.active ? "Negocio activo" : "Negocio inactivo"}</p>
+            <p>Slug: ${escapeHTML(business.slug)}</p>
+            <p>Admin principal: ${escapeHTML(admin?.name || "Pendiente")} · Usuario: ${escapeHTML(admin?.user || "Desarrollo")}</p>
+            <p>Cliente / Reservas: <a class="inline-link" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">${escapeHTML(urls.public)}</a></p>
+            <p>Admin / Barbero: <a class="inline-link" href="${escapeHTML(urls.panel)}" target="_blank" rel="noreferrer">${escapeHTML(urls.panel)}</a></p>
+            <p>Plantilla asociada: ${escapeHTML(summarizeEnvironmentAttachment(environmentAttachment))}</p>
+          </div>
+          <form class="super-business-edit form-stack" data-business-id="${escapeHTML(business.id)}">
+            <div class="form-grid">
+              <label>Nombre<input name="name" required value="${escapeHTML(business.name)}" /></label>
+              <label>Slug<input name="slug" required value="${escapeHTML(business.slug)}" /></label>
+              <label>Tema
+                <select name="theme">
+                  ${Object.entries(BUSINESS_THEMES).map(([key, theme]) => `<option value="${key}" ${business.theme === key ? "selected" : ""}>${escapeHTML(theme.label)}</option>`).join("")}
+                </select>
+              </label>
+              <label class="file-control">Subir logo
+                <input name="logo" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" data-business-logo-input="${escapeHTML(business.id)}" />
+              </label>
+            </div>
+            <div class="super-admin-logo-preview">${business.logoUrl || app.superAdminPendingLogos[business.id] ? `<img src="${escapeHTML(app.superAdminPendingLogos[business.id] || business.logoUrl)}" alt="Logo ${escapeHTML(business.name)}" loading="lazy" decoding="async" />` : `<span>Sin logo cargado</span>`}</div>
+            <label class="toggle-line"><input name="active" type="checkbox" ${business.active ? "checked" : ""} /> Negocio activo</label>
+            <div class="button-row">
+              <button class="primary-action">Guardar negocio</button>
+              <a class="secondary-action inline-action" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">Cliente / Reservas</a>
+              <a class="secondary-action inline-action" href="${escapeHTML(urls.panel)}" target="_blank" rel="noreferrer">Admin / Barbero</a>
+              ${business.id !== DEFAULT_BUSINESS_ID ? `<button class="secondary-action danger" type="button" data-delete-business="${escapeHTML(business.id)}" data-delete-business-slug="${escapeHTML(business.slug)}" data-delete-business-name="${escapeHTML(business.name)}">Eliminar barberia</button>` : ""}
+            </div>
+          </form>
+          <section class="super-admin-admins">
+            <div class="section-title"><span>A</span><h2>Administradores</h2></div>
+            ${adminList}
+            <form class="super-admin-account-create form-stack" data-business-id="${escapeHTML(business.id)}">
+              <div class="form-grid">
+                <label>Nombre<input name="name" required placeholder="Nuevo administrador" /></label>
+                <label>Usuario<input name="user" required placeholder="usuario.admin" /></label>
+              </div>
+              <label class="toggle-line"><input name="active" type="checkbox" checked /> Activo</label>
+              <div class="button-row">
+                <button class="primary-action">Crear administrador</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </article>
+    </section>`;
+  };
+  const renderCreateBusinessPanel = () => `<article class="admin-account-card super-business-card is-open">
     <div class="super-business-summary">
       <button class="super-business-summary__trigger" type="button" data-toggle-super-create aria-expanded="${app.superAdminCreateOpen ? "true" : "false"}">
         <div class="super-business-summary__brand">
@@ -7347,7 +7473,7 @@ function renderSuperAdmin() {
         <span class="super-business-summary__toggle">${app.superAdminCreateOpen ? "-" : "+"}</span>
       </div>
     </div>
-    <div class="super-business-panel" ${app.superAdminCreateOpen ? "" : "hidden"}>
+    <div class="super-business-panel">
       <div class="super-admin-create-form">
         <div class="super-admin-create-head">
           <div>
@@ -7451,7 +7577,7 @@ function renderSuperAdmin() {
       </section>
       <section class="admin-main">
         <div class="section-title"><span>+</span><h2>Nuevo negocio</h2></div>
-        ${createBusinessPanel}
+        ${renderCreateBusinessPanel()}
       </section>
       <section class="admin-main">
         <div class="section-title"><span>L</span><h2>Listado de negocios</h2></div>
@@ -7538,6 +7664,32 @@ function renderSuperAdminV2() {
       const serviceLabel = `<strong>${activeServiceCount}</strong> servicios`;
       const reservationCount = businessTodayReservationCount(business.id);
       const environmentAttachment = businessEnvironmentAttachment(business.id);
+      return `<article class="admin-account-card super-business-card">
+        <div class="super-business-summary">
+          <button class="super-business-summary__trigger" type="button" data-toggle-super-business="${escapeHTML(business.id)}" aria-label="Abrir detalle de ${escapeHTML(business.name)}">
+            <div class="super-business-summary__brand">
+              <div class="super-business-summary__logo">
+                ${business.logoUrl || app.superAdminPendingLogos[business.id] ? `<img src="${escapeHTML(app.superAdminPendingLogos[business.id] || business.logoUrl)}" alt="Logo ${escapeHTML(business.name)}" loading="lazy" decoding="async" />` : `<span>${escapeHTML((business.name || "B").slice(0, 1).toUpperCase())}</span>`}
+              </div>
+              <div class="super-business-summary__copy">
+                <h3>${escapeHTML(business.name)}</h3>
+                <p>${business.active ? "Activa" : "Inactiva"} · /barberia/${escapeHTML(business.slug)}</p>
+              </div>
+            </div>
+            <div class="super-business-summary__stats">
+              <span><strong>${barberCount}</strong> barberos</span>
+              <span>${serviceLabel}</span>
+              <span><strong>${reservationCount}</strong> reservas hoy</span>
+              <span><strong>${environmentAttachment?.mode === "attached_archive" ? "ZIP/RAR" : "Base"}</strong> entorno</span>
+            </div>
+          </button>
+          <div class="super-business-summary__actions">
+            <a class="secondary-action inline-action" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">Cliente / Reservas</a>
+            <a class="secondary-action inline-action" href="${escapeHTML(urls.panel)}" target="_blank" rel="noreferrer">Admin / Barbero</a>
+            <button class="secondary-action inline-action" type="button" data-toggle-super-business="${escapeHTML(business.id)}">Ver detalle</button>
+          </div>
+        </div>
+      </article>`;
       const admins = loadAdminAccounts().filter(
         (account) => account.businessId === business.id && account.role !== PRINCIPAL_ADMIN.role
       );
@@ -7646,7 +7798,139 @@ function renderSuperAdminV2() {
       </article>`;
     })
     .join("");
-  const createBusinessPanel = `<article class="admin-account-card super-business-card ${app.superAdminCreateOpen ? "is-open" : ""}">
+  const renderSuperBusinessDetailPanel = (business) => {
+    if (!business) {
+      return `<section class="admin-main super-admin-list-shell">
+        <div class="super-admin-view-toolbar">
+          <button class="secondary-action" type="button" data-super-admin-back>Volver al panel principal</button>
+          <div>
+            <p class="eyebrow">Detalle del negocio</p>
+            <h2>Negocio no encontrado</h2>
+          </div>
+        </div>
+        <p class="microcopy">Selecciona un negocio del listado para ver su detalle.</p>
+      </section>`;
+    }
+    const urls = businessUrlSet(business);
+    const barberCount = businessBarberCount(business.id);
+    const activeServiceCount = businessActiveServiceCount(business.id);
+    const reservationCount = businessTodayReservationCount(business.id);
+    const environmentAttachment = businessEnvironmentAttachment(business.id);
+    const admins = loadAdminAccounts().filter(
+      (account) => account.businessId === business.id && account.role !== PRINCIPAL_ADMIN.role
+    );
+    const admin = admins[0] || null;
+    const adminList = admins.length
+      ? admins
+          .map((account) => {
+            const currentPassword = adminPasswordValue(account);
+            const passwordVisible = isAdminPasswordVisible(account.id);
+            return `<form class="super-admin-account-edit form-stack" data-admin-account-id="${escapeHTML(account.id)}">
+              <div class="form-grid">
+                <label>Nombre<input name="name" required value="${escapeHTML(account.name || "")}" /></label>
+                <label>Usuario<input name="user" required value="${escapeHTML(account.user || "")}" /></label>
+                <label>Creado<input value="${escapeHTML(account.createdAt || todayISO())}" disabled /></label>
+              </div>
+              <label data-admin-password-row="true">Contrasena fija
+                <div class="password-inline">
+                  <input name="password" type="${passwordVisible ? "text" : "password"}" value="${escapeHTML(currentPassword)}" autocomplete="new-password" placeholder="Define una clave fija" />
+                  <button class="secondary-action inline-action" type="button" data-toggle-admin-password="${escapeHTML(account.id)}">${passwordVisible ? "Ocultar" : "Mostrar"}</button>
+                </div>
+              </label>
+              <p class="microcopy">${currentPassword ? "La clave visible pertenece solo a esta barberia y se valida con el login actual." : "Si la clave actual solo existe como hash, define una nueva clave fija para poder verla aqui."}</p>
+              <label class="toggle-line"><input name="active" type="checkbox" ${account.active ? "checked" : ""} /> Activo</label>
+              <div class="button-row">
+                <button class="primary-action">Guardar admin</button>
+                <button class="secondary-action" type="button" data-regenerate-admin-password="${escapeHTML(account.id)}">Regenerar contrasena</button>
+              </div>
+            </form>`;
+          })
+          .join("")
+      : `<p class="microcopy">Aun no hay administradores registrados para esta barberia.</p>`;
+
+    return `<section class="admin-main super-admin-list-shell super-admin-detail-shell">
+      <div class="super-admin-view-toolbar">
+        <button class="secondary-action" type="button" data-super-admin-back>Volver al panel principal</button>
+        <div>
+          <p class="eyebrow">Detalle del negocio</p>
+          <h2>${escapeHTML(business.name)}</h2>
+        </div>
+      </div>
+      <article class="admin-account-card super-business-card is-open">
+        <div class="super-business-summary">
+          <div class="super-business-summary__trigger super-business-summary__trigger--static">
+            <div class="super-business-summary__brand">
+              <div class="super-business-summary__logo">
+                ${business.logoUrl || app.superAdminPendingLogos[business.id] ? `<img src="${escapeHTML(app.superAdminPendingLogos[business.id] || business.logoUrl)}" alt="Logo ${escapeHTML(business.name)}" loading="lazy" decoding="async" />` : `<span>${escapeHTML((business.name || "B").slice(0, 1).toUpperCase())}</span>`}
+              </div>
+              <div class="super-business-summary__copy">
+                <h3>${escapeHTML(business.name)}</h3>
+                <p>${business.active ? "Activa" : "Inactiva"} · /barberia/${escapeHTML(business.slug)}</p>
+              </div>
+            </div>
+            <div class="super-business-summary__stats">
+              <span><strong>${barberCount}</strong> barberos</span>
+              <span><strong>${activeServiceCount}</strong> servicios</span>
+              <span><strong>${reservationCount}</strong> reservas hoy</span>
+              <span><strong>${environmentAttachment?.mode === "attached_archive" ? "ZIP/RAR" : "Base"}</strong> entorno</span>
+            </div>
+          </div>
+          <div class="super-business-summary__actions">
+            <a class="secondary-action inline-action" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">Cliente / Reservas</a>
+            <a class="secondary-action inline-action" href="${escapeHTML(urls.panel)}" target="_blank" rel="noreferrer">Admin / Barbero</a>
+          </div>
+        </div>
+        <div class="super-business-panel">
+          <div class="super-business-panel__meta">
+            <p class="eyebrow">${business.active ? "Negocio activo" : "Negocio inactivo"}</p>
+            <p>Slug: ${escapeHTML(business.slug)}</p>
+            <p>Admin principal: ${escapeHTML(admin?.name || "Pendiente")} · Usuario: ${escapeHTML(admin?.user || "Desarrollo")}</p>
+            <p>Cliente / Reservas: <a class="inline-link" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">${escapeHTML(urls.public)}</a></p>
+            <p>Admin / Barbero: <a class="inline-link" href="${escapeHTML(urls.panel)}" target="_blank" rel="noreferrer">${escapeHTML(urls.panel)}</a></p>
+            <p>Plantilla asociada: ${escapeHTML(summarizeEnvironmentAttachment(environmentAttachment))}</p>
+          </div>
+          <form class="super-business-edit form-stack" data-business-id="${escapeHTML(business.id)}">
+            <div class="form-grid">
+              <label>Nombre<input name="name" required value="${escapeHTML(business.name)}" /></label>
+              <label>Slug<input name="slug" required value="${escapeHTML(business.slug)}" /></label>
+              <label>Tema
+                <select name="theme">
+                  ${Object.entries(BUSINESS_THEMES).map(([key, theme]) => `<option value="${key}" ${business.theme === key ? "selected" : ""}>${escapeHTML(theme.label)}</option>`).join("")}
+                </select>
+              </label>
+              <label class="file-control">Subir logo
+                <input name="logo" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" data-business-logo-input="${escapeHTML(business.id)}" />
+              </label>
+            </div>
+            <div class="super-admin-logo-preview">${business.logoUrl || app.superAdminPendingLogos[business.id] ? `<img src="${escapeHTML(app.superAdminPendingLogos[business.id] || business.logoUrl)}" alt="Logo ${escapeHTML(business.name)}" loading="lazy" decoding="async" />` : `<span>Sin logo cargado</span>`}</div>
+            <label class="toggle-line"><input name="active" type="checkbox" ${business.active ? "checked" : ""} /> Negocio activo</label>
+            <div class="button-row">
+              <button class="primary-action">Guardar negocio</button>
+              <a class="secondary-action inline-action" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">Cliente / Reservas</a>
+              <a class="secondary-action inline-action" href="${escapeHTML(urls.panel)}" target="_blank" rel="noreferrer">Admin / Barbero</a>
+              ${business.id !== DEFAULT_BUSINESS_ID ? `<button class="secondary-action danger" type="button" data-delete-business="${escapeHTML(business.id)}" data-delete-business-slug="${escapeHTML(business.slug)}" data-delete-business-name="${escapeHTML(business.name)}">Eliminar barberia</button>` : ""}
+            </div>
+          </form>
+          <section class="super-admin-admins">
+            <div class="section-title"><span>A</span><h2>Administradores</h2></div>
+            ${adminList}
+            <form class="super-admin-account-create form-stack" data-business-id="${escapeHTML(business.id)}">
+              <div class="form-grid">
+                <label>Nombre<input name="name" required placeholder="Nuevo administrador" /></label>
+                <label>Usuario<input name="user" required placeholder="usuario.admin" /></label>
+              </div>
+              <label class="toggle-line"><input name="active" type="checkbox" checked /> Activo</label>
+              <div class="button-row">
+                <button class="primary-action">Crear administrador</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </article>
+    </section>`;
+  };
+
+  const renderCreateBusinessPanel = () => `<article class="admin-account-card super-business-card is-open">
     <div class="super-business-summary">
       <button class="super-business-summary__trigger" type="button" data-toggle-super-create aria-expanded="${app.superAdminCreateOpen ? "true" : "false"}">
         <div class="super-business-summary__brand">
@@ -7666,7 +7950,7 @@ function renderSuperAdminV2() {
         <span class="super-business-summary__toggle">${app.superAdminCreateOpen ? "-" : "+"}</span>
       </div>
     </div>
-    <div class="super-business-panel" ${app.superAdminCreateOpen ? "" : "hidden"}>
+    <div class="super-business-panel">
       ${app.superAdminMessage ? `<p class="form-note">${escapeHTML(app.superAdminMessage)}</p>` : ""}
       ${credentialReveal}
       <form id="super-business-create" class="editor-card">
@@ -7734,6 +8018,104 @@ function renderSuperAdminV2() {
     `);
   }
 
+  const activeSuperAdminView = app.superAdminOpenBusinessId
+    ? "business-detail"
+    : app.superAdminView || "home";
+  const selectedSuperBusiness = app.superAdminOpenBusinessId
+    ? store.businessById(app.superAdminOpenBusinessId)
+    : null;
+  const metricsSection = `<section class="admin-main dashboard-lite super-admin-command-board">
+    <div class="section-title"><span>N</span><h2>Centro de mando</h2></div>
+    <div class="dashboard-cards super-admin-metrics">
+      <div><span>Total negocios</span><strong>${totalBusinesses}</strong></div>
+      <div><span>Negocios activos</span><strong>${activeBusinesses}</strong></div>
+      <div><span>Servicios totales</span><strong>${totalServices}</strong></div>
+      <div><span>Barberos totales</span><strong>${totalBarbers}</strong></div>
+      <div><span>Reservas de hoy</span><strong>${reservationsToday}</strong></div>
+    </div>
+  </section>`;
+  const backToolbar = (eyebrow, title) => `<div class="super-admin-view-toolbar">
+    <button class="secondary-action" type="button" data-super-admin-back>Volver al panel principal</button>
+    <div>
+      <p class="eyebrow">${escapeHTML(eyebrow)}</p>
+      <h2>${escapeHTML(title)}</h2>
+    </div>
+  </div>`;
+  const homeContent = `<section class="admin-main super-admin-command-board">
+    <div class="section-title"><span>S</span><h2>Panel principal</h2></div>
+    ${app.superAdminMessage ? `<p class="form-note super-admin-global-message-inline">${escapeHTML(app.superAdminMessage)}</p>` : ""}
+    <div class="super-admin-module-grid">
+      <button class="super-admin-module-card" type="button" data-super-admin-view="summary">
+        <span>01</span><strong>Resumen global</strong><small>Metricas principales del SaaS.</small>
+      </button>
+      <button class="super-admin-module-card" type="button" data-super-admin-view="businesses">
+        <span>02</span><strong>Negocios registrados</strong><small>Listado, acciones y detalles por barberia.</small>
+      </button>
+      <button class="super-admin-module-card" type="button" data-super-admin-view="create">
+        <span>03</span><strong>Crear negocio</strong><small>Alta de nueva barberia con entorno independiente.</small>
+      </button>
+      <button class="super-admin-module-card" type="button" data-super-admin-view="settings">
+        <span>04</span><strong>Configuracion general</strong><small>Estado de tema, URL base y modo SaaS.</small>
+      </button>
+      <button class="super-admin-module-card" type="button" data-super-admin-view="sessions">
+        <span>05</span><strong>Sesiones / accesos</strong><small>Accesos independientes por negocio.</small>
+      </button>
+      <button class="super-admin-module-card" type="button" data-super-admin-view="audit">
+        <span>06</span><strong>Auditoria / estado</strong><small>Revision rapida del estado operativo.</small>
+      </button>
+    </div>
+  </section>`;
+  const businessesContent = `<section class="admin-main super-admin-list-shell">
+    ${backToolbar("Negocios", "Negocios registrados")}
+    <div class="admin-account-list super-admin-business-list">
+      ${businessCards || `<p class="microcopy">Aun no hay negocios registrados.</p>`}
+    </div>
+  </section>`;
+  const createContent = `<section class="admin-main super-admin-create-shell">
+    ${backToolbar("Alta guiada", "Crear negocio")}
+    ${renderCreateBusinessPanel()}
+  </section>`;
+  const settingsContent = `<section class="admin-main super-admin-command-board">
+    ${backToolbar("Configuracion", "Configuracion general")}
+    <div class="dashboard-cards super-admin-metrics">
+      <div><span>Tema visual</span><strong>Urban Neon</strong></div>
+      <div><span>URL publica</span><strong>/barberia/:slug</strong></div>
+      <div><span>Entorno base</span><strong>Dinamico</strong></div>
+    </div>
+  </section>`;
+  const sessionsContent = `<section class="admin-main super-admin-command-board">
+    ${backToolbar("Accesos", "Sesiones / accesos")}
+    <div class="dashboard-cards super-admin-metrics">
+      <div><span>Super Admin</span><strong>Independiente</strong></div>
+      <div><span>Admin negocio</span><strong>Por barberia</strong></div>
+      <div><span>Barberos</span><strong>Por negocio</strong></div>
+    </div>
+  </section>`;
+  const auditContent = `<section class="admin-main super-admin-command-board">
+    ${backToolbar("Estado", "Auditoria / estado")}
+    <div class="dashboard-cards super-admin-metrics">
+      <div><span>Negocios activos</span><strong>${activeBusinesses}</strong></div>
+      <div><span>Reservas hoy</span><strong>${reservationsToday}</strong></div>
+      <div><span>Estado global</span><strong>${escapeHTML(globalStatusLabel)}</strong></div>
+    </div>
+  </section>`;
+  const superAdminContent =
+    activeSuperAdminView === "summary"
+      ? `${backToolbar("Resumen", "Resumen global")}${metricsSection}`
+      : activeSuperAdminView === "businesses"
+        ? businessesContent
+        : activeSuperAdminView === "create"
+          ? createContent
+          : activeSuperAdminView === "business-detail"
+            ? renderSuperBusinessDetailPanel(selectedSuperBusiness)
+            : activeSuperAdminView === "settings"
+              ? settingsContent
+              : activeSuperAdminView === "sessions"
+                ? sessionsContent
+                : activeSuperAdminView === "audit"
+                  ? auditContent
+                  : homeContent;
+
   return appShell(`
     <section class="dashboard-head super-admin-hero">
       <div class="super-admin-hero__copy">
@@ -7750,28 +8132,7 @@ function renderSuperAdminV2() {
       </div>
     </section>
     <section class="admin-stack super-admin-dashboard">
-      <section class="super-admin-dashboard-grid">
-        <section class="admin-main dashboard-lite super-admin-command-board">
-          <div class="section-title"><span>N</span><h2>Centro de mando</h2></div>
-          <div class="dashboard-cards super-admin-metrics">
-            <div><span>Total negocios</span><strong>${totalBusinesses}</strong></div>
-            <div><span>Negocios activos</span><strong>${activeBusinesses}</strong></div>
-            <div><span>Servicios totales</span><strong>${totalServices}</strong></div>
-            <div><span>Barberos totales</span><strong>${totalBarbers}</strong></div>
-            <div><span>Reservas de hoy</span><strong>${reservationsToday}</strong></div>
-          </div>
-        </section>
-        <section class="admin-main super-admin-create-shell">
-          <div class="section-title"><span>+</span><h2>Nuevo negocio</h2></div>
-          ${createBusinessPanel}
-        </section>
-      </section>
-      <section class="admin-main super-admin-list-shell">
-        <div class="section-title"><span>L</span><h2>Listado de negocios</h2></div>
-        <div class="admin-account-list super-admin-business-list">
-          ${businessCards || `<p class="microcopy">Aun no hay negocios registrados.</p>`}
-        </div>
-      </section>
+      ${superAdminContent}
       ${deleteBusinessDialog}
     </section>
   `);
@@ -8646,16 +9007,38 @@ function bindEvents() {
     render();
   });
 
+  document.querySelectorAll("[data-super-admin-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      app.superAdminView = button.dataset.superAdminView || "home";
+      app.superAdminOpenBusinessId = "";
+      app.superAdminCreateOpen = app.superAdminView === "create";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-super-admin-back]").forEach((button) => {
+    button.addEventListener("click", () => {
+      app.superAdminView = "home";
+      app.superAdminOpenBusinessId = "";
+      app.superAdminCreateOpen = false;
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-toggle-super-business]").forEach((button) => {
     button.addEventListener("click", () => {
       const businessId = button.dataset.toggleSuperBusiness || "";
-      app.superAdminOpenBusinessId = app.superAdminOpenBusinessId === businessId ? "" : businessId;
+      app.superAdminView = "business-detail";
+      app.superAdminOpenBusinessId = businessId;
+      app.superAdminCreateOpen = false;
       render();
     });
   });
 
   document.querySelector("[data-toggle-super-create]")?.addEventListener("click", () => {
-    app.superAdminCreateOpen = !app.superAdminCreateOpen;
+    app.superAdminView = "create";
+    app.superAdminOpenBusinessId = "";
+    app.superAdminCreateOpen = true;
     render();
   });
 
@@ -8891,6 +9274,7 @@ function bindEvents() {
     };
     app.superAdminOpenBusinessId = business.id;
     app.superAdminCreateOpen = false;
+    app.superAdminView = "business-detail";
     app.superAdminMessage = environmentAttachment
       ? `Barberia creada: ${business.name}. El entorno adjunto quedo asociado y el negocio inicia sin datos operativos.`
       : `Barberia creada: ${business.name}. Se usara la plantilla base dinamica del sistema y el negocio inicia sin datos operativos.`;
@@ -9013,6 +9397,7 @@ function bindEvents() {
       delete app.superAdminPendingLogoFiles[target.id];
       delete app.superAdminPendingEnvironmentArchives[target.id];
       if (app.superAdminOpenBusinessId === target.id) app.superAdminOpenBusinessId = "";
+      app.superAdminView = "businesses";
       app.superAdminDeleteTarget = null;
       app.superAdminDeleting = false;
       app.superAdminMessage = "Barberia eliminada correctamente.";
