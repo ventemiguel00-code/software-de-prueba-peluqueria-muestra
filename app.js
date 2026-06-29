@@ -8024,6 +8024,12 @@ function renderSuperAdminV2() {
   const selectedSuperBusiness = app.superAdminOpenBusinessId
     ? store.businessById(app.superAdminOpenBusinessId)
     : null;
+  const heroMetrics = `<div class="super-admin-hero__metrics" aria-label="Metricas globales">
+    <div><span>Total negocios</span><strong>${totalBusinesses}</strong></div>
+    <div><span>Servicios totales</span><strong>${totalServices}</strong></div>
+    <div><span>Barberos totales</span><strong>${totalBarbers}</strong></div>
+    <div><span>Reservas de hoy</span><strong>${reservationsToday}</strong></div>
+  </div>`;
   const metricsSection = `<section class="admin-main dashboard-lite super-admin-command-board">
     <div class="section-title"><span>N</span><h2>Centro de mando</h2></div>
     <div class="dashboard-cards super-admin-metrics">
@@ -8045,23 +8051,14 @@ function renderSuperAdminV2() {
     <div class="section-title"><span>S</span><h2>Panel principal</h2></div>
     ${app.superAdminMessage ? `<p class="form-note super-admin-global-message-inline">${escapeHTML(app.superAdminMessage)}</p>` : ""}
     <div class="super-admin-module-grid">
-      <button class="super-admin-module-card" type="button" data-super-admin-view="summary">
-        <span>01</span><strong>Resumen global</strong><small>Metricas principales del SaaS.</small>
-      </button>
       <button class="super-admin-module-card" type="button" data-super-admin-view="businesses">
-        <span>02</span><strong>Negocios registrados</strong><small>Listado, acciones y detalles por barberia.</small>
+        <span>01</span><strong>Negocios registrados</strong><small>${totalBusinesses} negocios · ${activeBusinesses} activos · Acciones y detalles por barberia.</small>
       </button>
       <button class="super-admin-module-card" type="button" data-super-admin-view="create">
-        <span>03</span><strong>Crear negocio</strong><small>Alta de nueva barberia con entorno independiente.</small>
+        <span>02</span><strong>Crear negocio</strong><small>Alta guiada de nueva barberia con entorno independiente.</small>
       </button>
-      <button class="super-admin-module-card" type="button" data-super-admin-view="settings">
-        <span>04</span><strong>Configuracion general</strong><small>Estado de tema, URL base y modo SaaS.</small>
-      </button>
-      <button class="super-admin-module-card" type="button" data-super-admin-view="sessions">
-        <span>05</span><strong>Sesiones / accesos</strong><small>Accesos independientes por negocio.</small>
-      </button>
-      <button class="super-admin-module-card" type="button" data-super-admin-view="audit">
-        <span>06</span><strong>Auditoria / estado</strong><small>Revision rapida del estado operativo.</small>
+      <button class="super-admin-module-card" type="button" data-super-admin-view="operations">
+        <span>03</span><strong>Operación SaaS</strong><small>Configuracion, sesiones independientes y estado operativo en una sola vista.</small>
       </button>
     </div>
   </section>`;
@@ -8099,6 +8096,16 @@ function renderSuperAdminV2() {
       <div><span>Estado global</span><strong>${escapeHTML(globalStatusLabel)}</strong></div>
     </div>
   </section>`;
+  const operationsContent = `<section class="admin-main super-admin-command-board">
+    ${backToolbar("Operacion", "Operación SaaS")}
+    <div class="dashboard-cards super-admin-metrics">
+      <div><span>Negocios activos</span><strong>${activeBusinesses}</strong></div>
+      <div><span>URL publica</span><strong>/barberia/:slug</strong></div>
+      <div><span>Tema visual</span><strong>Urban Neon</strong></div>
+      <div><span>Sesiones</span><strong>Por negocio</strong></div>
+      <div><span>Estado</span><strong>${escapeHTML(globalStatusLabel)}</strong></div>
+    </div>
+  </section>`;
   const superAdminContent =
     activeSuperAdminView === "summary"
       ? `${backToolbar("Resumen", "Resumen global")}${metricsSection}`
@@ -8109,11 +8116,13 @@ function renderSuperAdminV2() {
           : activeSuperAdminView === "business-detail"
             ? renderSuperBusinessDetailPanel(selectedSuperBusiness)
             : activeSuperAdminView === "settings"
-              ? settingsContent
+              ? operationsContent
               : activeSuperAdminView === "sessions"
-                ? sessionsContent
+                ? operationsContent
                 : activeSuperAdminView === "audit"
-                  ? auditContent
+                  ? operationsContent
+                  : activeSuperAdminView === "operations"
+                    ? operationsContent
                   : homeContent;
 
   return appShell(`
@@ -8124,10 +8133,7 @@ function renderSuperAdminV2() {
         <span>Administra negocios, accesos, entornos y operaciones desde un centro de mando visual, claro y preparado para crecer.</span>
       </div>
       <div class="super-admin-hero__actions">
-        <div class="super-admin-hero__pulse">
-          <span>Estado global</span>
-          <strong>${globalStatusLabel}</strong>
-        </div>
+        ${heroMetrics}
         <button class="secondary-action" data-super-logout>Cerrar sesion</button>
       </div>
     </section>

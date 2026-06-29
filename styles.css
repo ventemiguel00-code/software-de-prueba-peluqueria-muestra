@@ -2682,6 +2682,7 @@ dialog::backdrop {
   gap: 14px;
   flex-wrap: wrap;
   justify-content: flex-end;
+  flex: 1 1 620px;
 }
 
 .super-admin-hero__pulse {
@@ -2706,6 +2707,39 @@ dialog::backdrop {
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
+}
+
+.super-admin-hero__metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(118px, 1fr));
+  gap: 10px;
+  width: min(760px, 100%);
+}
+
+.super-admin-hero__metrics div {
+  min-height: 76px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 26%, transparent);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--color-primary) 10%, transparent), rgba(255, 255, 255, 0.025)),
+    rgba(8, 14, 18, 0.8);
+  display: grid;
+  align-content: center;
+  gap: 4px;
+}
+
+.super-admin-hero__metrics span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+.super-admin-hero__metrics strong {
+  color: var(--white);
+  font-size: clamp(20px, 2.1vw, 30px);
+  line-height: 1;
 }
 
 .super-admin-command-board,
@@ -3453,11 +3487,17 @@ body[data-device="mobile"] *::after {
 
   .super-admin-hero__actions {
     justify-content: stretch;
+    flex-direction: column;
   }
 
   .super-admin-hero__pulse,
+  .super-admin-hero__metrics,
   .super-admin-hero__actions .secondary-action {
     width: 100%;
+  }
+
+  .super-admin-hero__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .super-admin-metrics {
