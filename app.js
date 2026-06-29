@@ -7749,20 +7749,22 @@ function renderSuperAdminV2() {
         <button class="secondary-action" data-super-logout>Cerrar sesion</button>
       </div>
     </section>
-    <section class="admin-stack">
-      <section class="admin-main dashboard-lite super-admin-command-board">
-        <div class="section-title"><span>N</span><h2>Negocios registrados</h2></div>
-        <div class="dashboard-cards super-admin-metrics">
-          <div><span>Total negocios</span><strong>${totalBusinesses}</strong></div>
-          <div><span>Negocios activos</span><strong>${activeBusinesses}</strong></div>
-          <div><span>Servicios totales</span><strong>${totalServices}</strong></div>
-          <div><span>Barberos totales</span><strong>${totalBarbers}</strong></div>
-          <div><span>Reservas de hoy</span><strong>${reservationsToday}</strong></div>
-        </div>
-      </section>
-      <section class="admin-main super-admin-create-shell">
-        <div class="section-title"><span>+</span><h2>Nuevo negocio</h2></div>
-        ${createBusinessPanel}
+    <section class="admin-stack super-admin-dashboard">
+      <section class="super-admin-dashboard-grid">
+        <section class="admin-main dashboard-lite super-admin-command-board">
+          <div class="section-title"><span>N</span><h2>Centro de mando</h2></div>
+          <div class="dashboard-cards super-admin-metrics">
+            <div><span>Total negocios</span><strong>${totalBusinesses}</strong></div>
+            <div><span>Negocios activos</span><strong>${activeBusinesses}</strong></div>
+            <div><span>Servicios totales</span><strong>${totalServices}</strong></div>
+            <div><span>Barberos totales</span><strong>${totalBarbers}</strong></div>
+            <div><span>Reservas de hoy</span><strong>${reservationsToday}</strong></div>
+          </div>
+        </section>
+        <section class="admin-main super-admin-create-shell">
+          <div class="section-title"><span>+</span><h2>Nuevo negocio</h2></div>
+          ${createBusinessPanel}
+        </section>
       </section>
       <section class="admin-main super-admin-list-shell">
         <div class="section-title"><span>L</span><h2>Listado de negocios</h2></div>
