@@ -3647,3 +3647,132 @@ body[data-device="mobile"] *::after {
   }
 }
 
+@media (max-width: 768px) {
+  html,
+  body {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  .super-admin-shell {
+    width: 100%;
+    max-width: 100%;
+    padding-top: 0;
+    overflow-x: hidden;
+  }
+
+  .super-admin-shell .dashboard-head.super-admin-hero {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding-inline: 14px;
+    padding-block: 16px 12px;
+    gap: 14px;
+    box-sizing: border-box;
+  }
+
+  .super-admin-hero__copy {
+    gap: 6px;
+    text-align: left;
+  }
+
+  .super-admin-hero__copy h1 {
+    font-size: clamp(28px, 9vw, 44px);
+    line-height: 0.95;
+  }
+
+  .super-admin-hero__copy span {
+    font-size: 13px;
+    max-width: 100%;
+  }
+
+  .super-admin-hero__actions {
+    width: 100%;
+    max-width: 100%;
+    gap: 10px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .super-admin-hero__metrics {
+    width: 100%;
+    max-width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .super-admin-hero__metrics div {
+    min-height: 68px;
+    padding: 10px 11px;
+  }
+
+  .super-admin-hero__metrics strong {
+    font-size: clamp(18px, 6vw, 26px);
+  }
+
+  .super-admin-hero__actions .secondary-action {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .super-admin-shell .admin-stack.super-admin-dashboard {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 10px 12px 14px;
+    gap: 14px;
+    box-sizing: border-box;
+  }
+
+  .super-admin-command-board,
+  .super-admin-create-shell,
+  .super-admin-list-shell {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .super-admin-module-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .super-admin-module-card {
+    min-height: 132px;
+    padding: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .super-admin-shell .dashboard-head.super-admin-hero {
+    padding-inline: 10px;
+    padding-block: 12px 10px;
+    gap: 12px;
+  }
+
+  .super-admin-shell .admin-stack.super-admin-dashboard {
+    padding: 8px 10px 12px;
+    gap: 12px;
+  }
+
+  .super-admin-hero__copy {
+    text-align: center;
+  }
+
+  .super-admin-hero__metrics {
+    gap: 7px;
+  }
+
+  .super-admin-hero__metrics div {
+    border-radius: 16px;
+    min-height: 62px;
+    padding: 9px 10px;
+  }
+
+  .super-admin-module-card {
+    min-height: 120px;
+    padding: 14px;
+    border-radius: 18px;
+  }
+}
+
