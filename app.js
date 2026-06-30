@@ -7900,6 +7900,23 @@ function renderSuperAdminV2() {
   );
   ensureRemoteSessionHealth("super_admin", app.superAdminSession);
 
+  if (!app.superAdminSession) {
+    return appShell(`
+      <section class="login-view">
+        <div class="login-panel">
+          <p class="eyebrow">Control global</p>
+          <h1>SUPER ADMIN</h1>
+          <form id="super-admin-login" class="form-stack">
+            <label>Usuario<input name="user" required autocomplete="username" placeholder="SDMcompany" /></label>
+            <label>Clave<input name="password" type="password" required autocomplete="current-password" placeholder="••••••••" /></label>
+            ${app.superAdminLoginError ? `<p class="form-error">${escapeHTML(app.superAdminLoginError)}</p>` : ""}
+            <button class="primary-action">Entrar</button>
+          </form>
+        </div>
+      </section>
+    `);
+  }
+
   const expectedSuperAdminScope = `super-admin:global:${DEFAULT_BUSINESS_SLUG}`;
   if (app.superAdminSession && store.supabase && (!store.remoteReady || store.remoteLoadedScopeKey !== expectedSuperAdminScope)) {
     return appShell(`
