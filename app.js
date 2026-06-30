@@ -5975,7 +5975,7 @@ function renderCounter(value, extraClass = "") {
 }
 
 function renderAccordionPanel(id, label, title, content, open = false) {
-  return `<section class="admin-main accordion-panel ${open ? "open" : ""}">
+  return `<section class="admin-main accordion-panel ds-card ds-accordion-panel ${open ? "open" : ""}">
     <button class="accordion-trigger" type="button" data-admin-panel="${id}" aria-expanded="${open ? "true" : "false"}">
       <span class="section-title">
         <span>${label}</span>
@@ -7073,34 +7073,36 @@ function barberEditorForm(barber, submitLabel) {
   const selectedServiceIds = new Set(
     storedServiceIds.length ? storedServiceIds : services.map((service) => service.id)
   );
-  return `<form id="barber-form" class="editor-card">
+  return `<form id="barber-form" class="editor-card ds-form-card ds-crud-form">
     <input type="hidden" name="id" value="${escapeHTML(barber?.id || "")}" />
-    ${app.adminBarberMessage ? `<p class="form-note">${escapeHTML(app.adminBarberMessage)}</p>` : ""}
-    <label>Nombre<input name="name" required value="${escapeHTML(barber?.name || "")}" /></label>
-    <label>WhatsApp<input name="whatsapp" inputmode="tel" value="${escapeHTML(barber?.whatsapp || "")}" placeholder="300 123 4567" /></label>
-    <label>Usuario<input name="user" required value="${escapeHTML(barber?.user || "")}" /></label>
-    <label>Clave<input name="password" ${barber ? "" : "required"} value="" placeholder="${escapeHTML(barber ? "Deja vacio para conservar la clave actual" : "studio2026")}" /></label>
-    <label>Especialidad<input name="specialty" value="${escapeHTML(barber?.specialty || "Servicio premium")}" /></label>
-    <label class="file-control">Fotografia<input name="photo" type="file" accept="image/*" /></label>
-    <div class="service-checklist-block">
-      <span class="field-label">Servicios disponibles</span>
+    ${app.adminBarberMessage ? `<p class="form-note ds-message-card">${escapeHTML(app.adminBarberMessage)}</p>` : ""}
+    <div class="form-grid ds-form-grid">
+      ${dsInputField("Nombre", "name", { required: true, value: barber?.name || "" })}
+      ${dsInputField("WhatsApp", "whatsapp", { value: barber?.whatsapp || "", placeholder: "300 123 4567", extra: 'inputmode="tel"' })}
+      ${dsInputField("Usuario", "user", { required: true, value: barber?.user || "" })}
+      ${dsInputField("Clave", "password", { required: !barber, value: "", placeholder: barber ? "Deja vacio para conservar la clave actual" : "studio2026" })}
+      ${dsInputField("Especialidad", "specialty", { value: barber?.specialty || "Servicio premium", wide: true })}
+      ${dsTextField("Fotografia", `<label class="file-control ds-upload-field">Subir imagen<input name="photo" type="file" accept="image/*" /></label>`, { wide: true })}
+    </div>
+    <div class="service-checklist-block ds-checklist-block">
+      <span class="field-label ds-field__label">Servicios disponibles</span>
       ${
         services.length
           ? `<div class="checklist-grid">
               ${services
                 .map(
-                  (service) => `<label class="check-item">
+                  (service) => `<label class="check-item ds-check-item">
                     <input type="checkbox" name="serviceIds" value="${escapeHTML(service.id)}" ${selectedServiceIds.has(service.id) ? "checked" : ""} />
                     <span>${escapeHTML(service.name)}</span>
                   </label>`
                 )
                 .join("")}
             </div>`
-          : `<p class="microcopy">Primero crea servicios en el modulo Servicios para poder asignarlos.</p>`
+          : `<div class="empty-state-card ds-empty-card"><p class="microcopy">Primero crea servicios en el modulo Servicios para poder asignarlos.</p></div>`
       }
     </div>
-    <label class="toggle-line"><input name="active" type="checkbox" ${barber?.active ?? true ? "checked" : ""} /> Barbero activo</label>
-    <div class="button-row">
+    <label class="toggle-line ds-toggle-line"><input name="active" type="checkbox" ${barber?.active ?? true ? "checked" : ""} /> Barbero activo</label>
+    <div class="button-row ds-button-row">
       <button class="primary-action">${submitLabel}</button>
       ${barber?.id ? `<button class="secondary-action" type="button" data-regenerate-barber-password="${escapeHTML(barber.id)}">Regenerar clave</button>` : ""}
     </div>
@@ -7137,6 +7139,53 @@ function barberSummaryCards(barber, anchorDate, viewer = "barber") {
 
 function adminAccountsSection() {
   const accounts = adminAccountsForBusiness(currentBusinessId());
+  return `<section class="admin-main ds-crud-shell">
+    <div class="section-title"><span>U</span><h2>Gestionar administradores</h2></div>
+    ${app.adminAccountMessage ? `<p class="form-note ds-message-card">${escapeHTML(app.adminAccountMessage)}</p>` : ""}
+    <form id="admin-account-create" class="editor-card ds-form-card ds-crud-form">
+      <div class="form-grid ds-form-grid">
+        ${dsInputField("Nombre completo", "name", { required: true, placeholder: "Nombre del administrador" })}
+        ${dsInputField("Usuario", "user", { required: true, placeholder: "usuario" })}
+        ${dsInputField("Contrasena", "password", { type: "password", required: true, placeholder: "Clave temporal" })}
+        ${dsInputField("Confirmar contrasena", "confirmPassword", { type: "password", required: true, placeholder: "Repetir clave" })}
+      </div>
+      <label class="toggle-line ds-toggle-line"><input name="active" type="checkbox" checked /> Administrador activo</label>
+      <div class="button-row ds-button-row">
+        <button class="primary-action">Registrar administrador</button>
+      </div>
+    </form>
+    <div class="admin-account-list ds-card-list">
+      ${accounts
+        .map((account) => {
+          const principal = account.id === PRINCIPAL_ADMIN.id;
+          return `<article class="admin-account-card ds-form-card ${principal ? "locked" : ""}">
+            <div>
+              <p class="eyebrow">${principal ? "Administrador principal" : account.active ? "Activo" : "Inactivo"}</p>
+              <h3>${escapeHTML(account.name)}</h3>
+              <p>Usuario: ${escapeHTML(account.user)} · Rol: ${escapeHTML(account.role)}</p>
+            </div>
+            ${
+              principal
+                ? `<div class="empty-state-card ds-empty-card"><p class="microcopy">Cuenta protegida. No se puede editar ni eliminar desde el panel.</p></div>`
+                : `<form class="admin-account-edit form-stack ds-crud-form" data-admin-account-id="${account.id}">
+                    <div class="form-grid ds-form-grid">
+                      ${dsInputField("Nombre", "name", { required: true, value: account.name })}
+                      ${dsInputField("Usuario", "user", { required: true, value: account.user })}
+                      ${dsInputField("Nueva contrasena", "password", { type: "password", required: true, value: account.password })}
+                      ${dsInputField("Confirmar", "confirmPassword", { type: "password", required: true, value: account.password })}
+                    </div>
+                    <label class="toggle-line ds-toggle-line"><input name="active" type="checkbox" ${account.active ? "checked" : ""} /> Activo</label>
+                    <div class="button-row ds-button-row">
+                      <button class="primary-action">Guardar cambios</button>
+                      <button class="icon-action danger" type="button" data-delete-admin-account="${account.id}">Eliminar</button>
+                    </div>
+                  </form>`
+            }
+          </article>`;
+        })
+        .join("")}
+    </div>
+  </section>`;
   return `<section class="admin-main">
     <div class="section-title"><span>U</span><h2>Gestionar administradores</h2></div>
     ${app.adminAccountMessage ? `<p class="form-note">${escapeHTML(app.adminAccountMessage)}</p>` : ""}
@@ -7240,6 +7289,22 @@ function validateBarberPayload(payload, editingId = "") {
 }
 
 function serviceEditorCard(service) {
+  return `<article class="service-card ds-form-card">
+    <form class="service-edit-form form-stack ds-crud-form" data-service-id="${escapeHTML(service.id)}">
+      <p class="microcopy ds-inline-status">Estado visible: <strong>${service.active ? "Activo en agenda" : "Inactivo / oculto en agenda"}</strong></p>
+      <div class="form-grid ds-form-grid">
+        ${dsInputField("Nombre del servicio", "name", { required: true, value: service.name })}
+        ${dsInputField("Valor del servicio", "value", { required: true, value: service.value, extra: 'inputmode="numeric"' })}
+        ${dsInputField("% administrador", "adminPercentage", { required: true, value: service.adminPercentage, extra: 'inputmode="numeric"' })}
+        ${dsInputField("% barbero", "barberPercentage", { required: true, value: service.barberPercentage, extra: 'inputmode="numeric"' })}
+      </div>
+      <label class="toggle-line ds-toggle-line"><input name="active" type="checkbox" ${service.active ? "checked" : ""} /> Servicio activo</label>
+      <div class="button-row ds-button-row">
+        <button class="primary-action">Guardar servicio</button>
+        <button class="icon-action danger" type="button" data-delete-service="${escapeHTML(service.id)}">Eliminar</button>
+      </div>
+    </form>
+  </article>`;
   return `<article class="service-card">
     <form class="service-edit-form form-stack" data-service-id="${escapeHTML(service.id)}">
       <p class="microcopy">Estado visible: <strong>${service.active ? "Activo en agenda" : "Inactivo / oculto en agenda"}</strong></p>
@@ -7262,6 +7327,44 @@ function servicesSection() {
   const services = [...servicesForBusiness(currentBusinessId())].sort((a, b) => a.name.localeCompare(b.name, "es"));
   const showPublicPrices = publicPricesVisibleForBusiness(currentBusinessId());
   const waitingServices = !services.length && isBusinessDataRefreshPending(currentBusinessId());
+  return `<section class="admin-main ds-crud-shell">
+    <div class="section-title"><span>S</span><h2>Servicios</h2></div>
+    <p class="microcopy">Crea y administra servicios sin tocar todavia el flujo actual de reservas.</p>
+    ${app.adminServiceMessage ? `<p class="form-note ds-message-card">${escapeHTML(app.adminServiceMessage)}</p>` : ""}
+    <form id="public-price-visibility-form" class="editor-card compact-form ds-form-card ds-crud-form">
+      <div class="split-inline ds-inline-control">
+        <div>
+          <strong>Mostrar precios al cliente</strong>
+          <p class="microcopy">Controla si la agenda publica muestra el valor de cada servicio.</p>
+        </div>
+        <label class="toggle-line ds-toggle-line"><input name="showPublicPrices" type="checkbox" ${showPublicPrices ? "checked" : ""} /> Visible en agenda publica</label>
+      </div>
+      <div class="button-row ds-button-row">
+        <button class="primary-action">Guardar preferencia</button>
+      </div>
+    </form>
+    <form id="service-create-form" class="editor-card ds-form-card ds-crud-form">
+      <div class="form-grid ds-form-grid">
+        ${dsInputField("Nombre del servicio", "name", { required: true, placeholder: "Corte clasico" })}
+        ${dsInputField("Valor del servicio", "value", { required: true, placeholder: "20000", extra: 'inputmode="numeric"' })}
+        ${dsInputField("% administrador", "adminPercentage", { required: true, placeholder: "50", extra: 'inputmode="numeric"' })}
+        ${dsInputField("% barbero", "barberPercentage", { required: true, placeholder: "50", extra: 'inputmode="numeric"' })}
+      </div>
+      <label class="toggle-line ds-toggle-line"><input name="active" type="checkbox" checked /> Servicio activo</label>
+      <div class="button-row ds-button-row">
+        <button class="primary-action">Crear servicio</button>
+      </div>
+    </form>
+    <div class="service-list ds-card-list">
+      ${
+        services.length
+          ? services.map(serviceEditorCard).join("")
+          : waitingServices
+            ? `<div class="empty-state-card ds-empty-card"><p class="microcopy">Sincronizando servicios del negocio...</p></div>`
+            : `<div class="empty-state-card ds-empty-card"><p class="microcopy">Aun no hay servicios creados.</p></div>`
+      }
+    </div>
+  </section>`;
   return `<section class="admin-main">
     <div class="section-title"><span>S</span><h2>Servicios</h2></div>
     <p class="microcopy">Crea y administra servicios sin tocar todavia el flujo actual de reservas.</p>
@@ -7306,6 +7409,25 @@ function attentionHoursSection() {
   const businessId = currentBusinessId();
   const schedule = businessScheduleConfig(businessId);
   const previewSlots = slotsForBusiness(businessId);
+  return `<section class="admin-main ds-crud-shell">
+    <div class="section-title"><span>H</span><h2>Horarios de atencion</h2></div>
+    <p class="microcopy">Configura las franjas que usara esta barberia en agenda publica, panel administrador y panel barbero.</p>
+    ${app.adminScheduleMessage ? `<p class="form-note ds-message-card">${escapeHTML(app.adminScheduleMessage)}</p>` : ""}
+    <form id="business-schedule-form" class="editor-card compact-form ds-form-card ds-crud-form">
+      <div class="form-grid ds-form-grid">
+        ${dsInputField("Hora de apertura", "openingTime", { type: "time", required: true, value: schedule.openingTime })}
+        ${dsInputField("Hora de cierre", "closingTime", { type: "time", required: true, value: schedule.closingTime })}
+        ${dsSelectField("Duracion del intervalo", "slotDurationMinutes", ALLOWED_SLOT_DURATIONS.map((duration) => ({ value: duration, label: `${duration} minutos` })), { value: schedule.slotDurationMinutes })}
+      </div>
+      <div class="button-row ds-button-row">
+        <button class="primary-action">Guardar horarios</button>
+      </div>
+    </form>
+    <div class="empty-state-card ds-empty-card ds-preview-card">
+      <p>Vista previa: ${previewSlots.length} franjas activas.</p>
+      <p>${escapeHTML(slotRange(previewSlots[0] || schedule.openingTime, businessId))} hasta ${escapeHTML(slotRange(previewSlots[previewSlots.length - 1] || schedule.openingTime, businessId))}</p>
+    </div>
+  </section>`;
   return `<section class="admin-main">
     <div class="section-title"><span>H</span><h2>Horarios de atencion</h2></div>
     <p class="microcopy">Configura las franjas que usara esta barberia en agenda publica, panel administrador y panel barbero.</p>
@@ -8441,12 +8563,12 @@ function renderSuperAdminV2() {
 }
 
 function backgroundSettingsSection() {
-  return `<section class="admin-main">
+  return `<section class="admin-main ds-crud-shell">
     <div class="section-title"><span>V</span><h2>Fondo dinamico</h2></div>
     <p class="microcopy">Carga un video corto MP4 o WEBM de maximo 10 MB. Recomendado: 10 a 15 segundos.</p>
-    ${app.backgroundMessage ? `<p class="form-note">${escapeHTML(app.backgroundMessage)}</p>` : ""}
-    <form id="background-form" class="editor-card">
-      <label>Video de fondo<input name="video" type="file" accept="video/mp4,video/webm" /></label>
+    ${app.backgroundMessage ? `<p class="form-note ds-message-card">${escapeHTML(app.backgroundMessage)}</p>` : ""}
+    <form id="background-form" class="editor-card ds-form-card ds-crud-form">
+      ${dsTextField("Video de fondo", `<label class="file-control ds-upload-field">Seleccionar video<input name="video" type="file" accept="video/mp4,video/webm" /></label>`, { wide: true, hint: "Usa videos breves para mantener una experiencia fluida." })}
       ${
         app.pendingBackgroundVideo
           ? `<video class="background-preview" src="${app.pendingBackgroundVideo.src}" controls muted loop playsinline></video>`
@@ -8454,7 +8576,7 @@ function backgroundSettingsSection() {
             ? `<video class="background-preview" src="${app.backgroundMedia.src}" controls muted loop playsinline></video>`
             : `<div class="background-preview static-preview"><span>Fondo estatico activo</span></div>`
       }
-      <div class="button-row">
+      <div class="button-row ds-button-row">
         <button class="primary-action" type="submit" ${app.pendingBackgroundVideo ? "" : "disabled"}>Guardar video como fondo</button>
         <button class="secondary-action" type="button" data-reset-background>Volver al fondo estatico</button>
       </div>
