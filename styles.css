@@ -3654,6 +3654,11 @@ body[data-device="mobile"] *::after {
     overflow-x: hidden;
   }
 
+  .super-admin-shell #view-root {
+    min-height: 0;
+    contain: none;
+  }
+
   .super-admin-shell {
     width: 100%;
     max-width: 100%;
@@ -3751,6 +3756,11 @@ body[data-device="mobile"] *::after {
 }
 
 @media (max-width: 480px) {
+  .super-admin-shell #view-root {
+    min-height: 0;
+    contain: none;
+  }
+
   .super-admin-shell .dashboard-head.super-admin-hero {
     padding-inline: 8px;
     padding-block: 8px 6px;
