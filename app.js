@@ -6167,6 +6167,130 @@ function renderWeekSelector(selected, onClickAttr = "data-date", options = {}) {
   }).join("")}</div>`;
 }
 
+function dsIcon(name = "dot") {
+  const icons = {
+    business: "◈",
+    barbers: "◌",
+    services: "✦",
+    reservations: "◷",
+    url: "↗",
+    admin: "◎",
+    environment: "▣",
+    theme: "◍",
+    status: "●",
+    create: "+",
+  };
+  return `<span class="ds-icon" aria-hidden="true">${icons[name] || "•"}</span>`;
+}
+
+function dsStatusBadge(active, activeLabel = "Activo", inactiveLabel = "Inactivo") {
+  return `<span class="ds-status-badge ${active ? "is-active" : "is-inactive"}">${dsIcon("status")}<span>${escapeHTML(active ? activeLabel : inactiveLabel)}</span></span>`;
+}
+
+function dsMetricCard({ icon = "business", label = "", value = "", meta = "" }) {
+  return `<article class="ds-metric-card">
+    <div class="ds-metric-card__icon">${dsIcon(icon)}</div>
+    <div class="ds-metric-card__copy">
+      <span>${escapeHTML(label)}</span>
+      <strong>${escapeHTML(String(value))}</strong>
+      ${meta ? `<small>${escapeHTML(meta)}</small>` : ""}
+    </div>
+  </article>`;
+}
+
+function dsStatItem({ icon = "business", label = "", value = "", emphasis = "" }) {
+  return `<div class="ds-stat-item">
+    <span class="ds-stat-item__label">${dsIcon(icon)}${escapeHTML(label)}</span>
+    <strong>${escapeHTML(String(value || emphasis))}</strong>
+  </div>`;
+}
+
+function dsMetricSection(title, iconToken, cards = [], extra = "") {
+  return `<section class="admin-main dashboard-lite ds-metric-section">
+    <div class="section-title"><span>${escapeHTML(iconToken)}</span><h2>${escapeHTML(title)}</h2></div>
+    <div class="dashboard-cards ds-metric-grid">
+      ${cards.join("")}
+    </div>
+    ${extra}
+  </section>`;
+}
+
+function dsTextField(label, inputMarkup, options = {}) {
+  const { hint = "", wide = false, className = "" } = options;
+  return `<label class="ds-field ${wide ? "ds-field--wide" : ""} ${className}">
+    <span class="ds-field__label">${escapeHTML(label)}</span>
+    ${inputMarkup}
+    ${hint ? `<small class="ds-field__hint">${escapeHTML(hint)}</small>` : ""}
+  </label>`;
+}
+
+function dsInputField(label, name, options = {}) {
+  const {
+    value = "",
+    placeholder = "",
+    type = "text",
+    required = false,
+    disabled = false,
+    autocomplete = "",
+    wide = false,
+    extra = "",
+    hint = "",
+  } = options;
+  return dsTextField(
+    label,
+    `<input name="${escapeHTML(name)}" type="${escapeHTML(type)}" ${required ? "required" : ""} ${disabled ? "disabled" : ""} ${autocomplete ? `autocomplete="${escapeHTML(autocomplete)}"` : ""} value="${escapeHTML(String(value))}" placeholder="${escapeHTML(placeholder)}" ${extra} />`,
+    { wide, hint }
+  );
+}
+
+function dsSelectField(label, name, choices = [], options = {}) {
+  const { value = "", wide = false, hint = "" } = options;
+  return dsTextField(
+    label,
+    `<select name="${escapeHTML(name)}">${choices
+      .map((choice) => `<option value="${escapeHTML(choice.value)}" ${String(choice.value) === String(value) ? "selected" : ""}>${escapeHTML(choice.label)}</option>`)
+      .join("")}</select>`,
+    { wide, hint }
+  );
+}
+
+function dsFileField(label, name, accept, dataAttr, options = {}) {
+  const { hint = "", wide = false } = options;
+  return dsTextField(
+    label,
+    `<label class="file-control ds-upload-field">${escapeHTML(label)}
+      <input name="${escapeHTML(name)}" type="file" accept="${escapeHTML(accept)}" ${dataAttr} />
+    </label>`,
+    { wide, hint, className: "ds-field--upload" }
+  );
+}
+
+function renderBusinessIdentityBlock(business, options = {}) {
+  const { pendingLogo = "", showUrl = true } = options;
+  const logoSrc = pendingLogo || business.logoUrl || "";
+  return `<div class="super-business-summary__brand ds-business-identity">
+    <div class="super-business-summary__logo ds-business-identity__logo">
+      ${logoSrc ? `<img src="${escapeHTML(logoSrc)}" alt="Logo ${escapeHTML(business.name)}" loading="lazy" decoding="async" />` : `<span>${escapeHTML((business.name || "B").slice(0, 1).toUpperCase())}</span>`}
+    </div>
+    <div class="super-business-summary__copy ds-business-identity__copy">
+      <h3>${escapeHTML(business.name)}</h3>
+      <div class="ds-business-identity__meta">
+        ${dsStatusBadge(Boolean(business.active), "Activa", "Inactiva")}
+        ${showUrl ? `<span class="ds-inline-path">${dsIcon("url")}<span>/barberia/${escapeHTML(business.slug)}</span></span>` : ""}
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderBusinessStatsRow({ barberCount = 0, serviceCount = 0, reservationCount = 0, environmentLabel = "Base" }) {
+  return `<div class="super-business-summary__stats ds-stat-grid">
+    ${dsStatItem({ icon: "barbers", label: "Barberos", value: barberCount })}
+    ${dsStatItem({ icon: "services", label: "Servicios", value: serviceCount })}
+    ${dsStatItem({ icon: "reservations", label: "Reservas de hoy", value: reservationCount })}
+    ${dsStatItem({ icon: "environment", label: "Entorno", value: environmentLabel })}
+  </div>`;
+}
+
 function publicFlowCard({ step, title, state = "locked", summary = "", actions = "", body = "" }) {
   return `<section class="flow-card ${state}">
     <div class="flow-card-head">
@@ -6628,10 +6752,15 @@ function renderPublic() {
       </div>
     </div>`;
     bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button>`;
-    bookingCardBody = renderWeekSelector(app.selectedDate, "data-public-date", {
-      disabledDate: (date) => !publicDateAvailableMemo(selected.id, date, businessId),
-      anchorDate: app.selectedDate,
-    });
+    bookingCardBody = `<div class="date-strip">${getWeekDatesMemo()
+      .map((date) => {
+        const disabled = !publicDateAvailableMemo(selected.id, date, businessId);
+        return `<button class="${date === app.selectedDate ? "active" : ""} ${disabled ? "past-date" : ""}" data-public-date="${date}" ${disabled ? "disabled" : ""}>
+          <span>${dayNameForISODate(date)}</span>
+          <strong>${dayNumberForISODate(date)}</strong>
+        </button>`;
+      })
+      .join("")}</div>`;
   }
 
   if (currentStep === "slots") {
@@ -6999,14 +7128,11 @@ function adminSelectedHeader(barber) {
 function barberSummaryCards(barber, anchorDate, viewer = "barber") {
   const summary = buildBarberSummary(barber.id, anchorDate);
   const title = viewer === "admin" ? "Resumen del barbero" : "Resumen de hoy";
-  return `<section class="admin-main dashboard-lite">
-    <div class="section-title"><span>R</span><h2>${title}</h2></div>
-    <div class="dashboard-cards">
-      <div><span>Reservas de hoy</span><strong>${summary.reservationsToday}</strong></div>
-      <div><span>Ganancias de hoy</span><strong>${formatCOP(summary.barberGainToday)}</strong></div>
-      <div><span>Ganancias semanales</span><strong>${formatCOP(summary.barberGainWeek)}</strong></div>
-    </div>
-  </section>`;
+  return dsMetricSection(title, "R", [
+    dsMetricCard({ icon: "reservations", label: "Reservas de hoy", value: summary.reservationsToday }),
+    dsMetricCard({ icon: "income", label: "Ganancias de hoy", value: formatCOP(summary.barberGainToday) }),
+    dsMetricCard({ icon: "income", label: "Ganancias semanales", value: formatCOP(summary.barberGainWeek) }),
+  ]);
 }
 
 function adminAccountsSection() {
@@ -7309,6 +7435,75 @@ function renderSuperAdmin() {
       </article>`;
     })
     .join("");
+  const businessCardsUnified = businesses
+    .map((business) => {
+      const urls = businessUrlSet(business);
+      const barberCount = businessBarberCount(business.id);
+      const activeServiceCount = businessActiveServiceCount(business.id);
+      const reservationCount = businessTodayReservationCount(business.id);
+      const environmentAttachment = businessEnvironmentAttachment(business.id);
+      return `<article class="admin-account-card super-business-card ds-card ds-card--business">
+        <div class="super-business-summary">
+          <button class="super-business-summary__trigger" type="button" data-toggle-super-business="${escapeHTML(business.id)}" aria-label="Abrir detalle de ${escapeHTML(business.name)}">
+            ${renderBusinessIdentityBlock(business, { pendingLogo: app.superAdminPendingLogos[business.id] || "" })}
+            ${renderBusinessStatsRow({
+              barberCount,
+              serviceCount: activeServiceCount,
+              reservationCount,
+              environmentLabel: environmentAttachment?.mode === "attached_archive" ? "ZIP/RAR" : "Base",
+            })}
+          </button>
+          <div class="super-business-summary__actions ds-card__actions">
+            <a class="secondary-action inline-action" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">Cliente / Reservas</a>
+            <a class="secondary-action inline-action" href="${escapeHTML(urls.panel)}" target="_blank" rel="noreferrer">Admin / Barbero</a>
+            <button class="secondary-action inline-action" type="button" data-toggle-super-business="${escapeHTML(business.id)}">Acciones</button>
+          </div>
+        </div>
+      </article>`;
+    })
+    .join("");
+
+  const renderSuperAdminAccountEditCard = (account) => {
+    const currentPassword = adminPasswordValue(account);
+    const passwordVisible = isAdminPasswordVisible(account.id);
+    return `<form class="super-admin-account-edit form-stack ds-form-card" data-admin-account-id="${escapeHTML(account.id)}">
+      <div class="form-grid ds-form-grid">
+        ${dsInputField("Nombre", "name", { required: true, value: account.name || "" })}
+        ${dsInputField("Usuario", "user", { required: true, value: account.user || "" })}
+        ${dsInputField("Creado", "created_at_preview", { value: account.createdAt || todayISO(), disabled: true })}
+      </div>
+      ${dsTextField(
+        "Contraseña fija",
+        `<div class="password-inline ds-password-inline">
+          <input name="password" type="${passwordVisible ? "text" : "password"}" value="${escapeHTML(currentPassword)}" autocomplete="new-password" placeholder="Define una clave fija" />
+          <button class="secondary-action inline-action" type="button" data-toggle-admin-password="${escapeHTML(account.id)}">${passwordVisible ? "Ocultar" : "Mostrar"}</button>
+        </div>`,
+        {
+          wide: true,
+          hint: currentPassword
+            ? "La clave visible pertenece solo a esta barberia y se valida con el login actual."
+            : "Si la clave actual solo existe como hash, define una nueva clave fija para poder verla aqui.",
+        }
+      )}
+      <label class="toggle-line ds-toggle-line"><input name="active" type="checkbox" ${account.active ? "checked" : ""} /> Activo</label>
+      <div class="button-row ds-button-row">
+        <button class="primary-action">Guardar admin</button>
+        <button class="secondary-action" type="button" data-regenerate-admin-password="${escapeHTML(account.id)}">Regenerar contraseña</button>
+      </div>
+    </form>`;
+  };
+
+  const renderSuperAdminAccountCreateCard = (business) => `<form class="super-admin-account-create form-stack ds-form-card" data-business-id="${escapeHTML(business.id)}">
+    <div class="form-grid ds-form-grid">
+      ${dsInputField("Nombre", "name", { required: true, placeholder: "Nuevo administrador" })}
+      ${dsInputField("Usuario", "user", { required: true, placeholder: "usuario.admin" })}
+    </div>
+    <label class="toggle-line ds-toggle-line"><input name="active" type="checkbox" checked /> Activo</label>
+    <div class="button-row ds-button-row">
+      <button class="primary-action">Crear administrador</button>
+    </div>
+  </form>`;
+
   const renderSuperBusinessDetailPanel = (business) => {
     if (!business) {
       return `<section class="admin-main super-admin-list-shell">
@@ -7497,6 +7692,123 @@ function renderSuperAdmin() {
       </form>
     </div>
   </article>`;
+
+  const renderSuperBusinessDetailPanelDS = (business) => {
+    if (!business) {
+      return `<section class="admin-main super-admin-list-shell">
+        ${backToolbar("Detalle del negocio", "Negocio no encontrado")}
+        <p class="microcopy">Selecciona un negocio del listado para ver su detalle.</p>
+      </section>`;
+    }
+    const urls = businessUrlSet(business);
+    const barberCount = businessBarberCount(business.id);
+    const activeServiceCount = businessActiveServiceCount(business.id);
+    const reservationCount = businessTodayReservationCount(business.id);
+    const environmentAttachment = businessEnvironmentAttachment(business.id);
+    const admins = loadAdminAccounts().filter((account) => account.businessId === business.id && account.role !== PRINCIPAL_ADMIN.role);
+    const admin = admins[0] || null;
+    const themeChoices = Object.entries(BUSINESS_THEMES).map(([key, theme]) => ({ value: key, label: theme.label }));
+    const adminList = admins.length
+      ? admins.map((account) => renderSuperAdminAccountEditCard(account)).join("")
+      : `<p class="microcopy">Aun no hay administradores registrados para esta barberia.</p>`;
+
+    return `<section class="admin-main super-admin-list-shell super-admin-detail-shell">
+      ${backToolbar("Detalle del negocio", business.name)}
+      <article class="admin-account-card super-business-card is-open ds-card ds-card--business-detail">
+        <div class="super-business-summary">
+          <div class="super-business-summary__trigger super-business-summary__trigger--static">
+            ${renderBusinessIdentityBlock(business, { pendingLogo: app.superAdminPendingLogos[business.id] || "" })}
+            ${renderBusinessStatsRow({
+              barberCount,
+              serviceCount: activeServiceCount,
+              reservationCount,
+              environmentLabel: environmentAttachment?.mode === "attached_archive" ? "ZIP/RAR" : "Base",
+            })}
+          </div>
+          <div class="super-business-summary__actions ds-card__actions">
+            <a class="secondary-action inline-action" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">Cliente / Reservas</a>
+            <a class="secondary-action inline-action" href="${escapeHTML(urls.panel)}" target="_blank" rel="noreferrer">Admin / Barbero</a>
+          </div>
+        </div>
+        <div class="super-business-panel">
+          <div class="super-business-panel__meta ds-meta-grid">
+            <div class="super-business-meta-card"><span>Estado</span><strong>${business.active ? "Activo" : "Inactivo"}</strong></div>
+            <div class="super-business-meta-card"><span>Slug</span><strong>${escapeHTML(business.slug)}</strong></div>
+            <div class="super-business-meta-card"><span>Administrador principal</span><strong>${escapeHTML(admin?.name || "Pendiente")}</strong><small>${escapeHTML(admin?.user || "Desarrollo")}</small></div>
+            <div class="super-business-meta-card super-business-meta-card--wide"><span>Plantilla asociada</span><strong>${escapeHTML(summarizeEnvironmentAttachment(environmentAttachment))}</strong></div>
+          </div>
+          <form class="super-business-edit form-stack ds-form-card" data-business-id="${escapeHTML(business.id)}">
+            <div class="form-grid ds-form-grid">
+              ${dsInputField("Nombre", "name", { required: true, value: business.name })}
+              ${dsInputField("Slug", "slug", { required: true, value: business.slug })}
+              ${dsSelectField("Tema", "theme", themeChoices, { value: business.theme || DEFAULT_BUSINESS_THEME_KEY })}
+              ${dsFileField("Subir logo", "logo", "image/png,image/jpeg,image/jpg,image/webp", `data-business-logo-input=\"${escapeHTML(business.id)}\"`)}
+            </div>
+            <div class="super-admin-logo-preview ds-media-preview">${business.logoUrl || app.superAdminPendingLogos[business.id] ? `<img src="${escapeHTML(app.superAdminPendingLogos[business.id] || business.logoUrl)}" alt="Logo ${escapeHTML(business.name)}" loading="lazy" decoding="async" />` : `<span>Sin logo cargado</span>`}</div>
+            <label class="toggle-line ds-toggle-line"><input name="active" type="checkbox" ${business.active ? "checked" : ""} /> Negocio activo</label>
+            <div class="button-row ds-button-row">
+              <button class="primary-action">Guardar negocio</button>
+              <a class="secondary-action inline-action" href="${escapeHTML(urls.public)}" target="_blank" rel="noreferrer">Cliente / Reservas</a>
+              <a class="secondary-action inline-action" href="${escapeHTML(urls.panel)}" target="_blank" rel="noreferrer">Admin / Barbero</a>
+              ${business.id !== DEFAULT_BUSINESS_ID ? `<button class="secondary-action danger" type="button" data-delete-business="${escapeHTML(business.id)}" data-delete-business-slug="${escapeHTML(business.slug)}" data-delete-business-name="${escapeHTML(business.name)}">Eliminar barberia</button>` : ""}
+            </div>
+          </form>
+          <section class="super-admin-admins">
+            <div class="section-title"><span>A</span><h2>Administradores</h2></div>
+            ${adminList}
+            ${renderSuperAdminAccountCreateCard(business)}
+          </section>
+        </div>
+      </article>
+    </section>`;
+  };
+
+  const renderCreateBusinessPanelDS = () => {
+    const themeChoices = Object.entries(BUSINESS_THEMES).map(([key, theme]) => ({ value: key, label: theme.label }));
+    return `<article class="admin-account-card super-business-card is-open ds-card ds-card--business-detail">
+      <div class="super-business-summary">
+        <button class="super-business-summary__trigger" type="button" data-toggle-super-create aria-expanded="${app.superAdminCreateOpen ? "true" : "false"}">
+          <div class="super-business-summary__brand ds-business-identity">
+            <div class="super-business-summary__logo ds-business-identity__logo"><span>+</span></div>
+            <div class="super-business-summary__copy ds-business-identity__copy">
+              <h3>Crear barberia</h3>
+              <div class="ds-business-identity__meta">
+                ${dsStatusBadge(true, "Alta guiada", "Alta guiada")}
+                <span class="ds-inline-path">${dsIcon("create")}<span>Plantilla base dinámica</span></span>
+              </div>
+            </div>
+          </div>
+          <div class="super-business-summary__stats ds-stat-grid">
+            ${dsStatItem({ icon: "business", label: "Negocio", value: "Nuevo" })}
+            ${dsStatItem({ icon: "admin", label: "Usuario", value: "Desarrollo" })}
+            ${dsStatItem({ icon: "url", label: "URL", value: "Automática" })}
+            ${dsStatItem({ icon: "environment", label: "Entorno", value: "Base" })}
+          </div>
+        </button>
+      </div>
+      <div class="super-business-panel">
+        ${app.superAdminMessage ? `<p class="form-note">${escapeHTML(app.superAdminMessage)}</p>` : ""}
+        ${credentialReveal}
+        <form id="super-business-create" class="editor-card ds-form-card">
+          <div class="form-grid ds-form-grid">
+            ${dsInputField("Nombre del negocio", "name", { required: true, placeholder: "Barberia Elite" })}
+            ${dsInputField("Slug URL", "slug", { placeholder: "Se genera automaticamente desde el nombre" })}
+            ${dsSelectField("Tema", "theme", themeChoices, { value: DEFAULT_BUSINESS_THEME_KEY })}
+            ${dsFileField("Subir logo", "logo", "image/png,image/jpeg,image/jpg,image/webp", "data-business-logo-input=\"create\"")}
+            ${dsFileField("Adjuntar entorno", "environmentArchive", ".zip,.rar,application/zip,application/vnd.rar,application/x-rar-compressed", "data-business-environment-input=\"create\"")}
+            ${dsInputField("Administrador principal", "adminName", { required: true, placeholder: "Nombre administrador" })}
+          </div>
+          <div class="super-admin-logo-preview ds-media-preview">${app.superAdminPendingLogos.create ? `<img src="${escapeHTML(app.superAdminPendingLogos.create)}" alt="Vista previa logo" loading="lazy" decoding="async" />` : `<span>Vista previa del logo</span>`}</div>
+          <div class="super-admin-environment-preview ds-media-preview">${app.superAdminPendingEnvironmentArchives.create ? `<strong>${escapeHTML(app.superAdminPendingEnvironmentArchives.create.fileName)}</strong><span>${escapeHTML(summarizeEnvironmentAttachment(app.superAdminPendingEnvironmentArchives.create))}</span>` : `<span>Si no adjuntas entorno, la barberia usara la plantilla base dinamica.</span>`}</div>
+          <p class="microcopy">El usuario administrador inicial se crea automaticamente como <strong>Desarrollo</strong> y el sistema genera una clave temporal segura.</p>
+          <label class="toggle-line ds-toggle-line"><input name="active" type="checkbox" checked /> Negocio activo</label>
+          <div class="button-row ds-button-row">
+            <button class="primary-action">Crear barberia</button>
+          </div>
+        </form>
+      </div>
+    </article>`;
+  };
 
   const deleteTarget = app.superAdminDeleteTarget
     ? store.businessById(app.superAdminDeleteTarget.id) || app.superAdminDeleteTarget
@@ -8008,20 +8320,20 @@ function renderSuperAdminV2() {
   const selectedSuperBusiness = app.superAdminOpenBusinessId
     ? store.businessById(app.superAdminOpenBusinessId)
     : null;
-  const heroMetrics = `<div class="super-admin-hero__metrics" aria-label="Metricas globales">
-    <div><span>Total negocios</span><strong>${totalBusinesses}</strong></div>
-    <div><span>Servicios totales</span><strong>${totalServices}</strong></div>
-    <div><span>Barberos totales</span><strong>${totalBarbers}</strong></div>
-    <div><span>Reservas de hoy</span><strong>${reservationsToday}</strong></div>
+  const heroMetrics = `<div class="super-admin-hero__metrics ds-metric-grid" aria-label="Metricas globales">
+    ${dsMetricCard({ icon: "business", label: "Total negocios", value: totalBusinesses })}
+    ${dsMetricCard({ icon: "services", label: "Servicios totales", value: totalServices })}
+    ${dsMetricCard({ icon: "barbers", label: "Barberos totales", value: totalBarbers })}
+    ${dsMetricCard({ icon: "reservations", label: "Reservas de hoy", value: reservationsToday })}
   </div>`;
   const metricsSection = `<section class="admin-main dashboard-lite super-admin-command-board">
     <div class="section-title"><span>N</span><h2>Centro de mando</h2></div>
-    <div class="dashboard-cards super-admin-metrics">
-      <div><span>Total negocios</span><strong>${totalBusinesses}</strong></div>
-      <div><span>Negocios activos</span><strong>${activeBusinesses}</strong></div>
-      <div><span>Servicios totales</span><strong>${totalServices}</strong></div>
-      <div><span>Barberos totales</span><strong>${totalBarbers}</strong></div>
-      <div><span>Reservas de hoy</span><strong>${reservationsToday}</strong></div>
+    <div class="dashboard-cards super-admin-metrics ds-metric-grid">
+      ${dsMetricCard({ icon: "business", label: "Total negocios", value: totalBusinesses })}
+      ${dsMetricCard({ icon: "status", label: "Negocios activos", value: activeBusinesses })}
+      ${dsMetricCard({ icon: "services", label: "Servicios totales", value: totalServices })}
+      ${dsMetricCard({ icon: "barbers", label: "Barberos totales", value: totalBarbers })}
+      ${dsMetricCard({ icon: "reservations", label: "Reservas de hoy", value: reservationsToday })}
     </div>
   </section>`;
   const backToolbar = (eyebrow, title) => `<div class="super-admin-view-toolbar">
@@ -8049,45 +8361,45 @@ function renderSuperAdminV2() {
   const businessesContent = `<section class="admin-main super-admin-list-shell">
     ${backToolbar("Negocios", "Negocios registrados")}
     <div class="admin-account-list super-admin-business-list">
-      ${businessCards || `<p class="microcopy">Aun no hay negocios registrados.</p>`}
+      ${businessCardsUnified || `<p class="microcopy">Aun no hay negocios registrados.</p>`}
     </div>
   </section>`;
   const createContent = `<section class="admin-main super-admin-create-shell">
     ${backToolbar("Alta guiada", "Crear negocio")}
-    ${renderCreateBusinessPanel()}
+    ${renderCreateBusinessPanelDS()}
   </section>`;
   const settingsContent = `<section class="admin-main super-admin-command-board">
     ${backToolbar("Configuracion", "Configuracion general")}
-    <div class="dashboard-cards super-admin-metrics">
-      <div><span>Tema visual</span><strong>Urban Neon</strong></div>
-      <div><span>URL publica</span><strong>/barberia/:slug</strong></div>
-      <div><span>Entorno base</span><strong>Dinamico</strong></div>
+    <div class="dashboard-cards super-admin-metrics ds-metric-grid">
+      ${dsMetricCard({ icon: "theme", label: "Tema visual", value: "Urban Neon" })}
+      ${dsMetricCard({ icon: "url", label: "URL publica", value: "/barberia/:slug" })}
+      ${dsMetricCard({ icon: "environment", label: "Entorno base", value: "Dinamico" })}
     </div>
   </section>`;
   const sessionsContent = `<section class="admin-main super-admin-command-board">
     ${backToolbar("Accesos", "Sesiones / accesos")}
-    <div class="dashboard-cards super-admin-metrics">
-      <div><span>Super Admin</span><strong>Independiente</strong></div>
-      <div><span>Admin negocio</span><strong>Por barberia</strong></div>
-      <div><span>Barberos</span><strong>Por negocio</strong></div>
+    <div class="dashboard-cards super-admin-metrics ds-metric-grid">
+      ${dsMetricCard({ icon: "admin", label: "Super Admin", value: "Independiente" })}
+      ${dsMetricCard({ icon: "business", label: "Admin negocio", value: "Por barberia" })}
+      ${dsMetricCard({ icon: "barbers", label: "Barberos", value: "Por negocio" })}
     </div>
   </section>`;
   const auditContent = `<section class="admin-main super-admin-command-board">
     ${backToolbar("Estado", "Auditoria / estado")}
-    <div class="dashboard-cards super-admin-metrics">
-      <div><span>Negocios activos</span><strong>${activeBusinesses}</strong></div>
-      <div><span>Reservas hoy</span><strong>${reservationsToday}</strong></div>
-      <div><span>Estado global</span><strong>${escapeHTML(globalStatusLabel)}</strong></div>
+    <div class="dashboard-cards super-admin-metrics ds-metric-grid">
+      ${dsMetricCard({ icon: "status", label: "Negocios activos", value: activeBusinesses })}
+      ${dsMetricCard({ icon: "reservations", label: "Reservas hoy", value: reservationsToday })}
+      ${dsMetricCard({ icon: "business", label: "Estado global", value: globalStatusLabel })}
     </div>
   </section>`;
   const operationsContent = `<section class="admin-main super-admin-command-board">
     ${backToolbar("Operacion", "Operación SaaS")}
-    <div class="dashboard-cards super-admin-metrics">
-      <div><span>Negocios activos</span><strong>${activeBusinesses}</strong></div>
-      <div><span>URL publica</span><strong>/barberia/:slug</strong></div>
-      <div><span>Tema visual</span><strong>Urban Neon</strong></div>
-      <div><span>Sesiones</span><strong>Por negocio</strong></div>
-      <div><span>Estado</span><strong>${escapeHTML(globalStatusLabel)}</strong></div>
+    <div class="dashboard-cards super-admin-metrics ds-metric-grid">
+      ${dsMetricCard({ icon: "status", label: "Negocios activos", value: activeBusinesses })}
+      ${dsMetricCard({ icon: "url", label: "URL publica", value: "/barberia/:slug" })}
+      ${dsMetricCard({ icon: "theme", label: "Tema visual", value: "Urban Neon" })}
+      ${dsMetricCard({ icon: "admin", label: "Sesiones", value: "Por negocio" })}
+      ${dsMetricCard({ icon: "business", label: "Estado", value: globalStatusLabel })}
     </div>
   </section>`;
   const superAdminContent =
@@ -8098,7 +8410,7 @@ function renderSuperAdminV2() {
         : activeSuperAdminView === "create"
           ? createContent
           : activeSuperAdminView === "business-detail"
-            ? renderSuperBusinessDetailPanel(selectedSuperBusiness)
+            ? renderSuperBusinessDetailPanelDS(selectedSuperBusiness)
             : activeSuperAdminView === "settings"
               ? operationsContent
               : activeSuperAdminView === "sessions"
@@ -8174,17 +8486,18 @@ function adminDashboardSection() {
     { admin: 0, barber: 0 }
   );
 
-  return `<section class="admin-main dashboard-lite">
-    <div class="section-title"><span>D</span><h2>Resumen de hoy</h2></div>
-    <div class="dashboard-cards">
-      <div><span>Reservas de hoy</span><strong>${reservedToday}</strong></div>
-      <div><span>Ingresos de hoy</span><strong>${formatCOP(incomeToday)}</strong></div>
-      <div><span>Ingresos de la semana actual</span><strong>${formatCOP(incomeWeek)}</strong></div>
-      <div><span>Ganancias del administrador</span><strong>${formatCOP(gainsToday.admin)}</strong></div>
-      <div><span>Ganancias de los barberos</span><strong>${formatCOP(gainsToday.barber)}</strong></div>
-    </div>
-    <label class="toggle-line sound-toggle"><input type="checkbox" data-sound-toggle ${app.soundEnabled ? "checked" : ""} /> Sonido sutil para nueva reserva</label>
-  </section>`;
+  return dsMetricSection(
+    "Resumen de hoy",
+    "D",
+    [
+      dsMetricCard({ icon: "reservations", label: "Reservas de hoy", value: reservedToday }),
+      dsMetricCard({ icon: "income", label: "Ingresos de hoy", value: formatCOP(incomeToday) }),
+      dsMetricCard({ icon: "income", label: "Ingresos de la semana actual", value: formatCOP(incomeWeek) }),
+      dsMetricCard({ icon: "admin", label: "Ganancias del administrador", value: formatCOP(gainsToday.admin) }),
+      dsMetricCard({ icon: "barbers", label: "Ganancias de los barberos", value: formatCOP(gainsToday.barber) }),
+    ],
+    `<label class="toggle-line sound-toggle"><input type="checkbox" data-sound-toggle ${app.soundEnabled ? "checked" : ""} /> Sonido sutil para nueva reserva</label>`
+  );
 }
 
 function clientHistorySummary(record) {
