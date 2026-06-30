@@ -6156,21 +6156,10 @@ function barberWhatsappLink(barber) {
   return phone ? `<a class="inline-link" href="https://wa.me/${phone}" target="_blank" rel="noreferrer">WhatsApp</a>` : `<span>Sin WhatsApp</span>`;
 }
 
-function weekButtons(selected, attr = "data-admin-date") {
-  return `<div class="week-cards">${getWeekDatesMemo()
-    .map((date) => {
-      const past = isPastDate(date);
-      return `<button class="${date === selected ? "active" : ""} ${past ? "past-date" : ""}" ${attr}="${date}">
-        <span>${dayNameForISODate(date, true)}</span>
-        <strong>${dayNumberForISODate(date)}</strong>
-      </button>`;
-    })
-    .join("")}</div>`;
-}
-
-function dateStrip(selected, onClickAttr = "data-date") {
-  return `<div class="date-strip">${getWeekDatesMemo().map((date) => {
-    const disabled = onClickAttr === "data-date" && isPastDate(date);
+function renderWeekSelector(selected, onClickAttr = "data-date", options = {}) {
+  const { disabledDate = null, anchorDate = selected || todayISO() } = options;
+  return `<div class="date-strip day-selector">${getWeekDatesMemo(dateAnchor(anchorDate)).map((date) => {
+    const disabled = typeof disabledDate === "function" ? !!disabledDate(date) : false;
     return `<button class="${date === selected ? "active" : ""} ${disabled ? "past-date" : ""}" ${onClickAttr}="${date}" ${disabled ? "disabled" : ""}>
       <span>${dayNameForISODate(date)}</span>
       <strong>${dayNumberForISODate(date)}</strong>
@@ -6639,15 +6628,10 @@ function renderPublic() {
       </div>
     </div>`;
     bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button>`;
-    bookingCardBody = `<div class="date-strip">${getWeekDatesMemo()
-      .map((date) => {
-        const disabled = !publicDateAvailableMemo(selected.id, date, businessId);
-        return `<button class="${date === app.selectedDate ? "active" : ""} ${disabled ? "past-date" : ""}" data-public-date="${date}" ${disabled ? "disabled" : ""}>
-          <span>${dayNameForISODate(date)}</span>
-          <strong>${dayNumberForISODate(date)}</strong>
-        </button>`;
-      })
-      .join("")}</div>`;
+    bookingCardBody = renderWeekSelector(app.selectedDate, "data-public-date", {
+      disabledDate: (date) => !publicDateAvailableMemo(selected.id, date, businessId),
+      anchorDate: app.selectedDate,
+    });
   }
 
   if (currentStep === "slots") {
@@ -6840,7 +6824,7 @@ function renderAdmin() {
 
       <section class="admin-main">
         <div class="agenda-toolbar">
-          <div>${dateStrip(app.selectedDate, "data-admin-date")}</div>
+          <div>${renderWeekSelector(app.selectedDate, "data-admin-date", { anchorDate: app.selectedDate })}</div>
           <div class="button-row">
             <button class="secondary-action" data-block-day="${blocked ? "off" : "on"}">${blocked ? "Desbloquear dia" : "Bloquear dia"}</button>
           </div>
@@ -8406,7 +8390,7 @@ function renderAdminV2() {
           <section class="admin-main">
             ${
               app.adminScheduleView === "days"
-                ? `<div class="section-title"><span>D</span><h2>Dias de la semana</h2></div>${weekButtons(app.selectedDate, "data-admin-date")}`
+                ? `<div class="section-title"><span>D</span><h2>Dias de la semana</h2></div>${renderWeekSelector(app.selectedDate, "data-admin-date", { anchorDate: app.selectedDate })}`
                 : adminHoursView(selected)
             }
           </section>
@@ -8630,7 +8614,7 @@ function renderBarberV2() {
       ${barberSummaryCards(barber, todayISO(), "barber")}
       ${
         app.barberScheduleView === "days"
-          ? `<div class="section-title"><span>D</span><h2>Dias de la semana</h2></div>${weekButtons(app.barberDate, "data-barber-date")}`
+          ? `<div class="section-title"><span>D</span><h2>Dias de la semana</h2></div>${renderWeekSelector(app.barberDate, "data-barber-date", { anchorDate: app.barberDate })}`
           : `<div class="agenda-toolbar">
             <div>
               <div class="section-title"><span>H</span><h2>Agenda del dia actual</h2></div>
