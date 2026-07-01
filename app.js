@@ -8028,15 +8028,19 @@ function renderSuperAdminV2() {
   const hasSuperAdminScopeLoaded =
     store.remoteLoadedScopeKey === expectedSuperAdminScope ||
     store.remoteLoadedScopes?.has(expectedSuperAdminScope);
-  const canRenderSuperAdminData = Boolean((store.state.businesses || []).length);
+  const stagedBusinesses = store.state.businesses || [];
+  const onlySeedBusinessVisible =
+    stagedBusinesses.length === 1 &&
+    stagedBusinesses[0]?.id === DEFAULT_BUSINESS_ID &&
+    !hasSuperAdminScopeLoaded;
   const remoteAttemptStillFresh =
     !store.remoteAttemptedAt || Date.now() - store.remoteAttemptedAt < 5000;
   const shouldShowSuperAdminLoading =
     app.superAdminSession &&
     store.supabase &&
-    !canRenderSuperAdminData &&
     !hasSuperAdminScopeLoaded &&
-    (store.syncInFlight || remoteAttemptStillFresh);
+    !store.remoteLastError &&
+    (store.syncInFlight || remoteAttemptStillFresh || onlySeedBusinessVisible);
   if (shouldShowSuperAdminLoading) {
     return appShell(`
       <section class="dashboard-head super-admin-hero">
