@@ -2378,6 +2378,15 @@ class StudioStore {
     writeCachedRecordMap(BUSINESS_IDENTITY_CACHE_KEY, cachedMap);
   }
 
+  removePersistentBusinessIdentity(slug = "") {
+    const normalizedSlug = slugify(slug);
+    if (!normalizedSlug) return;
+    const cachedMap = readCachedRecordMap(BUSINESS_IDENTITY_CACHE_KEY);
+    if (!cachedMap[normalizedSlug]) return;
+    delete cachedMap[normalizedSlug];
+    writeCachedRecordMap(BUSINESS_IDENTITY_CACHE_KEY, cachedMap);
+  }
+
   seedPersistentBusinessIdentityRows(rows = []) {
     if (!Array.isArray(rows) || !rows.length) return;
     const cachedMap = readCachedRecordMap(BUSINESS_IDENTITY_CACHE_KEY);
@@ -4065,6 +4074,7 @@ class StudioStore {
 
   deleteBusinessLocalOnly(businessId) {
     if (!businessId || businessId === DEFAULT_BUSINESS_ID) return false;
+    const targetBusiness = this.businessById(businessId);
     markBusinessDeleted(businessId);
     this.state.businesses = this.state.businesses.filter((business) => business.id !== businessId);
     this.state.barbers = this.state.barbers.filter((barber) => barber.negocioId !== businessId);
@@ -4072,7 +4082,36 @@ class StudioStore {
     this.state.appointments = this.state.appointments.filter((appointment) => appointment.negocioId !== businessId);
     this.state.blockedDays = this.state.blockedDays.filter((blockedDay) => blockedDay.negocioId !== businessId);
     this.state.barberServices = this.state.barberServices.filter((relation) => relation.negocioId !== businessId);
+    if (targetBusiness?.slug) {
+      this.businessResolutionBySlug.delete(targetBusiness.slug);
+      this.removePersistentBusinessIdentity(targetBusiness.slug);
+      themeMemoryCache.delete(targetBusiness.slug);
+      try {
+        localStorage.removeItem(`${THEME_CACHE_PREFIX}${targetBusiness.slug}`);
+      } catch {}
+    }
+    themeMemoryCache.delete(businessId);
+    this.businessSettingsByBusiness.delete(businessId);
+    this.invalidateStableBusinessCache(businessId);
+    this.invalidateRemoteCache(businessId);
+    this.invalidateRemoteCache(targetBusiness?.slug || "");
+    Object.values(this.resourceViewState || {}).forEach((map) => {
+      if (!(map instanceof Map)) return;
+      [...map.keys()].forEach((key) => {
+        if (String(key || "").startsWith(`${businessId}:`)) map.delete(key);
+      });
+    });
+    if (targetBusiness?.slug) {
+      clearScopedBusinessSession(ADMIN_SESSION_KEY, targetBusiness.slug);
+      clearScopedBusinessSession(BARBER_SESSION_KEY, targetBusiness.slug);
+      if (app?.currentBusinessSlug === targetBusiness.slug) {
+        app.adminSession = null;
+        app.barberSession = null;
+      }
+    }
     this.state = this.stateWithRuntimeScope(this.state);
+    this.invalidateBusinessBuckets();
+    invalidateDerivedBusinessCache();
     localStorage.setItem(APP_KEY, JSON.stringify(this.state));
     this.emit({ type: "SYNC", table: "businesses", reason: "business_delete_local" });
     return true;

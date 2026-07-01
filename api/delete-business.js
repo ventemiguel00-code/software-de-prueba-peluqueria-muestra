@@ -75,6 +75,21 @@ const getBusiness = async (businessId) => {
   return rows?.[0] || null;
 };
 
+const countByColumn = async (table, column, businessId) => {
+  const params = new URLSearchParams({
+    select: "id",
+    [column]: `eq.${businessId}`,
+  });
+  try {
+    const rows = await supabaseFetch(`/rest/v1/${table}?${params}`);
+    return Array.isArray(rows) ? rows.length : 0;
+  } catch (error) {
+    if (isOptionalSchemaError(error)) return 0;
+    error.step = `count:${table}:${column}`;
+    throw error;
+  }
+};
+
 const deleteByBusinessId = async (table, businessId) => {
   const params = new URLSearchParams({ business_id: `eq.${businessId}` });
   try {
@@ -204,24 +219,39 @@ module.exports = async function handler(req, res) {
     // Borrado completo, aislado y exacto: nunca se elimina por slug/nombre ni sin business_id.
     // El orden evita relaciones colgantes y mantiene cada operacion limitada al negocio objetivo.
     const businessScopedTables = [
-      "appointments",
-      "blocked_days",
-      "barber_services",
-      "services",
-      "barbers",
-      "admin_accounts",
-      "clients",
-      "customers",
-      "schedules",
-      "horarios",
-      "business_settings",
-      "business_admin_passwords",
+      { table: "appointments", key: "deleted_appointments" },
+      { table: "blocked_days", key: "deleted_blocked_days" },
+      { table: "barber_services", key: "deleted_barber_services" },
+      { table: "services", key: "deleted_services" },
+      { table: "barbers", key: "deleted_barbers" },
+      { table: "admin_accounts", key: "deleted_admin_accounts" },
+      { table: "active_sessions", key: "deleted_active_sessions" },
+      { table: "clients", key: "deleted_clients" },
+      { table: "customers", key: "deleted_customers" },
+      { table: "schedules", key: "deleted_schedules" },
+      { table: "horarios", key: "deleted_horarios" },
+      { table: "business_settings", key: "deleted_business_settings" },
+      { table: "business_admin_passwords", key: "deleted_business_admin_passwords" },
     ];
+    const deletionSummary = {
+      business_id: businessId,
+      deleted_businesses: 0,
+      deleted_business_audit_log: 0,
+    };
 
-    for (const table of businessScopedTables) {
-      await deleteByBusinessId(table, businessId);
+    for (const { table, key } of businessScopedTables) {
+      const beforeCount = await countByColumn(table, "business_id", businessId);
+      if (beforeCount > 0) {
+        await deleteByBusinessId(table, businessId);
+      }
+      deletionSummary[key] = beforeCount;
     }
-    await deleteBySourceBusinessId("business_audit_log", businessId);
+
+    const auditLogCount = await countByColumn("business_audit_log", "source_business_id", businessId);
+    if (auditLogCount > 0) {
+      await deleteBySourceBusinessId("business_audit_log", businessId);
+    }
+    deletionSummary.deleted_business_audit_log = auditLogCount;
     await Promise.allSettled([
       removeStoragePrefix("logos-negocios", businessId),
       removeStoragePrefix("fondos-negocios", businessId),
@@ -230,6 +260,7 @@ module.exports = async function handler(req, res) {
       removeStoragePrefix("entornos", businessId),
     ]);
     await deleteBusinessRow(businessId);
+    deletionSummary.deleted_businesses = 1;
 
     const stillExists = await getBusiness(businessId);
     if (stillExists) {
@@ -241,7 +272,34 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    json(res, 200, { ok: true, deleted: true, businessId });
+    const leftoverChecks = [
+      ["business_settings", "business_id"],
+      ["admin_accounts", "business_id"],
+      ["barbers", "business_id"],
+      ["services", "business_id"],
+      ["barber_services", "business_id"],
+      ["appointments", "business_id"],
+      ["blocked_days", "business_id"],
+      ["active_sessions", "business_id"],
+      ["business_audit_log", "source_business_id"],
+    ];
+    const leftovers = {};
+    for (const [table, column] of leftoverChecks) {
+      leftovers[table] = await countByColumn(table, column, businessId);
+    }
+    const remainingEntries = Object.entries(leftovers).filter(([, count]) => Number(count) > 0);
+    if (remainingEntries.length) {
+      json(res, 409, {
+        ok: false,
+        step: "verify:related-records",
+        error: "Quedaron registros asociados al negocio eliminado.",
+        summary: deletionSummary,
+        leftovers,
+      });
+      return;
+    }
+
+    json(res, 200, { ok: true, deleted: true, businessId, summary: deletionSummary, leftovers });
   } catch (error) {
     json(res, 500, {
       ok: false,
