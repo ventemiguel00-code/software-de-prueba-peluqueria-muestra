@@ -2254,9 +2254,11 @@ class StudioStore {
     const key = this.resourceViewScopeKey(businessId, syncScopeKey);
     if (!entry) {
       map.delete(key);
+      this.invalidateBusinessBuckets();
       return;
     }
     map.set(key, entry);
+    this.invalidateBusinessBuckets();
   }
 
   snapshotResourceRows(resourceKey, businessId, state = this.state) {
@@ -3470,7 +3472,22 @@ class StudioStore {
       this.bucketCache = new Map();
     }
     if (!this.bucketCache.has(id)) {
-      this.bucketCache.set(id, buildBusinessBucketFromState(this.state, id));
+      const bucket = buildBusinessBucketFromState(this.state, id);
+      if (this.renderableResourceRows) {
+        bucket.barbers = this.renderableResourceRows("barbers", id, bucket.barbers);
+        bucket.activeBarbers = bucket.barbers.filter((barber) => barber.active);
+        bucket.services = this.renderableResourceRows("services", id, bucket.services);
+        bucket.activeServices = bucket.services.filter((service) => service.active);
+        bucket.appointments = this.renderableResourceRows("appointments", id, bucket.appointments);
+        bucket.barbersById = new Map(bucket.barbers.map((barber) => [barber.id, barber]));
+        bucket.servicesById = new Map(bucket.services.map((service) => [service.id, service]));
+        bucket.appointmentsById = new Map(bucket.appointments.map((appointment) => [appointment.id, appointment]));
+        bucket.appointmentBySlot = new Map();
+        bucket.appointments.forEach((appointment) => {
+          bucket.appointmentBySlot.set(`${appointment.barberId}|${appointment.date}|${appointment.time}`, appointment);
+        });
+      }
+      this.bucketCache.set(id, bucket);
     }
     return this.bucketCache.get(id);
   }
@@ -5222,10 +5239,18 @@ function currentBusiness() {
   }
   const slug = String(activeApp?.currentBusinessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
   const resolution = activeStore?.businessResolution(slug) || null;
+  const persistedBusinessRow = activeStore?.getPersistentBusinessIdentity?.(slug) || null;
+  const persistedBusiness = persistedBusinessRow ? mapRowToBusiness(persistedBusinessRow) : null;
   if (slug === DEFAULT_BUSINESS_SLUG) {
-    return requestedBusiness() || resolution?.business || activeStore?.businessById(DEFAULT_BUSINESS_ID) || defaultBusiness();
+    return (
+      requestedBusiness() ||
+      resolution?.business ||
+      persistedBusiness ||
+      activeStore?.businessById(DEFAULT_BUSINESS_ID) ||
+      defaultBusiness()
+    );
   }
-  return requestedBusiness() || resolution?.business || placeholderBusinessForSlug(slug);
+  return requestedBusiness() || resolution?.business || persistedBusiness || placeholderBusinessForSlug(slug);
 }
 
 function requestedBusiness() {
