@@ -1997,7 +1997,7 @@ class StudioStore {
 
   currentRuntimeScopeKey(route = resolveRoute(location.pathname)) {
     if (route.view === "super-admin") {
-      return `${route.view}:global:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
+      return "super-admin:global";
     }
     const scopeView = route.shell === "internal" ? "internal" : route.view;
     const scopedBusinessId = this.scopedBusinessIdForRoute(route);
@@ -2006,7 +2006,7 @@ class StudioStore {
 
   currentRealtimeScopeKey(route = resolveRoute(location.pathname)) {
     if (route.view === "super-admin") {
-      return `super-admin:global:${DEFAULT_BUSINESS_SLUG}`;
+      return "super-admin:global";
     }
     const scopedBusinessId = this.scopedBusinessIdForRoute(route);
     return `business:${scopedBusinessId || "global"}:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
@@ -4427,7 +4427,7 @@ function resolveRoute(pathname = location.pathname) {
   const parts = pathname.split("/").filter(Boolean);
   const routeSlug = (index) => slugify(decodeURIComponent(parts[index] || "")) || DEFAULT_BUSINESS_SLUG;
   if (parts[0] === "super-admin" || parts[0] === "admin-global") {
-    return { view: "super-admin", businessSlug: DEFAULT_BUSINESS_SLUG };
+    return { view: "super-admin", businessSlug: "", shell: "super-admin" };
   }
   if (parts[0] === "barberia-test" && parts[1]) {
     return { view: "business-test", businessSlug: routeSlug(1) };
@@ -5214,6 +5214,9 @@ async function validateEnvironmentArchive(file) {
 function currentBusiness() {
   const activeApp = app && typeof app === "object" ? app : null;
   const activeStore = runtimeStore();
+  if (activeApp?.view === "super-admin") {
+    return defaultBusiness();
+  }
   const slug = String(activeApp?.currentBusinessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
   const resolution = activeStore?.businessResolution(slug) || null;
   if (slug === DEFAULT_BUSINESS_SLUG) {
@@ -5224,6 +5227,7 @@ function currentBusiness() {
 
 function requestedBusiness() {
   const activeApp = app && typeof app === "object" ? app : null;
+  if (activeApp?.view === "super-admin") return null;
   const slug = String(activeApp?.currentBusinessSlug || "").trim().toLowerCase();
   const activeStore = runtimeStore();
   return activeStore?.businessBySlug(slug) || null;
@@ -5231,6 +5235,9 @@ function requestedBusiness() {
 
 function currentBusinessResolution() {
   const activeApp = app && typeof app === "object" ? app : null;
+  if (activeApp?.view === "super-admin") {
+    return { status: "success", business: defaultBusiness() };
+  }
   const slug = String(activeApp?.currentBusinessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
   const activeStore = runtimeStore();
   if (!activeStore) {
@@ -5251,6 +5258,7 @@ function currentBusinessResolution() {
 function ensureCurrentBusinessResolution() {
   if (requestedBusiness()) return;
   const activeApp = app && typeof app === "object" ? app : null;
+  if (activeApp?.view === "super-admin") return;
   const slug = String(activeApp?.currentBusinessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
   const activeStore = runtimeStore();
   if (!activeStore) return;
@@ -5277,7 +5285,7 @@ function currentWritableBusinessId() {
 }
 
 function currentDocumentTitle() {
-  if (app.view === "super-admin") return "Super Admin | Vision Barber SaaS";
+  if (app.view === "super-admin") return "Super Admin | SaaS";
   const resolution = currentBusinessResolution();
   const scopedBusinessPending =
     Boolean(app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG) &&
@@ -5291,7 +5299,7 @@ function currentDocumentTitle() {
 
 function expectedScopeForCurrentRoute() {
   const route = resolveRoute(location.pathname);
-  if (route.view === "super-admin") return `super-admin:global:${DEFAULT_BUSINESS_SLUG}`;
+  if (route.view === "super-admin") return "super-admin:global";
   const business = requestedBusiness() || store.businessResolution(route.businessSlug)?.business || (route.businessSlug === DEFAULT_BUSINESS_SLUG ? store.businessById(DEFAULT_BUSINESS_ID) || null : null);
   const scopeView = route.shell === "internal" ? "internal" : route.view;
   return `${scopeView}:${business?.id || "global"}:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
@@ -6191,8 +6199,8 @@ function dsMetricCard({ icon = "business", label = "", value = "", meta = "" }) 
   return `<article class="ds-metric-card">
     <div class="ds-metric-card__icon">${dsIcon(icon)}</div>
     <div class="ds-metric-card__copy">
-      <span>${escapeHTML(label)}</span>
       <strong>${escapeHTML(String(value))}</strong>
+      <span>${escapeHTML(label)}</span>
       ${meta ? `<small>${escapeHTML(meta)}</small>` : ""}
     </div>
   </article>`;
@@ -8022,7 +8030,7 @@ function renderSuperAdminV2() {
   );
   ensureRemoteSessionHealth("super_admin", app.superAdminSession);
 
-  const expectedSuperAdminScope = `super-admin:global:${DEFAULT_BUSINESS_SLUG}`;
+  const expectedSuperAdminScope = "super-admin:global";
   if (app.superAdminSession && store.supabase && (!store.remoteReady || store.remoteLoadedScopeKey !== expectedSuperAdminScope)) {
     return appShell(`
       <section class="dashboard-head super-admin-hero">
@@ -9200,12 +9208,14 @@ function render() {
   };
   ensurePersistentBackground();
   app.backgroundMedia = currentBackgroundMedia();
-  const shellSignature = [
-    routeShellType(),
-    app.currentBusinessSlug || DEFAULT_BUSINESS_SLUG,
-    currentBusinessResolution().status || "idle",
-    requestedBusiness()?.id || currentBusinessId() || "pending",
-  ].join("|");
+  const shellSignature = app.view === "super-admin"
+    ? ["super-admin", "global", store.remoteLoadedScopeKey || "idle", String(Boolean(app.superAdminSession))].join("|")
+    : [
+        routeShellType(),
+        app.currentBusinessSlug || DEFAULT_BUSINESS_SLUG,
+        currentBusinessResolution().status || "idle",
+        requestedBusiness()?.id || currentBusinessId() || "pending",
+      ].join("|");
   if (root.dataset.shellReady !== "true" || root.dataset.shellSignature !== shellSignature) {
     root.innerHTML = renderLayoutShell();
     root.dataset.shellReady = "true";
