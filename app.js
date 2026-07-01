@@ -859,50 +859,9 @@ function getBusinessBucket(businessId = currentBusinessId()) {
   return bucket;
 }
 
-function isPurePrincipalSeedOperationalRows(resourceKey = "", rows = []) {
-  if (!Array.isArray(rows) || !rows.length) return false;
-  const seed = visionSeedSnapshot();
-  if (resourceKey === "barbers") {
-    return rows.every(
-      (row) =>
-        (row?.negocioId || DEFAULT_BUSINESS_ID) === DEFAULT_BUSINESS_ID &&
-        (seed.barberIds.has(row?.id) || seed.barberSignatures.has(barberCloneSignature(row || {})))
-    );
-  }
-  if (resourceKey === "services") {
-    return rows.every(
-      (row) =>
-        (row?.negocioId || DEFAULT_BUSINESS_ID) === DEFAULT_BUSINESS_ID &&
-        (seed.serviceIds.has(row?.id) || seed.serviceSignatures.has(serviceCloneSignature(row || {})))
-    );
-  }
-  if (resourceKey === "appointments") {
-    return rows.every(
-      (row) =>
-        (row?.negocioId || DEFAULT_BUSINESS_ID) === DEFAULT_BUSINESS_ID &&
-        (seed.appointmentIds.has(row?.id) || seed.appointmentSignatures.has(appointmentCloneSignature(row || {})))
-    );
-  }
-  return false;
-}
-
-function shouldSuppressPrincipalLocalOperationalData(resourceKey = "", businessId = currentBusinessId(), rows = []) {
-  if (businessId !== DEFAULT_BUSINESS_ID) return false;
-  if (!["barbers", "services", "appointments"].includes(resourceKey)) return false;
-  const liveStore = runtimeStore();
-  if (!liveStore?.supabase) return false;
-  const route = resolveRoute(location.pathname);
-  if (route.view === "super-admin") return false;
-  if ((route.businessSlug || DEFAULT_BUSINESS_SLUG) !== DEFAULT_BUSINESS_SLUG) return false;
-  if (!isPurePrincipalSeedOperationalRows(resourceKey, rows)) return false;
-  const expectedScope =
-    typeof liveStore.currentRuntimeScopeKey === "function"
-      ? liveStore.currentRuntimeScopeKey(route)
-      : `${route.shell === "internal" ? "internal" : route.view}:${DEFAULT_BUSINESS_ID}:${DEFAULT_BUSINESS_SLUG}`;
-  const scopeLoaded =
-    liveStore.remoteLoadedScopeKey === expectedScope ||
-    liveStore.remoteLoadedScopes?.has(expectedScope);
-  return !scopeLoaded;
+function principalBusinessFallbackBucket(baseState = null) {
+  const sourceState = baseState && typeof baseState === "object" ? baseState : defaultState();
+  return buildBusinessBucketFromState(sourceState, DEFAULT_BUSINESS_ID);
 }
 
 function isPastDate(date) {
@@ -2369,15 +2328,10 @@ class StudioStore {
   renderableResourceRows(resourceKey, businessId, fallbackRows = []) {
     if (!RESOURCE_VIEW_KEYS.includes(resourceKey) || !businessId) return fallbackRows;
     const entry = this.resourceViewEntry(resourceKey, businessId);
-    if (!entry) {
-      return shouldSuppressPrincipalLocalOperationalData(resourceKey, businessId, fallbackRows)
-        ? []
-        : fallbackRows;
-    }
+    if (!entry) return fallbackRows;
     if (entry.loading) {
       if (Array.isArray(entry.lastValidData) && entry.lastValidData.length) return entry.lastValidData;
       if (Array.isArray(entry.data) && entry.data.length) return entry.data;
-      if (shouldSuppressPrincipalLocalOperationalData(resourceKey, businessId, fallbackRows)) return [];
       return Array.isArray(fallbackRows) ? fallbackRows : [];
     }
     return Array.isArray(entry.data) ? entry.data : Array.isArray(fallbackRows) ? fallbackRows : [];
@@ -2426,15 +2380,6 @@ class StudioStore {
       createdAt: Date.now(),
       row,
     };
-    writeCachedRecordMap(BUSINESS_IDENTITY_CACHE_KEY, cachedMap);
-  }
-
-  removePersistentBusinessIdentity(slug = "") {
-    const normalizedSlug = slugify(slug);
-    if (!normalizedSlug) return;
-    const cachedMap = readCachedRecordMap(BUSINESS_IDENTITY_CACHE_KEY);
-    if (!cachedMap[normalizedSlug]) return;
-    delete cachedMap[normalizedSlug];
     writeCachedRecordMap(BUSINESS_IDENTITY_CACHE_KEY, cachedMap);
   }
 
@@ -2792,13 +2737,11 @@ class StudioStore {
       const mergedBusinesses =
         route.view === "super-admin"
           ? remoteBusinesses
-          : route.businessSlug === DEFAULT_BUSINESS_SLUG && this.supabase
-            ? remoteBusinesses
-            : mergeBusinessesById(
-                (this.state.businesses || []).filter((business) => business.slug === route.businessSlug && !deletedBusinessIds.has(business.id) && !isPlaceholderBusiness(business)),
-                (localState.businesses || []).filter((business) => business.slug === route.businessSlug && !deletedBusinessIds.has(business.id) && !isPlaceholderBusiness(business)),
-                remoteBusinesses
-              );
+          : mergeBusinessesById(
+              (this.state.businesses || []).filter((business) => business.slug === route.businessSlug && !deletedBusinessIds.has(business.id) && !isPlaceholderBusiness(business)),
+              (localState.businesses || []).filter((business) => business.slug === route.businessSlug && !deletedBusinessIds.has(business.id) && !isPlaceholderBusiness(business)),
+              remoteBusinesses
+            );
 
       const scopedBusiness =
         route.view === "super-admin"
@@ -3062,6 +3005,26 @@ class StudioStore {
       const barberServicesData = barberServicesResult.fromStableCache
         ? stableBucket.barberServices
         : (barberServicesResult.error ? [] : (barberServicesResult.data || []).map(mapRowToBarberService));
+      const shouldUsePrincipalFallbackData =
+        scopedBusinessId === DEFAULT_BUSINESS_ID &&
+        (route.businessSlug || DEFAULT_BUSINESS_SLUG) === DEFAULT_BUSINESS_SLUG;
+      if (shouldUsePrincipalFallbackData) {
+        const principalLocalBucket = principalBusinessFallbackBucket(localState);
+        const principalSeedBucket = principalBusinessFallbackBucket(defaultState());
+        if (!barbersData.length) {
+          barbersData.push(...(principalLocalBucket.barbers.length ? principalLocalBucket.barbers : principalSeedBucket.barbers));
+        }
+        if (!servicesData.length) {
+          servicesData.push(...(principalLocalBucket.services.length ? principalLocalBucket.services : principalSeedBucket.services));
+        }
+        if (!barberServicesData.length) {
+          barberServicesData.push(
+            ...(principalLocalBucket.barberServices.length
+              ? principalLocalBucket.barberServices
+              : principalSeedBucket.barberServices)
+          );
+        }
+      }
       const scopedBusinessSettingsRows = businessSettingsResult.fromStableCache || businessSettingsResult.error ? [] : businessSettingsResult.data || [];
       const currentWeek = getWeekKey();
       if (scopedBusinessId) {
@@ -4127,7 +4090,6 @@ class StudioStore {
 
   deleteBusinessLocalOnly(businessId) {
     if (!businessId || businessId === DEFAULT_BUSINESS_ID) return false;
-    const targetBusiness = this.businessById(businessId);
     markBusinessDeleted(businessId);
     this.state.businesses = this.state.businesses.filter((business) => business.id !== businessId);
     this.state.barbers = this.state.barbers.filter((barber) => barber.negocioId !== businessId);
@@ -4135,36 +4097,7 @@ class StudioStore {
     this.state.appointments = this.state.appointments.filter((appointment) => appointment.negocioId !== businessId);
     this.state.blockedDays = this.state.blockedDays.filter((blockedDay) => blockedDay.negocioId !== businessId);
     this.state.barberServices = this.state.barberServices.filter((relation) => relation.negocioId !== businessId);
-    if (targetBusiness?.slug) {
-      this.businessResolutionBySlug.delete(targetBusiness.slug);
-      this.removePersistentBusinessIdentity(targetBusiness.slug);
-      themeMemoryCache.delete(targetBusiness.slug);
-      try {
-        localStorage.removeItem(`${THEME_CACHE_PREFIX}${targetBusiness.slug}`);
-      } catch {}
-    }
-    themeMemoryCache.delete(businessId);
-    this.businessSettingsByBusiness.delete(businessId);
-    this.invalidateStableBusinessCache(businessId);
-    this.invalidateRemoteCache(businessId);
-    this.invalidateRemoteCache(targetBusiness?.slug || "");
-    Object.values(this.resourceViewState || {}).forEach((map) => {
-      if (!(map instanceof Map)) return;
-      [...map.keys()].forEach((key) => {
-        if (String(key || "").startsWith(`${businessId}:`)) map.delete(key);
-      });
-    });
-    if (targetBusiness?.slug) {
-      clearScopedBusinessSession(ADMIN_SESSION_KEY, targetBusiness.slug);
-      clearScopedBusinessSession(BARBER_SESSION_KEY, targetBusiness.slug);
-      if (app?.currentBusinessSlug === targetBusiness.slug) {
-        app.adminSession = null;
-        app.barberSession = null;
-      }
-    }
     this.state = this.stateWithRuntimeScope(this.state);
-    this.invalidateBusinessBuckets();
-    invalidateDerivedBusinessCache();
     localStorage.setItem(APP_KEY, JSON.stringify(this.state));
     this.emit({ type: "SYNC", table: "businesses", reason: "business_delete_local" });
     return true;
