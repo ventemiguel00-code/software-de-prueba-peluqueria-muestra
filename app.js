@@ -2453,7 +2453,7 @@ class StudioStore {
           this.invalidateBusinessBuckets();
           invalidateDerivedBusinessCache();
           localStorage.setItem(APP_KEY, JSON.stringify(this.state));
-          if (typeof scheduleRender === "function" && document.visibilityState === "visible") {
+          if (typeof scheduleRender === "function") {
             scheduleRender();
           }
         }
@@ -2572,7 +2572,7 @@ class StudioStore {
     this.remoteLoadedScopes.add(syncScopeKey);
     this.remoteScopeLoadRequestedAt.delete(syncScopeKey);
     this.remoteReady = true;
-    if (typeof scheduleRender === "function" && document.visibilityState === "visible") {
+    if (typeof scheduleRender === "function") {
       scheduleRender();
     }
     if (!quiet) {
@@ -9120,10 +9120,20 @@ let renderFrame = 0;
 
 function scheduleRender() {
   if (renderFrame) return;
-  renderFrame = requestAnimationFrame(() => {
+  const flushRender = () => {
     renderFrame = 0;
     render();
-  });
+  };
+  if (document.visibilityState === "visible") {
+    renderFrame = requestAnimationFrame(flushRender);
+    window.setTimeout(() => {
+      if (!renderFrame) return;
+      cancelAnimationFrame(renderFrame);
+      flushRender();
+    }, 120);
+    return;
+  }
+  renderFrame = window.setTimeout(flushRender, 16);
 }
 
 function syncSuperAdminMessageBanner(viewRoot) {
