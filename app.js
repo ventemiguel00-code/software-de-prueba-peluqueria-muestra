@@ -859,7 +859,34 @@ function getBusinessBucket(businessId = currentBusinessId()) {
   return bucket;
 }
 
-function shouldSuppressPrincipalLocalOperationalData(resourceKey = "", businessId = currentBusinessId()) {
+function isPurePrincipalSeedOperationalRows(resourceKey = "", rows = []) {
+  if (!Array.isArray(rows) || !rows.length) return false;
+  const seed = visionSeedSnapshot();
+  if (resourceKey === "barbers") {
+    return rows.every(
+      (row) =>
+        (row?.negocioId || DEFAULT_BUSINESS_ID) === DEFAULT_BUSINESS_ID &&
+        (seed.barberIds.has(row?.id) || seed.barberSignatures.has(barberCloneSignature(row || {})))
+    );
+  }
+  if (resourceKey === "services") {
+    return rows.every(
+      (row) =>
+        (row?.negocioId || DEFAULT_BUSINESS_ID) === DEFAULT_BUSINESS_ID &&
+        (seed.serviceIds.has(row?.id) || seed.serviceSignatures.has(serviceCloneSignature(row || {})))
+    );
+  }
+  if (resourceKey === "appointments") {
+    return rows.every(
+      (row) =>
+        (row?.negocioId || DEFAULT_BUSINESS_ID) === DEFAULT_BUSINESS_ID &&
+        (seed.appointmentIds.has(row?.id) || seed.appointmentSignatures.has(appointmentCloneSignature(row || {})))
+    );
+  }
+  return false;
+}
+
+function shouldSuppressPrincipalLocalOperationalData(resourceKey = "", businessId = currentBusinessId(), rows = []) {
   if (businessId !== DEFAULT_BUSINESS_ID) return false;
   if (!["barbers", "services", "appointments"].includes(resourceKey)) return false;
   const liveStore = runtimeStore();
@@ -867,6 +894,7 @@ function shouldSuppressPrincipalLocalOperationalData(resourceKey = "", businessI
   const route = resolveRoute(location.pathname);
   if (route.view === "super-admin") return false;
   if ((route.businessSlug || DEFAULT_BUSINESS_SLUG) !== DEFAULT_BUSINESS_SLUG) return false;
+  if (!isPurePrincipalSeedOperationalRows(resourceKey, rows)) return false;
   const expectedScope =
     typeof liveStore.currentRuntimeScopeKey === "function"
       ? liveStore.currentRuntimeScopeKey(route)
@@ -2342,14 +2370,14 @@ class StudioStore {
     if (!RESOURCE_VIEW_KEYS.includes(resourceKey) || !businessId) return fallbackRows;
     const entry = this.resourceViewEntry(resourceKey, businessId);
     if (!entry) {
-      return shouldSuppressPrincipalLocalOperationalData(resourceKey, businessId)
+      return shouldSuppressPrincipalLocalOperationalData(resourceKey, businessId, fallbackRows)
         ? []
         : fallbackRows;
     }
     if (entry.loading) {
       if (Array.isArray(entry.lastValidData) && entry.lastValidData.length) return entry.lastValidData;
       if (Array.isArray(entry.data) && entry.data.length) return entry.data;
-      if (shouldSuppressPrincipalLocalOperationalData(resourceKey, businessId)) return [];
+      if (shouldSuppressPrincipalLocalOperationalData(resourceKey, businessId, fallbackRows)) return [];
       return Array.isArray(fallbackRows) ? fallbackRows : [];
     }
     return Array.isArray(entry.data) ? entry.data : Array.isArray(fallbackRows) ? fallbackRows : [];
