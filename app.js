@@ -6460,9 +6460,6 @@ function BusinessPublicTemplate({
   return appShell(`
     <section class="hero public-reservation-hero">
       <div class="hero-bg ${backgroundMedia?.type === "video" ? "video-backed" : ""}"></div>
-      <div class="hero-copy">
-        <h1>${escapeHTML(business?.name || "Vision Barber")}</h1>
-      </div>
     </section>
 
     <section class="workspace public-flow">
@@ -6859,9 +6856,6 @@ function renderPublic() {
   return appShell(`
     <section class="hero public-reservation-hero">
       <div class="hero-bg ${backgroundMedia?.type === "video" ? "video-backed" : ""}"></div>
-      <div class="hero-copy">
-        <h1>${escapeHTML(business?.name || "Vision Barber")}</h1>
-      </div>
     </section>
 
     <section class="workspace public-flow">
