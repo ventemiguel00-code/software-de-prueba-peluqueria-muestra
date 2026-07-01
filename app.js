@@ -2747,7 +2747,10 @@ class StudioStore {
           ? null
           : scopedBusiness?.id || null;
       const syncScopeView = route.shell === "internal" ? "internal" : route.view;
-      const syncScopeKey = `${syncScopeView}:${scopedBusinessId || "global"}:${route.businessSlug || ""}`;
+      const syncScopeKey =
+        route.view === "super-admin"
+          ? "super-admin:global"
+          : `${syncScopeView}:${scopedBusinessId || "global"}:${route.businessSlug || ""}`;
       activeSyncScopeKey = syncScopeKey;
       activeScopedBusinessId = scopedBusinessId || "";
 
