@@ -8031,7 +8031,19 @@ function renderSuperAdminV2() {
   ensureRemoteSessionHealth("super_admin", app.superAdminSession);
 
   const expectedSuperAdminScope = "super-admin:global";
-  if (app.superAdminSession && store.supabase && (!store.remoteReady || store.remoteLoadedScopeKey !== expectedSuperAdminScope)) {
+  const hasSuperAdminScopeLoaded =
+    store.remoteLoadedScopeKey === expectedSuperAdminScope ||
+    store.remoteLoadedScopes?.has(expectedSuperAdminScope);
+  const canRenderSuperAdminData = Boolean((store.state.businesses || []).length);
+  const remoteAttemptStillFresh =
+    !store.remoteAttemptedAt || Date.now() - store.remoteAttemptedAt < 5000;
+  const shouldShowSuperAdminLoading =
+    app.superAdminSession &&
+    store.supabase &&
+    !canRenderSuperAdminData &&
+    !hasSuperAdminScopeLoaded &&
+    (store.syncInFlight || remoteAttemptStillFresh);
+  if (shouldShowSuperAdminLoading) {
     return appShell(`
       <section class="dashboard-head super-admin-hero">
         <div class="super-admin-hero__copy">
