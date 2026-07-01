@@ -859,6 +859,24 @@ function getBusinessBucket(businessId = currentBusinessId()) {
   return bucket;
 }
 
+function shouldSuppressPrincipalLocalOperationalData(resourceKey = "", businessId = currentBusinessId()) {
+  if (businessId !== DEFAULT_BUSINESS_ID) return false;
+  if (!["barbers", "services", "appointments"].includes(resourceKey)) return false;
+  const liveStore = runtimeStore();
+  if (!liveStore?.supabase) return false;
+  const route = resolveRoute(location.pathname);
+  if (route.view === "super-admin") return false;
+  if ((route.businessSlug || DEFAULT_BUSINESS_SLUG) !== DEFAULT_BUSINESS_SLUG) return false;
+  const expectedScope =
+    typeof liveStore.currentRuntimeScopeKey === "function"
+      ? liveStore.currentRuntimeScopeKey(route)
+      : `${route.shell === "internal" ? "internal" : route.view}:${DEFAULT_BUSINESS_ID}:${DEFAULT_BUSINESS_SLUG}`;
+  const scopeLoaded =
+    liveStore.remoteLoadedScopeKey === expectedScope ||
+    liveStore.remoteLoadedScopes?.has(expectedScope);
+  return !scopeLoaded;
+}
+
 function isPastDate(date) {
   return isPastDateInBogota(date);
 }
@@ -2323,10 +2341,15 @@ class StudioStore {
   renderableResourceRows(resourceKey, businessId, fallbackRows = []) {
     if (!RESOURCE_VIEW_KEYS.includes(resourceKey) || !businessId) return fallbackRows;
     const entry = this.resourceViewEntry(resourceKey, businessId);
-    if (!entry) return fallbackRows;
+    if (!entry) {
+      return shouldSuppressPrincipalLocalOperationalData(resourceKey, businessId)
+        ? []
+        : fallbackRows;
+    }
     if (entry.loading) {
       if (Array.isArray(entry.lastValidData) && entry.lastValidData.length) return entry.lastValidData;
       if (Array.isArray(entry.data) && entry.data.length) return entry.data;
+      if (shouldSuppressPrincipalLocalOperationalData(resourceKey, businessId)) return [];
       return Array.isArray(fallbackRows) ? fallbackRows : [];
     }
     return Array.isArray(entry.data) ? entry.data : Array.isArray(fallbackRows) ? fallbackRows : [];
@@ -2741,11 +2764,13 @@ class StudioStore {
       const mergedBusinesses =
         route.view === "super-admin"
           ? remoteBusinesses
-          : mergeBusinessesById(
-              (this.state.businesses || []).filter((business) => business.slug === route.businessSlug && !deletedBusinessIds.has(business.id) && !isPlaceholderBusiness(business)),
-              (localState.businesses || []).filter((business) => business.slug === route.businessSlug && !deletedBusinessIds.has(business.id) && !isPlaceholderBusiness(business)),
-              remoteBusinesses
-            );
+          : route.businessSlug === DEFAULT_BUSINESS_SLUG && this.supabase
+            ? remoteBusinesses
+            : mergeBusinessesById(
+                (this.state.businesses || []).filter((business) => business.slug === route.businessSlug && !deletedBusinessIds.has(business.id) && !isPlaceholderBusiness(business)),
+                (localState.businesses || []).filter((business) => business.slug === route.businessSlug && !deletedBusinessIds.has(business.id) && !isPlaceholderBusiness(business)),
+                remoteBusinesses
+              );
 
       const scopedBusiness =
         route.view === "super-admin"
