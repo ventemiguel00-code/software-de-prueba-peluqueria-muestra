@@ -2804,7 +2804,7 @@ class StudioStore {
           ? null
           : mergedBusinesses.find((business) => business.slug === route.businessSlug) ||
             this.businessResolution(route.businessSlug)?.business ||
-            placeholderBusinessForSlug(route.businessSlug);
+            null;
       const scopedBusinessId =
         route.view === "super-admin"
           ? null
@@ -5383,8 +5383,11 @@ function currentBusinessResolution() {
     if (storedDefault) return { status: "success", business: storedDefault };
     return { status: "success", business: defaultBusiness() };
   }
+  const waitedForRemoteResolution =
+    activeStore.remoteReady ||
+    (activeStore.remoteAttemptedAt && Date.now() - activeStore.remoteAttemptedAt > 1500);
   if (
-    activeStore.remoteReady &&
+    waitedForRemoteResolution &&
     !activeStore.getPersistentBusinessIdentity?.(slug) &&
     !activeStore.businessBySlug?.(slug)
   ) {
