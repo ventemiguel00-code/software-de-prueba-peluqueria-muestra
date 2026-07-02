@@ -5383,6 +5383,13 @@ function currentBusinessResolution() {
     if (storedDefault) return { status: "success", business: storedDefault };
     return { status: "success", business: defaultBusiness() };
   }
+  if (
+    activeStore.remoteReady &&
+    !activeStore.getPersistentBusinessIdentity?.(slug) &&
+    !activeStore.businessBySlug?.(slug)
+  ) {
+    return { status: "not_found", business: null };
+  }
   return { status: "idle" };
 }
 
