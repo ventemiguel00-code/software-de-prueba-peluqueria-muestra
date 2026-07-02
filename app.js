@@ -1053,10 +1053,9 @@ function isArchivedBusiness(business = {}) {
 }
 
 function normalizeTenantState(state = {}) {
-  const business = normalizeBusiness((state.businesses || [defaultBusiness()])[0] || defaultBusiness());
-  const businesses = (state.businesses?.length ? state.businesses : [business]).map(normalizeBusiness);
-  const currentBusinessId = state.meta?.currentBusinessId || businesses[0]?.id || DEFAULT_BUSINESS_ID;
-  const fallbackBusinessId = businesses.length === 1 ? businesses[0]?.id || currentBusinessId || DEFAULT_BUSINESS_ID : "";
+  const businesses = Array.isArray(state.businesses) ? state.businesses.filter(Boolean).map(normalizeBusiness) : [];
+  const currentBusinessId = state.meta?.currentBusinessId || businesses[0]?.id || "";
+  const fallbackBusinessId = businesses.length === 1 ? businesses[0]?.id || currentBusinessId || "" : "";
   const attachBusiness = (item) => {
     const resolvedBusinessId = item?.negocioId || item?.businessId || item?.business_id || fallbackBusinessId;
     return resolvedBusinessId ? { ...item, negocioId: resolvedBusinessId } : { ...item };
@@ -1411,116 +1410,15 @@ const defaultState = () => ({
     dayKey: todayISO(),
     weekKey: getWeekKey(),
     selectedDate: todayISO(),
-    currentBusinessId: DEFAULT_BUSINESS_ID,
+    currentBusinessId: "",
     businessSummaryById: {},
   },
-  businesses: [defaultBusiness()],
-  barbers: [
-    {
-      id: "barber_mateo",
-      negocioId: DEFAULT_BUSINESS_ID,
-      name: "Mateo Rivas",
-      user: "mateo",
-      password: "studio2026",
-      whatsapp: "3004448899",
-      active: true,
-      photo: "",
-      gradient: avatarGradients[0],
-      specialty: "Cortes urbanos",
-    },
-    {
-      id: "barber_dante",
-      negocioId: DEFAULT_BUSINESS_ID,
-      name: "Dante Molina",
-      user: "dante",
-      password: "studio2026",
-      whatsapp: "3137771900",
-      active: true,
-      photo: "",
-      gradient: avatarGradients[1],
-      specialty: "Barba y perfilado",
-    },
-    {
-      id: "barber_elias",
-      negocioId: DEFAULT_BUSINESS_ID,
-      name: "Elias Torres",
-      user: "elias",
-      password: "studio2026",
-      whatsapp: "3015552000",
-      active: true,
-      photo: "",
-      gradient: avatarGradients[2],
-      specialty: "Fade premium",
-    },
-    {
-      id: "barber_simon",
-      negocioId: DEFAULT_BUSINESS_ID,
-      name: "Simon Vera",
-      user: "simon",
-      password: "studio2026",
-      whatsapp: "",
-      active: false,
-      photo: "",
-      gradient: avatarGradients[3],
-      specialty: "Textura y tijera",
-    },
-  ],
-  appointments: [
-    {
-      id: "apt_seed_1",
-      negocioId: DEFAULT_BUSINESS_ID,
-      barberId: "barber_mateo",
-      date: todayISO(),
-      time: "10:00",
-      status: "reserved",
-      clientName: "Laura Pena",
-      whatsapp: "300 444 8899",
-      source: "public",
-      weekKey: getWeekKey(),
-    },
-    {
-      id: "apt_seed_2",
-      negocioId: DEFAULT_BUSINESS_ID,
-      barberId: "barber_dante",
-      date: todayISO(),
-      time: "15:20",
-      status: "fixed",
-      clientName: "Andres Silva",
-      whatsapp: "313-777-1900",
-      source: "admin",
-      weekKey: "permanent",
-    },
-    {
-      id: "apt_seed_3",
-      negocioId: DEFAULT_BUSINESS_ID,
-      barberId: "barber_elias",
-      date: todayISO(),
-      time: "12:00",
-      status: "blocked",
-      clientName: "Bloqueo operativo",
-      whatsapp: "",
-      source: "admin",
-      weekKey: "permanent",
-    },
-  ],
+  businesses: [],
+  barbers: [],
+  appointments: [],
   blockedDays: [],
-  services: [
-    { id: "service_corte_clasico", negocioId: DEFAULT_BUSINESS_ID, name: "Corte clasico", value: 20000, adminPercentage: 50, barberPercentage: 50, active: true },
-    { id: "service_corte_barba", negocioId: DEFAULT_BUSINESS_ID, name: "Corte + barba", value: 30000, adminPercentage: 50, barberPercentage: 50, active: true },
-    { id: "service_barba", negocioId: DEFAULT_BUSINESS_ID, name: "Barba", value: 18000, adminPercentage: 50, barberPercentage: 50, active: true },
-    { id: "service_cejas", negocioId: DEFAULT_BUSINESS_ID, name: "Cejas", value: 12000, adminPercentage: 50, barberPercentage: 50, active: true },
-    { id: "service_diseno", negocioId: DEFAULT_BUSINESS_ID, name: "Diseno", value: 15000, adminPercentage: 50, barberPercentage: 50, active: true },
-  ],
-  barberServices: [
-    { id: "barber_service_seed_1", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_mateo", serviceId: "service_corte_clasico", active: true },
-    { id: "barber_service_seed_2", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_mateo", serviceId: "service_corte_barba", active: true },
-    { id: "barber_service_seed_3", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_mateo", serviceId: "service_diseno", active: true },
-    { id: "barber_service_seed_4", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_dante", serviceId: "service_corte_barba", active: true },
-    { id: "barber_service_seed_5", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_dante", serviceId: "service_barba", active: true },
-    { id: "barber_service_seed_6", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_elias", serviceId: "service_corte_clasico", active: true },
-    { id: "barber_service_seed_7", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_elias", serviceId: "service_diseno", active: true },
-    { id: "barber_service_seed_8", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_simon", serviceId: "service_cejas", active: true },
-  ],
+  services: [],
+  barberServices: [],
 });
 
 function normalizeSignaturePart(value) {
@@ -3061,26 +2959,6 @@ class StudioStore {
       const barberServicesData = barberServicesResult.fromStableCache
         ? stableBucket.barberServices
         : (barberServicesResult.error ? [] : (barberServicesResult.data || []).map(mapRowToBarberService));
-      const shouldUsePrincipalFallbackData =
-        scopedBusinessId === DEFAULT_BUSINESS_ID &&
-        (route.businessSlug || DEFAULT_BUSINESS_SLUG) === DEFAULT_BUSINESS_SLUG;
-      if (shouldUsePrincipalFallbackData) {
-        const principalLocalBucket = principalBusinessFallbackBucket(localState);
-        const principalSeedBucket = principalBusinessFallbackBucket(defaultState());
-        if (!barbersData.length) {
-          barbersData.push(...(principalLocalBucket.barbers.length ? principalLocalBucket.barbers : principalSeedBucket.barbers));
-        }
-        if (!servicesData.length) {
-          servicesData.push(...(principalLocalBucket.services.length ? principalLocalBucket.services : principalSeedBucket.services));
-        }
-        if (!barberServicesData.length) {
-          barberServicesData.push(
-            ...(principalLocalBucket.barberServices.length
-              ? principalLocalBucket.barberServices
-              : principalSeedBucket.barberServices)
-          );
-        }
-      }
       const scopedBusinessSettingsRows = businessSettingsResult.fromStableCache || businessSettingsResult.error ? [] : businessSettingsResult.data || [];
       const currentWeek = getWeekKey();
       if (scopedBusinessId) {
@@ -3208,26 +3086,8 @@ class StudioStore {
   }
 
   async seedRemoteFromLocal() {
-    if (!this.supabase) return;
-
-    const seedState = this.loadLocalState();
-    const [businessesInsert, barbersInsert, appointmentsInsert, blockedDaysInsert, servicesInsert, barberServicesInsert] = await Promise.all([
-      this.supabase.from("businesses").upsert(seedState.businesses.map(mapBusinessToRow), { onConflict: "id" }),
-      this.supabase.from("barbers").upsert(seedState.barbers.map(mapBarberToRow), { onConflict: "id" }),
-      this.supabase.from("appointments").upsert(seedState.appointments.map(mapAppointmentToRow), { onConflict: "id" }),
-      this.supabase.from("blocked_days").upsert(seedState.blockedDays.map(mapBlockedDayToRow), { onConflict: "id" }),
-      this.supabase.from("services").upsert(seedState.services.map(mapServiceToRow), { onConflict: "id" }),
-      this.supabase.from("barber_services").upsert(seedState.barberServices.map(mapBarberServiceToRow), { onConflict: "id" }),
-    ]);
-
-    if (businessesInsert.error) console.warn("Supabase businesses seed skipped", businessesInsert.error);
-    if (barbersInsert.error) throw barbersInsert.error;
-    if (appointmentsInsert.error) throw appointmentsInsert.error;
-    if (blockedDaysInsert.error) throw blockedDaysInsert.error;
-    if (servicesInsert.error) console.warn("Supabase services seed skipped", servicesInsert.error);
-    if (barberServicesInsert.error) console.warn("Supabase barber services seed skipped", barberServicesInsert.error);
-
-    await this.syncFromRemote({ origin: "seedSupabase:after_seed", component: "StudioStore", hook: "seedSupabase" });
+    console.info("seedRemoteFromLocal disabled in SaaS runtime");
+    return false;
   }
 
   subscribeRemote() {
@@ -3694,7 +3554,26 @@ class StudioStore {
       throw error;
     }
 
-    const remoteAccounts = (data || []).map((row) => mapRowToAdminAccount(row, businesses));
+    let remoteAccounts = (data || []).map((row) => mapRowToAdminAccount(row, businesses));
+    const shouldEnsurePrincipalAdmin = !businessId || businessId === DEFAULT_BUSINESS_ID;
+    const hasPrincipalAdmin = remoteAccounts.some(
+      (account) => account.businessId === DEFAULT_BUSINESS_ID && String(account.user || "").trim().toLowerCase() === PRINCIPAL_ADMIN.user
+    );
+    if (shouldEnsurePrincipalAdmin && !hasPrincipalAdmin) {
+      const principalBusiness = businesses.find((item) => item.id === DEFAULT_BUSINESS_ID) || this.businessById(DEFAULT_BUSINESS_ID) || null;
+      const ensuredPrincipalAdmin = {
+        ...PRINCIPAL_ADMIN,
+        businessId: DEFAULT_BUSINESS_ID,
+        businessSlug: principalBusiness?.slug || DEFAULT_BUSINESS_SLUG,
+        createdAt: todayISO(),
+      };
+      try {
+        await this.upsertAdminAccountRemote(ensuredPrincipalAdmin);
+        remoteAccounts = [...remoteAccounts, upsertLocalAdminAccount(ensuredPrincipalAdmin)].filter(Boolean);
+      } catch (error) {
+        console.warn("Principal admin sync safeguard skipped", error);
+      }
+    }
     remoteAccounts.forEach((account) => {
       if (account.password) {
         setVisibleAdminPassword(account.id, {
@@ -3705,7 +3584,7 @@ class StudioStore {
         });
       }
     });
-    const localAccounts = loadAdminAccounts().filter((account) => account.id !== PRINCIPAL_ADMIN.id);
+    const localAccounts = loadAdminAccounts();
     const preservedAccounts = businessId
       ? localAccounts.filter((account) => account.businessId !== businessId)
       : [];
@@ -4040,7 +3919,7 @@ class StudioStore {
   }
 
   async upsertAdminAccountRemote(account) {
-    if (!this.supabase || !account?.id || account.id === PRINCIPAL_ADMIN.id) return true;
+    if (!this.supabase || !account?.id) return true;
     let { error } = await this.supabase
       .from("admin_accounts")
       .upsert(mapAdminAccountToRow(account), { onConflict: "id" });
@@ -4067,7 +3946,7 @@ class StudioStore {
   }
 
   async deleteAdminAccountRemote(id, businessId = null) {
-    if (!this.supabase || !id || id === PRINCIPAL_ADMIN.id) return true;
+    if (!this.supabase || !id) return true;
     let query = this.supabase.from("admin_accounts").delete().eq("id", id);
     if (businessId) {
       query = query.eq("business_id", businessId);
@@ -4581,14 +4460,12 @@ function loadAdminAccounts() {
   } catch {
     accounts = [];
   }
-
-  const secondary = accounts
-    .filter((account) => account.id !== PRINCIPAL_ADMIN.id)
-    .map((account) => ({
-      ...account,
-      password: "",
-    }));
-  return [PRINCIPAL_ADMIN, ...secondary];
+  return Array.isArray(accounts)
+    ? accounts.map((account) => ({
+        ...account,
+        password: "",
+      }))
+    : [];
 }
 
 function adminAccountsForBusiness(businessId = currentBusinessId()) {
@@ -4596,15 +4473,10 @@ function adminAccountsForBusiness(businessId = currentBusinessId()) {
 }
 
 function saveAdminAccounts(accounts) {
-  const normalized = [
-    PRINCIPAL_ADMIN,
-    ...accounts
-      .filter((account) => account.id !== PRINCIPAL_ADMIN.id)
-      .map((account) => ({
-        ...account,
-        password: "",
-      })),
-  ];
+  const normalized = (Array.isArray(accounts) ? accounts : []).map((account) => ({
+    ...account,
+    password: "",
+  }));
   localStorage.setItem(ADMIN_ACCOUNTS_KEY, JSON.stringify(normalized));
 }
 
@@ -4623,7 +4495,7 @@ function upsertLocalAdminAccount(account) {
     active: account.active !== false,
     createdAt: account.createdAt || todayISO(),
   };
-  const existing = loadAdminAccounts().filter((item) => item.id !== PRINCIPAL_ADMIN.id);
+  const existing = loadAdminAccounts();
   const nextAccounts = existing.some((item) => item.id === normalizedAccount.id)
       ? existing.map((item) => (item.id === normalizedAccount.id ? { ...item, ...normalizedAccount } : item))
       : [...existing, normalizedAccount];
@@ -5344,15 +5216,6 @@ function currentBusiness() {
   const resolution = activeStore?.businessResolution(slug) || null;
   const persistedBusinessRow = activeStore?.getPersistentBusinessIdentity?.(slug) || null;
   const persistedBusiness = persistedBusinessRow ? mapRowToBusiness(persistedBusinessRow) : null;
-  if (slug === DEFAULT_BUSINESS_SLUG) {
-    return (
-      requestedBusiness() ||
-      resolution?.business ||
-      persistedBusiness ||
-      activeStore?.businessById(DEFAULT_BUSINESS_ID) ||
-      defaultBusiness()
-    );
-  }
   return requestedBusiness() || resolution?.business || persistedBusiness || placeholderBusinessForSlug(slug);
 }
 
@@ -5372,17 +5235,12 @@ function currentBusinessResolution() {
   const slug = String(activeApp?.currentBusinessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
   const activeStore = runtimeStore();
   if (!activeStore) {
-    return slug === DEFAULT_BUSINESS_SLUG ? { status: "success", business: defaultBusiness() } : { status: "idle" };
+    return { status: "idle" };
   }
   const business = requestedBusiness();
   if (business) return { status: "success", business };
   const resolved = activeStore.businessResolution(slug);
   if (resolved) return resolved;
-  if (slug === DEFAULT_BUSINESS_SLUG) {
-    const storedDefault = activeStore.businessById(DEFAULT_BUSINESS_ID);
-    if (storedDefault) return { status: "success", business: storedDefault };
-    return { status: "success", business: defaultBusiness() };
-  }
   const waitedForRemoteResolution =
     activeStore.remoteReady ||
     (activeStore.remoteAttemptedAt && Date.now() - activeStore.remoteAttemptedAt > 1500);
@@ -5418,7 +5276,6 @@ function currentWritableBusinessId() {
   const resolvedBusiness = currentBusinessResolution().business;
   if (resolvedBusiness?.id && !isPlaceholderBusiness(resolvedBusiness)) return resolvedBusiness.id;
   const route = resolveRoute(location.pathname);
-  if (route.businessSlug === DEFAULT_BUSINESS_SLUG) return DEFAULT_BUSINESS_ID;
   const activeStore = runtimeStore();
   const cachedBusiness = activeStore?.businessBySlug(route.businessSlug || "");
   if (cachedBusiness?.id && !isPlaceholderBusiness(cachedBusiness)) return cachedBusiness.id;
@@ -5573,9 +5430,6 @@ function businessLoadingShell(title = "Preparando entorno") {
 
 function currentAdminAccountRecord() {
   if (!app.adminSession) return null;
-  if (app.adminSession.id === PRINCIPAL_ADMIN.id) {
-    return currentBusinessId() === DEFAULT_BUSINESS_ID ? PRINCIPAL_ADMIN : null;
-  }
   return (
     adminAccountsForBusiness(currentBusinessId()).find(
       (account) =>
@@ -5819,15 +5673,13 @@ async function findAdminAccount(user, password, businessId = null) {
     ) || null;
   if (!legacyMatch) return null;
 
-  if (legacyMatch.id !== PRINCIPAL_ADMIN.id) {
-    legacyMatch.passwordHash = passwordHash;
-    legacyMatch.password = "";
-    saveAdminAccounts(loadAdminAccounts().map((account) => (account.id === legacyMatch.id ? legacyMatch : account)));
-    try {
-      await store.upsertAdminAccountRemote(legacyMatch);
-    } catch (error) {
-      console.warn("Legacy admin hash upgrade skipped", error);
-    }
+  legacyMatch.passwordHash = passwordHash;
+  legacyMatch.password = "";
+  saveAdminAccounts(loadAdminAccounts().map((account) => (account.id === legacyMatch.id ? legacyMatch : account)));
+  try {
+    await store.upsertAdminAccountRemote(legacyMatch);
+  } catch (error) {
+    console.warn("Legacy admin hash upgrade skipped", error);
   }
 
   return legacyMatch;
@@ -6152,8 +6004,14 @@ function viewPath(view) {
   if (view === "business-test") return `/barberia-test/${slug}`;
   if (view === "admin") return `/panel/${slug}?modo=admin`;
   if (view === "barber") return `/panel/${slug}?modo=barbero`;
-  if (slug === DEFAULT_BUSINESS_SLUG) return "/";
   return `/barberia/${slug}`;
+}
+
+function resolveLegacyRedirectPath(pathname = location.pathname) {
+  if (pathname === "/") return `/barberia/${DEFAULT_BUSINESS_SLUG}`;
+  if (pathname === "/admin-vip") return `/panel/${DEFAULT_BUSINESS_SLUG}?modo=admin`;
+  if (pathname === "/gestion-equipo") return `/panel/${DEFAULT_BUSINESS_SLUG}?modo=barbero`;
+  return "";
 }
 
 function routeShellType() {
@@ -9359,6 +9217,13 @@ async function handleDeleteBusinessSubmit(formElement) {
 function render() {
   const perf = perfMark("render");
   const root = document.querySelector("#app");
+  const legacyRedirectPath = resolveLegacyRedirectPath(location.pathname);
+  if (legacyRedirectPath) {
+    const currentFullPath = `${location.pathname}${location.search || ""}`;
+    if (currentFullPath !== legacyRedirectPath) {
+      history.replaceState(null, "", legacyRedirectPath);
+    }
+  }
   app.route = resolveRoute(location.pathname);
   app.view = app.route.view;
   app.currentBusinessSlug = app.route.businessSlug;
