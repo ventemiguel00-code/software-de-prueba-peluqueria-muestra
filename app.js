@@ -2372,6 +2372,28 @@ class StudioStore {
     return cached.row || null;
   }
 
+  clearPersistentBusinessIdentity(slug = "", businessId = "") {
+    const normalizedSlug = slugify(slug);
+    const normalizedBusinessId = String(businessId || "").trim();
+    const cachedMap = readCachedRecordMap(BUSINESS_IDENTITY_CACHE_KEY);
+    let changed = false;
+    Object.keys(cachedMap).forEach((key) => {
+      const row = cachedMap[key]?.row || null;
+      const rowSlug = slugify(row?.slug || row?.business_name || "");
+      const rowBusinessId = String(row?.id || row?.business_id || "").trim();
+      const slugMatches = normalizedSlug && (key === normalizedSlug || rowSlug === normalizedSlug);
+      const businessMatches = normalizedBusinessId && rowBusinessId === normalizedBusinessId;
+      if (slugMatches || businessMatches) {
+        delete cachedMap[key];
+        changed = true;
+      }
+    });
+    if (changed) {
+      writeCachedRecordMap(BUSINESS_IDENTITY_CACHE_KEY, cachedMap);
+    }
+    return changed;
+  }
+
   setPersistentBusinessIdentity(slug = "", row = null) {
     const normalizedSlug = slugify(slug || row?.slug || row?.business_name || "");
     if (!normalizedSlug || !row) return;
@@ -2487,16 +2509,26 @@ class StudioStore {
     const persistedBusinessRow = this.getPersistentBusinessIdentity(normalizedSlug);
     if (persistedBusinessRow) {
       const persistedBusiness = mapRowToBusiness(persistedBusinessRow);
-      this.state = {
-        ...this.state,
-        businesses: mergeBusinessesById(
-          (this.state.businesses || []).filter((item) => !isPlaceholderBusiness(item)),
-          [persistedBusiness]
-        ),
-      };
-      localStorage.setItem(APP_KEY, JSON.stringify(this.state));
-      this.invalidateBusinessBuckets();
-      invalidateDerivedBusinessCache();
+      const persistedSlug = slugify(persistedBusiness?.slug || persistedBusinessRow?.slug || "");
+      const deletedBusinessIds = loadDeletedBusinessIds();
+      if (
+        persistedBusiness?.id &&
+        !deletedBusinessIds.has(persistedBusiness.id) &&
+        persistedSlug === normalizedSlug
+      ) {
+        this.state = {
+          ...this.state,
+          businesses: mergeBusinessesById(
+            (this.state.businesses || []).filter((item) => !isPlaceholderBusiness(item)),
+            [persistedBusiness]
+          ),
+        };
+        localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+        this.invalidateBusinessBuckets();
+        invalidateDerivedBusinessCache();
+      } else {
+        this.clearPersistentBusinessIdentity(normalizedSlug, persistedBusiness?.id || "");
+      }
     }
     const cachedBusiness =
       this.businessBySlug(normalizedSlug) ||
@@ -2526,6 +2558,7 @@ class StudioStore {
           return result;
         }
         if (!data) {
+          this.clearPersistentBusinessIdentity(normalizedSlug);
           const result = { status: "not_found", checkedAt: Date.now() };
           this.businessResolutionBySlug.set(normalizedSlug, result);
           return result;
@@ -4090,7 +4123,16 @@ class StudioStore {
 
   deleteBusinessLocalOnly(businessId) {
     if (!businessId || businessId === DEFAULT_BUSINESS_ID) return false;
+    const targetBusiness = this.businessById(businessId);
     markBusinessDeleted(businessId);
+    if (targetBusiness?.slug) {
+      this.businessResolutionBySlug.delete(String(targetBusiness.slug).trim().toLowerCase());
+    }
+    this.clearPersistentBusinessIdentity(targetBusiness?.slug || "", businessId);
+    this.invalidateStableBusinessCache(businessId);
+    this.invalidateRemoteCache(businessId);
+    this.publicServicesCache.delete(businessId);
+    this.publicServicesInFlight.delete(businessId);
     this.state.businesses = this.state.businesses.filter((business) => business.id !== businessId);
     this.state.barbers = this.state.barbers.filter((barber) => barber.negocioId !== businessId);
     this.state.services = this.state.services.filter((service) => service.negocioId !== businessId);
@@ -4098,6 +4140,8 @@ class StudioStore {
     this.state.blockedDays = this.state.blockedDays.filter((blockedDay) => blockedDay.negocioId !== businessId);
     this.state.barberServices = this.state.barberServices.filter((relation) => relation.negocioId !== businessId);
     this.state = this.stateWithRuntimeScope(this.state);
+    this.invalidateBusinessBuckets();
+    invalidateDerivedBusinessCache();
     localStorage.setItem(APP_KEY, JSON.stringify(this.state));
     this.emit({ type: "SYNC", table: "businesses", reason: "business_delete_local" });
     return true;
