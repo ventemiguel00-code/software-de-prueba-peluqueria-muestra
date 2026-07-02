@@ -43,6 +43,9 @@ const DEFAULT_OPENING_TIME = "08:00";
 const DEFAULT_CLOSING_TIME = "20:00";
 const DEFAULT_SLOT_DURATION_MINUTES = 60;
 const ALLOWED_SLOT_DURATIONS = [30, 45, 60];
+// Historical identifiers for the canonical Vision Barber tenant.
+// They remain only for route, session, and record compatibility.
+// They must not be treated as a privileged runtime source.
 const DEFAULT_BUSINESS_ID = "business_principal";
 const DEFAULT_BUSINESS_SLUG = "barberia-principal";
 const PRODUCTION_BASE_URL = "https://software-de-prueba-peluqueria-muest.vercel.app";
@@ -857,11 +860,6 @@ function getBusinessBucket(businessId = currentBusinessId()) {
   }
   derivedBusinessCache.buckets.set(id, bucket);
   return bucket;
-}
-
-function principalBusinessFallbackBucket(baseState = null) {
-  const sourceState = baseState && typeof baseState === "object" ? baseState : defaultState();
-  return buildBusinessBucketFromState(sourceState, DEFAULT_BUSINESS_ID);
 }
 
 function isPastDate(date) {
@@ -4408,6 +4406,8 @@ const DEFAULT_BACKGROUND_VIDEO = {
   type: "video",
   src: "/assets/v2_watermarked-a5df2acc-b2b0-45a5-9132-e0006456c345.mp4",
 };
+// Legacy compatibility record kept only while the canonical tenant finishes
+// converging on admin_accounts like the rest of the SaaS tenants.
 const PRINCIPAL_ADMIN = {
   id: "admin_principal",
   name: "Administrador principal",
@@ -4447,6 +4447,8 @@ function resolveRoute(pathname = location.pathname) {
   if ((parts[0] === "barberia" || parts[0] === "negocio") && parts[1]) {
     return { view: "public", businessSlug: routeSlug(1), shell: "public" };
   }
+  // Legacy paths are preserved only so old links can be normalized before the
+  // app continues through the standard slug -> business_id -> Supabase flow.
   if (pathname === "/admin-vip") return { view: "admin", businessSlug: DEFAULT_BUSINESS_SLUG, shell: "internal" };
   if (pathname === "/gestion-equipo") return { view: "barber", businessSlug: DEFAULT_BUSINESS_SLUG, shell: "internal" };
   return { view: "public", businessSlug: DEFAULT_BUSINESS_SLUG, shell: "public" };
@@ -6008,6 +6010,8 @@ function viewPath(view) {
 }
 
 function resolveLegacyRedirectPath(pathname = location.pathname) {
+  // Canonicalize obsolete entrypoints so they no longer behave like runtime
+  // bootstrap routes; they now redirect into explicit tenant URLs.
   if (pathname === "/") return `/barberia/${DEFAULT_BUSINESS_SLUG}`;
   if (pathname === "/admin-vip") return `/panel/${DEFAULT_BUSINESS_SLUG}?modo=admin`;
   if (pathname === "/gestion-equipo") return `/panel/${DEFAULT_BUSINESS_SLUG}?modo=barbero`;
