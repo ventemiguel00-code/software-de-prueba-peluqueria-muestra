@@ -2778,6 +2778,18 @@ class StudioStore {
       const remoteBusinesses = (businessesResult.data || [])
         .map(mapRowToBusiness)
         .filter((business) => !isArchivedBusiness(business));
+      if (
+        route.view !== "super-admin" &&
+        route.businessSlug &&
+        route.businessSlug !== DEFAULT_BUSINESS_SLUG &&
+        !remoteBusinesses.length
+      ) {
+        this.clearPersistentBusinessIdentity(route.businessSlug);
+        this.businessResolutionBySlug.set(route.businessSlug, {
+          status: "not_found",
+          checkedAt: Date.now(),
+        });
+      }
       const mergedBusinesses =
         route.view === "super-admin"
           ? remoteBusinesses
