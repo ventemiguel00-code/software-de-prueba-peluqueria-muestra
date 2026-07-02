@@ -1227,6 +1227,17 @@ function cacheBusinessTheme(business) {
   }
 }
 
+function clearCachedThemeForSlug(slug = "") {
+  const cleanSlug = slugify(slug);
+  if (!cleanSlug) return;
+  themeMemoryCache.delete(cleanSlug);
+  try {
+    localStorage.removeItem(`${THEME_CACHE_PREFIX}${cleanSlug}`);
+  } catch {
+    // Cache visual solamente.
+  }
+}
+
 function cacheBusinessThemes(businesses = []) {
   businesses.forEach(cacheBusinessTheme);
 }
@@ -3565,13 +3576,24 @@ class StudioStore {
 
   saveBusiness(payload) {
     if (payload.id) {
+      const previous = this.businessById(payload.id);
+      const previousSlug = previous?.slug || "";
       this.state.businesses = this.state.businesses.map((business) =>
         business.id === payload.id ? normalizeBusiness({ ...business, ...payload, updatedAt: todayISO() }) : business
       );
-      this.setPersistentBusinessIdentity(payload.slug || this.businessById(payload.id)?.slug, mapBusinessToRow(this.businessById(payload.id)));
-      cacheBusinessTheme(this.businessById(payload.id));
-      this.persist({ type: "UPDATE", table: "businesses", record: this.businessById(payload.id) });
-      return this.businessById(payload.id);
+      const updated = this.businessById(payload.id);
+      const nextSlug = updated?.slug || payload.slug || "";
+      if (previousSlug && nextSlug && previousSlug !== nextSlug) {
+        this.businessResolutionBySlug.delete(String(previousSlug).trim().toLowerCase());
+        this.clearPersistentBusinessIdentity(previousSlug, payload.id);
+        clearCachedThemeForSlug(previousSlug);
+      }
+      this.setPersistentBusinessIdentity(nextSlug || previousSlug, mapBusinessToRow(updated));
+      cacheBusinessTheme(updated);
+      this.invalidateBusinessBuckets();
+      invalidateDerivedBusinessCache();
+      this.persist({ type: "UPDATE", table: "businesses", record: updated });
+      return updated;
     }
 
     const created = normalizeBusiness({
@@ -9840,7 +9862,9 @@ function bindEvents() {
       const businessId = event.currentTarget.dataset.businessId;
       const current = store.businessById(businessId);
       if (!current) return;
-      const slug = uniqueBusinessSlug(form.get("slug") || current.slug, current.id);
+      const nextName = String(form.get("name") || "").trim() || current.name;
+      const previousSlug = current.slug || "";
+      const slug = uniqueBusinessSlug(nextName, current.id);
       const theme = String(form.get("theme") || current.theme || DEFAULT_BUSINESS_THEME_KEY);
       const themePatch = businessThemePatch(theme);
       let logoUrl = current.logoUrl;
@@ -9864,7 +9888,7 @@ function bindEvents() {
       }
       const updated = store.saveBusiness({
         id: current.id,
-        name: String(form.get("name") || "").trim(),
+        name: nextName,
         slug,
         logoUrl,
         ...themePatch,
@@ -9883,9 +9907,16 @@ function bindEvents() {
           account.businessId === updated.id ? { ...account, businessSlug: updated.slug } : account
         )
       );
+      if (previousSlug && previousSlug !== updated.slug) {
+        clearScopedBusinessSession(ADMIN_SESSION_KEY, previousSlug);
+        clearScopedBusinessSession(BARBER_SESSION_KEY, previousSlug);
+      }
       app.superAdminPendingLogos = { ...app.superAdminPendingLogos, [current.id]: "" };
       app.superAdminPendingLogoFiles = { ...app.superAdminPendingLogoFiles, [current.id]: null };
-      app.superAdminMessage = `Negocio actualizado: ${updated.name}`;
+      app.superAdminMessage =
+        previousSlug && previousSlug !== updated.slug
+          ? `Negocio actualizado: ${updated.name}. Nueva URL: /barberia/${updated.slug}`
+          : `Negocio actualizado: ${updated.name}`;
       render();
     });
   });
