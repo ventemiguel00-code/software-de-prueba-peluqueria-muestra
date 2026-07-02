@@ -5432,6 +5432,16 @@ function currentDocumentTitle() {
     Boolean(app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG) &&
     ["idle", "pending"].includes(resolution.status);
   if (scopedBusinessPending) return "Cargando negocio...";
+  if (resolution.status === "not_found") {
+    if (app.view === "public" || app.view === "business-test") return "Negocio no encontrado | Reservas";
+    if (app.view === "admin" || app.view === "barber") return "Negocio no encontrado | Panel";
+    return "Negocio no encontrado";
+  }
+  if (resolution.status === "error") {
+    if (app.view === "public" || app.view === "business-test") return "Error al cargar negocio | Reservas";
+    if (app.view === "admin" || app.view === "barber") return "Error al cargar negocio | Panel";
+    return "Error al cargar negocio";
+  }
   const businessName = resolution.business?.name || currentBusiness()?.name || "Barberia";
   if (app.view === "public" || app.view === "business-test") return `${businessName} | Reservas`;
   if (app.view === "admin" || app.view === "barber") return `${businessName} | Panel`;
