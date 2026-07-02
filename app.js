@@ -6738,18 +6738,9 @@ function renderBusinessPublicTest() {
 function renderPublic() {
   const resolution = currentBusinessResolution();
   const requested = requestedBusiness();
-  let businessDataLoading =
-    (!requested && isCurrentBusinessLoading()) ||
-    Boolean(app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && ["idle", "pending"].includes(resolution.status));
-  if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && resolution.status === "not_found") {
-    return appShell(`
-      <section class="booking-surface">
-        <div class="section-title"><span>!</span><h2>Entorno no disponible</h2></div>
-        <p class="microcopy">Negocio no encontrado.</p>
-      </section>
-    `);
-  }
-  if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && resolution.status === "error") {
+  const missingRequestedBusiness =
+    Boolean(app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested);
+  if (missingRequestedBusiness && resolution.status === "error") {
     return appShell(`
       <section class="booking-surface">
         <div class="section-title"><span>!</span><h2>No fue posible cargar el negocio</h2></div>
@@ -6758,6 +6749,17 @@ function renderPublic() {
       </section>
     `);
   }
+  if (missingRequestedBusiness && !isCurrentBusinessLoading()) {
+    return appShell(`
+      <section class="booking-surface">
+        <div class="section-title"><span>!</span><h2>Entorno no disponible</h2></div>
+        <p class="microcopy">Negocio no encontrado.</p>
+      </section>
+    `);
+  }
+  let businessDataLoading =
+    (!requested && isCurrentBusinessLoading()) ||
+    Boolean(app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && ["idle", "pending"].includes(resolution.status));
   if (requested && requested.active === false) {
     return appShell(`
       <section class="booking-surface">
