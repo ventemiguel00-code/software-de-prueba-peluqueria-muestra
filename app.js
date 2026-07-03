@@ -5561,7 +5561,7 @@ function publicServicePriceMarkup(service, businessId = currentBusinessId()) {
 }
 
 function publicServiceBadgeLabel(businessId = currentBusinessId()) {
-  return publicPricesVisibleForBusiness(businessId) ? "$" : "S";
+  return "Servicio";
 }
 
 function businessWhatsappForBusiness(business = currentBusiness(), businessId = business?.id || currentBusinessId()) {
