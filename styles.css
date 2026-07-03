@@ -4392,17 +4392,17 @@ body[data-device="mobile"] *::after {
 
 .public-service-step-v2__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
 }
 
 .public-service-card-v2 {
   position: relative;
   display: grid;
-  gap: 28px;
-  min-height: 182px;
-  padding: 20px;
-  border-radius: 26px;
+  gap: 8px;
+  min-height: 88px;
+  padding: 11px 12px;
+  border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.022)),
@@ -4416,7 +4416,7 @@ body[data-device="mobile"] *::after {
 }
 
 .public-service-card-v2:hover {
-  transform: translateY(-3px);
+  transform: translateY(-1px);
   border-color: rgba(126, 216, 255, 0.24);
 }
 
@@ -4435,47 +4435,55 @@ body[data-device="mobile"] *::after {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .public-service-card-v2__icon {
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 11px;
   border: 1px solid rgba(126, 216, 255, 0.18);
   background: rgba(255, 255, 255, 0.04);
   color: var(--petrol-bright);
+}
+
+.public-service-card-v2__icon svg {
+  width: 14px;
+  height: 14px;
 }
 
 .public-service-card-v2__price {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 36px;
-  padding: 0 14px;
+  min-height: 26px;
+  padding: 0 9px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.06);
   color: rgba(239, 247, 252, 0.84);
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 .public-service-card-v2__body {
   display: flex;
-  align-items: flex-end;
-  min-height: 74px;
+  align-items: center;
+  min-height: 28px;
 }
 
 .public-service-card-v2__body strong {
   display: block;
   margin: 0;
-  font-size: clamp(22px, 2.5vw, 30px);
-  line-height: 1.02;
-  letter-spacing: -0.04em;
-  text-wrap: balance;
+  font-size: clamp(16px, 1.35vw, 19px);
+  line-height: 1.04;
+  letter-spacing: -0.03em;
+  text-wrap: pretty;
 }
 
 .public-booking-panel-v2 .secondary-action {
@@ -4571,12 +4579,12 @@ body[data-device="mobile"] *::after {
   }
 
   .public-service-card-v2 {
-    min-height: 160px;
-    padding: 18px;
+    min-height: 84px;
+    padding: 10px 11px;
   }
 
   .public-service-card-v2__body strong {
-    font-size: 24px;
+    font-size: 16px;
   }
 }
 
