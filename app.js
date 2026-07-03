@@ -44,8 +44,8 @@ const DEFAULT_CLOSING_TIME = "20:00";
 const DEFAULT_SLOT_DURATION_MINUTES = 60;
 const ALLOWED_SLOT_DURATIONS = [30, 45, 60];
 // Historical identifiers for the canonical Vision Barber tenant.
-// They remain only for route, session, and record compatibility.
-// They must not be treated as a privileged runtime source.
+// They are kept for compatibility with existing routes, records and sessions,
+// not as a signal that Vision Barber should behave like a privileged runtime.
 const DEFAULT_BUSINESS_ID = "business_principal";
 const DEFAULT_BUSINESS_SLUG = "barberia-principal";
 const PRODUCTION_BASE_URL = "https://software-de-prueba-peluqueria-muest.vercel.app";
@@ -889,6 +889,9 @@ function escapeHTML(value) {
 }
 
 function defaultBusiness() {
+  // Neutral business metadata for the canonical tenant route.
+  // This helper should only describe the tenant identity and theme shell.
+  // Operational resources must come from Supabase by business_id.
   const palette = BUSINESS_THEMES[DEFAULT_BUSINESS_THEME_KEY];
   return {
     id: DEFAULT_BUSINESS_ID,
@@ -992,6 +995,48 @@ function isPlaceholderBusiness(business = {}) {
   return Boolean(business.isPlaceholder) || String(business.id || "").startsWith("missing_");
 }
 
+function neutralBootstrapBusiness() {
+  return {
+    name: "Cargando negocio",
+    logoUrl: "",
+    theme: "loading-neutral",
+    primaryColor: LOADING_BUSINESS_PALETTE.primary,
+    secondaryColor: LOADING_BUSINESS_PALETTE.secondary,
+    backgroundColor: LOADING_BUSINESS_PALETTE.background,
+    cardColor: LOADING_BUSINESS_PALETTE.card,
+    textColor: LOADING_BUSINESS_PALETTE.text,
+    textSecondaryColor: LOADING_BUSINESS_PALETTE.textSecondary,
+    titleColor: LOADING_BUSINESS_PALETTE.title,
+    subtitleColor: LOADING_BUSINESS_PALETTE.subtitle,
+    buttonColor: LOADING_BUSINESS_PALETTE.button,
+    buttonHoverColor: LOADING_BUSINESS_PALETTE.buttonHover,
+    borderColor: LOADING_BUSINESS_PALETTE.border,
+    iconColor: LOADING_BUSINESS_PALETTE.icon,
+    badgeColor: LOADING_BUSINESS_PALETTE.badge,
+    active: true,
+    isBootstrap: true,
+  };
+}
+
+function neutralBootstrapState() {
+  return {
+    meta: {
+      dayKey: todayISO(),
+      weekKey: getWeekKey(),
+      selectedDate: todayISO(),
+      currentBusinessId: "",
+      businessSummaryById: {},
+      bootstrapReady: false,
+    },
+    businesses: [],
+    barbers: [],
+    appointments: [],
+    blockedDays: [],
+    services: [],
+    barberServices: [],
+  };
+}
+
 function normalizeThemeKey(themeKey = DEFAULT_BUSINESS_THEME_KEY) {
   const key = String(themeKey || DEFAULT_BUSINESS_THEME_KEY).trim();
   if (key === "loading-neutral") return key;
@@ -1051,9 +1096,10 @@ function isArchivedBusiness(business = {}) {
 }
 
 function normalizeTenantState(state = {}) {
-  const businesses = Array.isArray(state.businesses) ? state.businesses.filter(Boolean).map(normalizeBusiness) : [];
-  const currentBusinessId = state.meta?.currentBusinessId || businesses[0]?.id || "";
-  const fallbackBusinessId = businesses.length === 1 ? businesses[0]?.id || currentBusinessId || "" : "";
+  const business = normalizeBusiness((state.businesses || [defaultBusiness()])[0] || defaultBusiness());
+  const businesses = (state.businesses?.length ? state.businesses : [business]).map(normalizeBusiness);
+  const currentBusinessId = state.meta?.currentBusinessId || businesses[0]?.id || DEFAULT_BUSINESS_ID;
+  const fallbackBusinessId = businesses.length === 1 ? businesses[0]?.id || currentBusinessId || DEFAULT_BUSINESS_ID : "";
   const attachBusiness = (item) => {
     const resolvedBusinessId = item?.negocioId || item?.businessId || item?.business_id || fallbackBusinessId;
     return resolvedBusinessId ? { ...item, negocioId: resolvedBusinessId } : { ...item };
@@ -1221,17 +1267,6 @@ function cacheBusinessTheme(business) {
     );
   } catch {
     // Cache visual solamente; si falla, la app sigue usando Supabase/local state.
-  }
-}
-
-function clearCachedThemeForSlug(slug = "") {
-  const cleanSlug = slugify(slug);
-  if (!cleanSlug) return;
-  themeMemoryCache.delete(cleanSlug);
-  try {
-    localStorage.removeItem(`${THEME_CACHE_PREFIX}${cleanSlug}`);
-  } catch {
-    // Cache visual solamente.
   }
 }
 
@@ -1408,15 +1443,116 @@ const defaultState = () => ({
     dayKey: todayISO(),
     weekKey: getWeekKey(),
     selectedDate: todayISO(),
-    currentBusinessId: "",
+    currentBusinessId: DEFAULT_BUSINESS_ID,
     businessSummaryById: {},
   },
-  businesses: [],
-  barbers: [],
-  appointments: [],
+  businesses: [defaultBusiness()],
+  barbers: [
+    {
+      id: "barber_mateo",
+      negocioId: DEFAULT_BUSINESS_ID,
+      name: "Mateo Rivas",
+      user: "mateo",
+      password: "studio2026",
+      whatsapp: "3004448899",
+      active: true,
+      photo: "",
+      gradient: avatarGradients[0],
+      specialty: "Cortes urbanos",
+    },
+    {
+      id: "barber_dante",
+      negocioId: DEFAULT_BUSINESS_ID,
+      name: "Dante Molina",
+      user: "dante",
+      password: "studio2026",
+      whatsapp: "3137771900",
+      active: true,
+      photo: "",
+      gradient: avatarGradients[1],
+      specialty: "Barba y perfilado",
+    },
+    {
+      id: "barber_elias",
+      negocioId: DEFAULT_BUSINESS_ID,
+      name: "Elias Torres",
+      user: "elias",
+      password: "studio2026",
+      whatsapp: "3015552000",
+      active: true,
+      photo: "",
+      gradient: avatarGradients[2],
+      specialty: "Fade premium",
+    },
+    {
+      id: "barber_simon",
+      negocioId: DEFAULT_BUSINESS_ID,
+      name: "Simon Vera",
+      user: "simon",
+      password: "studio2026",
+      whatsapp: "",
+      active: false,
+      photo: "",
+      gradient: avatarGradients[3],
+      specialty: "Textura y tijera",
+    },
+  ],
+  appointments: [
+    {
+      id: "apt_seed_1",
+      negocioId: DEFAULT_BUSINESS_ID,
+      barberId: "barber_mateo",
+      date: todayISO(),
+      time: "10:00",
+      status: "reserved",
+      clientName: "Laura Pena",
+      whatsapp: "300 444 8899",
+      source: "public",
+      weekKey: getWeekKey(),
+    },
+    {
+      id: "apt_seed_2",
+      negocioId: DEFAULT_BUSINESS_ID,
+      barberId: "barber_dante",
+      date: todayISO(),
+      time: "15:20",
+      status: "fixed",
+      clientName: "Andres Silva",
+      whatsapp: "313-777-1900",
+      source: "admin",
+      weekKey: "permanent",
+    },
+    {
+      id: "apt_seed_3",
+      negocioId: DEFAULT_BUSINESS_ID,
+      barberId: "barber_elias",
+      date: todayISO(),
+      time: "12:00",
+      status: "blocked",
+      clientName: "Bloqueo operativo",
+      whatsapp: "",
+      source: "admin",
+      weekKey: "permanent",
+    },
+  ],
   blockedDays: [],
-  services: [],
-  barberServices: [],
+  services: [
+    { id: "service_corte_clasico", negocioId: DEFAULT_BUSINESS_ID, name: "Corte clasico", value: 20000, adminPercentage: 50, barberPercentage: 50, active: true },
+    { id: "service_corte_barba", negocioId: DEFAULT_BUSINESS_ID, name: "Corte + barba", value: 30000, adminPercentage: 50, barberPercentage: 50, active: true },
+    { id: "service_barba", negocioId: DEFAULT_BUSINESS_ID, name: "Barba", value: 18000, adminPercentage: 50, barberPercentage: 50, active: true },
+    { id: "service_cejas", negocioId: DEFAULT_BUSINESS_ID, name: "Cejas", value: 12000, adminPercentage: 50, barberPercentage: 50, active: true },
+    { id: "service_diseno", negocioId: DEFAULT_BUSINESS_ID, name: "Diseno", value: 15000, adminPercentage: 50, barberPercentage: 50, active: true },
+  ],
+  barberServices: [
+    { id: "barber_service_seed_1", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_mateo", serviceId: "service_corte_clasico", active: true },
+    { id: "barber_service_seed_2", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_mateo", serviceId: "service_corte_barba", active: true },
+    { id: "barber_service_seed_3", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_mateo", serviceId: "service_diseno", active: true },
+    { id: "barber_service_seed_4", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_dante", serviceId: "service_corte_barba", active: true },
+    { id: "barber_service_seed_5", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_dante", serviceId: "service_barba", active: true },
+    { id: "barber_service_seed_6", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_elias", serviceId: "service_corte_clasico", active: true },
+    { id: "barber_service_seed_7", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_elias", serviceId: "service_diseno", active: true },
+    { id: "barber_service_seed_8", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_simon", serviceId: "service_cejas", active: true },
+  ],
 });
 
 function normalizeSignaturePart(value) {
@@ -1786,9 +1922,10 @@ class StudioStore {
     };
     this.applyingRemote = false;
     this.dailyResetPending = false;
+    this.state = neutralBootstrapState();
     this.state = this.load();
     if (this.shouldIgnoreCrossScopeLocalSync(this.state)) {
-      this.state = normalizeTenantState(defaultState());
+      this.state = neutralBootstrapState();
     }
     this.applyDemoMaintenance();
 
@@ -1835,11 +1972,11 @@ class StudioStore {
 
   loadLocalState() {
     const raw = localStorage.getItem(APP_KEY);
-    if (!raw) return normalizeTenantState(defaultState());
+    if (!raw) return neutralBootstrapState();
     try {
       return normalizeTenantState(JSON.parse(raw));
     } catch {
-      return normalizeTenantState(defaultState());
+      return neutralBootstrapState();
     }
   }
 
@@ -1929,7 +2066,7 @@ class StudioStore {
     return (
       this.businessBySlug(route.businessSlug)?.id ||
       this.businessResolution(route.businessSlug)?.business?.id ||
-      (route.businessSlug === DEFAULT_BUSINESS_SLUG ? this.businessById(DEFAULT_BUSINESS_ID)?.id || null : null)
+      null
     );
   }
 
@@ -2439,7 +2576,7 @@ class StudioStore {
     }
     const cachedBusiness =
       this.businessBySlug(normalizedSlug) ||
-      (normalizedSlug === DEFAULT_BUSINESS_SLUG ? this.businessById(DEFAULT_BUSINESS_ID) || null : null);
+      null;
     if (cachedBusiness) {
       const result = { status: "success", business: cachedBusiness, checkedAt: Date.now() };
       this.businessResolutionBySlug.set(normalizedSlug, result);
@@ -2547,10 +2684,7 @@ class StudioStore {
   }
 
   async bootstrapRemote() {
-    if (this.dailyResetPending) {
-      await this.persistRemote({ type: "RESET", table: "demo", reason: "daily_reset" });
-      this.dailyResetPending = false;
-    }
+    this.dailyResetPending = false;
     await this.syncFromRemote({ quiet: true, origin: "bootstrapRemote", component: "StudioStore", hook: "bootstrapRemote" });
     this.emit({ type: "SYNC", table: "remote", reason: "remote_bootstrap" });
     this.subscribeRemote();
@@ -2600,7 +2734,6 @@ class StudioStore {
     let activeScopedBusinessId = "";
 
     try {
-      const localState = this.loadLocalState();
       const route = resolveRoute(location.pathname);
       activeRoute = route;
       const queryScope = `${route.view}:${route.businessSlug || "global"}`;
@@ -2674,33 +2807,14 @@ class StudioStore {
       const remoteBusinesses = (businessesResult.data || [])
         .map(mapRowToBusiness)
         .filter((business) => !isArchivedBusiness(business));
-      if (
-        route.view !== "super-admin" &&
-        route.businessSlug &&
-        route.businessSlug !== DEFAULT_BUSINESS_SLUG &&
-        !remoteBusinesses.length
-      ) {
-        this.clearPersistentBusinessIdentity(route.businessSlug);
-        this.businessResolutionBySlug.set(route.businessSlug, {
-          status: "not_found",
-          checkedAt: Date.now(),
-        });
-      }
-      const mergedBusinesses =
-        route.view === "super-admin"
-          ? remoteBusinesses
-          : mergeBusinessesById(
-              (this.state.businesses || []).filter((business) => business.slug === route.businessSlug && !deletedBusinessIds.has(business.id) && !isPlaceholderBusiness(business)),
-              (localState.businesses || []).filter((business) => business.slug === route.businessSlug && !deletedBusinessIds.has(business.id) && !isPlaceholderBusiness(business)),
-              remoteBusinesses
-            );
+      const mergedBusinesses = remoteBusinesses;
 
       const scopedBusiness =
         route.view === "super-admin"
           ? null
           : mergedBusinesses.find((business) => business.slug === route.businessSlug) ||
             this.businessResolution(route.businessSlug)?.business ||
-            null;
+            placeholderBusinessForSlug(route.businessSlug);
       const scopedBusinessId =
         route.view === "super-admin"
           ? null
@@ -2810,12 +2924,12 @@ class StudioStore {
             remoteView: route.view,
             remoteBusinessSlug: route.businessSlug || DEFAULT_BUSINESS_SLUG,
           },
-          businesses: themedBusinesses.length ? themedBusinesses : defaultState().businesses,
-          barbers: localState.barbers || this.state.barbers || [],
-          appointments: localState.appointments || this.state.appointments || [],
-          blockedDays: localState.blockedDays || this.state.blockedDays || [],
-          services: localState.services || this.state.services || [],
-          barberServices: localState.barberServices || this.state.barberServices || [],
+          businesses: themedBusinesses.length ? themedBusinesses : neutralBootstrapState().businesses,
+          barbers: this.state.barbers || [],
+          appointments: this.state.appointments || [],
+          blockedDays: this.state.blockedDays || [],
+          services: this.state.services || [],
+          barberServices: this.state.barberServices || [],
         };
 
         await this.syncAdminAccountsFromRemote(null, nextState.businesses);
@@ -3008,7 +3122,7 @@ class StudioStore {
         businesses: scopedThemedBusinesses.length
           ? scopedThemedBusinesses
           : isPlaceholderBusiness(scopedBusiness)
-            ? (this.state.businesses || []).filter((business) => !isPlaceholderBusiness(business))
+            ? []
             : [scopedBusiness],
         barbers: barbersData,
         appointments: (appointmentsResult.data || [])
@@ -3083,9 +3197,45 @@ class StudioStore {
     }
   }
 
-  async seedRemoteFromLocal() {
-    console.info("seedRemoteFromLocal disabled in SaaS runtime");
-    return false;
+  async seedRemoteFromLocal({ manual = false, reason = "manual-demo" } = {}) {
+    if (!this.supabase) return;
+    const manualSeedEnabled =
+      manual === true &&
+      typeof window !== "undefined" &&
+      window.__ENABLE_LOCAL_DEMO_SEED__ === true;
+    if (!manualSeedEnabled) {
+      console.warn("Local seed to Supabase skipped", {
+        reason,
+        manualRequested: manual === true,
+        demoFlagEnabled:
+          typeof window !== "undefined" && window.__ENABLE_LOCAL_DEMO_SEED__ === true,
+      });
+      return { skipped: true, reason: "manual_seed_disabled" };
+    }
+
+    const seedState = this.loadLocalState();
+    const [businessesInsert, barbersInsert, appointmentsInsert, blockedDaysInsert, servicesInsert, barberServicesInsert] = await Promise.all([
+      this.supabase.from("businesses").upsert(seedState.businesses.map(mapBusinessToRow), { onConflict: "id" }),
+      this.supabase.from("barbers").upsert(seedState.barbers.map(mapBarberToRow), { onConflict: "id" }),
+      this.supabase.from("appointments").upsert(seedState.appointments.map(mapAppointmentToRow), { onConflict: "id" }),
+      this.supabase.from("blocked_days").upsert(seedState.blockedDays.map(mapBlockedDayToRow), { onConflict: "id" }),
+      this.supabase.from("services").upsert(seedState.services.map(mapServiceToRow), { onConflict: "id" }),
+      this.supabase.from("barber_services").upsert(seedState.barberServices.map(mapBarberServiceToRow), { onConflict: "id" }),
+    ]);
+
+    if (businessesInsert.error) console.warn("Supabase businesses seed skipped", businessesInsert.error);
+    if (barbersInsert.error) throw barbersInsert.error;
+    if (appointmentsInsert.error) throw appointmentsInsert.error;
+    if (blockedDaysInsert.error) throw blockedDaysInsert.error;
+    if (servicesInsert.error) console.warn("Supabase services seed skipped", servicesInsert.error);
+    if (barberServicesInsert.error) console.warn("Supabase barber services seed skipped", barberServicesInsert.error);
+
+    await this.syncFromRemote({
+      origin: `seedSupabase:after_seed:${reason}`,
+      component: "StudioStore",
+      hook: "seedSupabase",
+    });
+    return { skipped: false, reason };
   }
 
   subscribeRemote() {
@@ -3230,39 +3380,12 @@ class StudioStore {
   async persistRemote(event) {
     if (!this.supabase) return;
     if (event.reason === "daily_reset") {
-      const appointmentsReset = await this.supabase
-        .from("appointments")
-        .delete()
-        .eq("business_id", DEFAULT_BUSINESS_ID);
-      if (appointmentsReset.error) throw appointmentsReset.error;
-
-      const blockedDaysReset = await this.supabase
-        .from("blocked_days")
-        .delete()
-        .eq("business_id", DEFAULT_BUSINESS_ID);
-      if (blockedDaysReset.error) throw blockedDaysReset.error;
-
-      const seedAppointments = this.state.appointments
-        .filter((appointment) => appointment.negocioId === DEFAULT_BUSINESS_ID)
-        .map(mapAppointmentToRow);
-      if (seedAppointments.length) {
-        const appointmentsSeed = await this.supabase
-          .from("appointments")
-          .upsert(seedAppointments, { onConflict: "id" });
-        if (appointmentsSeed.error) throw appointmentsSeed.error;
-      }
+      console.warn("daily_reset ignored: exclusive maintenance for business_principal is disabled.");
       return;
     }
 
     if (event.reason === "weekly_cleanup") {
-      const currentWeek = getWeekKey();
-      const { error } = await this.supabase
-        .from("appointments")
-        .delete()
-        .eq("business_id", DEFAULT_BUSINESS_ID)
-        .eq("status", "reserved")
-        .neq("week_key", currentWeek);
-      if (error) throw error;
+      console.warn("weekly_cleanup ignored: exclusive maintenance for business_principal is disabled.");
       return;
     }
 
@@ -3446,24 +3569,13 @@ class StudioStore {
 
   saveBusiness(payload) {
     if (payload.id) {
-      const previous = this.businessById(payload.id);
-      const previousSlug = previous?.slug || "";
       this.state.businesses = this.state.businesses.map((business) =>
         business.id === payload.id ? normalizeBusiness({ ...business, ...payload, updatedAt: todayISO() }) : business
       );
-      const updated = this.businessById(payload.id);
-      const nextSlug = updated?.slug || payload.slug || "";
-      if (previousSlug && nextSlug && previousSlug !== nextSlug) {
-        this.businessResolutionBySlug.delete(String(previousSlug).trim().toLowerCase());
-        this.clearPersistentBusinessIdentity(previousSlug, payload.id);
-        clearCachedThemeForSlug(previousSlug);
-      }
-      this.setPersistentBusinessIdentity(nextSlug || previousSlug, mapBusinessToRow(updated));
-      cacheBusinessTheme(updated);
-      this.invalidateBusinessBuckets();
-      invalidateDerivedBusinessCache();
-      this.persist({ type: "UPDATE", table: "businesses", record: updated });
-      return updated;
+      this.setPersistentBusinessIdentity(payload.slug || this.businessById(payload.id)?.slug, mapBusinessToRow(this.businessById(payload.id)));
+      cacheBusinessTheme(this.businessById(payload.id));
+      this.persist({ type: "UPDATE", table: "businesses", record: this.businessById(payload.id) });
+      return this.businessById(payload.id);
     }
 
     const created = normalizeBusiness({
@@ -3552,26 +3664,7 @@ class StudioStore {
       throw error;
     }
 
-    let remoteAccounts = (data || []).map((row) => mapRowToAdminAccount(row, businesses));
-    const shouldEnsurePrincipalAdmin = !businessId || businessId === DEFAULT_BUSINESS_ID;
-    const hasPrincipalAdmin = remoteAccounts.some(
-      (account) => account.businessId === DEFAULT_BUSINESS_ID && String(account.user || "").trim().toLowerCase() === PRINCIPAL_ADMIN.user
-    );
-    if (shouldEnsurePrincipalAdmin && !hasPrincipalAdmin) {
-      const principalBusiness = businesses.find((item) => item.id === DEFAULT_BUSINESS_ID) || this.businessById(DEFAULT_BUSINESS_ID) || null;
-      const ensuredPrincipalAdmin = {
-        ...PRINCIPAL_ADMIN,
-        businessId: DEFAULT_BUSINESS_ID,
-        businessSlug: principalBusiness?.slug || DEFAULT_BUSINESS_SLUG,
-        createdAt: todayISO(),
-      };
-      try {
-        await this.upsertAdminAccountRemote(ensuredPrincipalAdmin);
-        remoteAccounts = [...remoteAccounts, upsertLocalAdminAccount(ensuredPrincipalAdmin)].filter(Boolean);
-      } catch (error) {
-        console.warn("Principal admin sync safeguard skipped", error);
-      }
-    }
+    const remoteAccounts = (data || []).map((row) => mapRowToAdminAccount(row, businesses));
     remoteAccounts.forEach((account) => {
       if (account.password) {
         setVisibleAdminPassword(account.id, {
@@ -4406,18 +4499,9 @@ const DEFAULT_BACKGROUND_VIDEO = {
   type: "video",
   src: "/assets/v2_watermarked-a5df2acc-b2b0-45a5-9132-e0006456c345.mp4",
 };
-// Legacy compatibility record kept only while the canonical tenant finishes
-// converging on admin_accounts like the rest of the SaaS tenants.
-const PRINCIPAL_ADMIN = {
-  id: "admin_principal",
-  name: "Administrador principal",
-  user: "admin",
-  password: "",
-  passwordHash: "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
-  role: "administrador_principal",
-  businessId: DEFAULT_BUSINESS_ID,
-  active: true,
-};
+// Legacy role label kept only to preserve compatibility in old admin records
+// and UI guards while Vision Barber continues behaving as a normal tenant.
+const PRINCIPAL_ADMIN_ROLE = "administrador_principal";
 const remoteSessionMonitorState = {
   super_admin: { validating: false, lastValidatedAt: 0, lastHeartbeatAt: 0, lastToken: "" },
   admin: { validating: false, lastValidatedAt: 0, lastHeartbeatAt: 0, lastToken: "" },
@@ -4447,11 +4531,31 @@ function resolveRoute(pathname = location.pathname) {
   if ((parts[0] === "barberia" || parts[0] === "negocio") && parts[1]) {
     return { view: "public", businessSlug: routeSlug(1), shell: "public" };
   }
-  // Legacy paths are preserved only so old links can be normalized before the
-  // app continues through the standard slug -> business_id -> Supabase flow.
+  // Legacy routes remain here only so the router understands old links before
+  // canonical redirection normalizes them to explicit /panel/:slug paths.
   if (pathname === "/admin-vip") return { view: "admin", businessSlug: DEFAULT_BUSINESS_SLUG, shell: "internal" };
   if (pathname === "/gestion-equipo") return { view: "barber", businessSlug: DEFAULT_BUSINESS_SLUG, shell: "internal" };
   return { view: "public", businessSlug: DEFAULT_BUSINESS_SLUG, shell: "public" };
+}
+
+function canonicalLegacyPath(pathname = location.pathname, search = location.search) {
+  const normalizedPath = String(pathname || "/").replace(/\/+$/, "") || "/";
+  // Legacy entrypoints are redirected to explicit tenant URLs so they no
+  // longer act as runtime bootstrap paths by themselves.
+  if (normalizedPath === "/") return `/barberia/${DEFAULT_BUSINESS_SLUG}`;
+  if (normalizedPath === "/admin-vip") return `/panel/${DEFAULT_BUSINESS_SLUG}?modo=admin`;
+  if (normalizedPath === "/gestion-equipo") return `/panel/${DEFAULT_BUSINESS_SLUG}?modo=barbero`;
+  return "";
+}
+
+function ensureCanonicalLegacyPath() {
+  if (typeof history === "undefined" || typeof location === "undefined") return false;
+  const canonicalPath = canonicalLegacyPath(location.pathname, location.search);
+  if (!canonicalPath) return false;
+  const currentPath = `${location.pathname}${location.search || ""}`;
+  if (currentPath === canonicalPath) return false;
+  history.replaceState(null, "", canonicalPath);
+  return true;
 }
 
 function loadAdminAccounts() {
@@ -4462,12 +4566,11 @@ function loadAdminAccounts() {
   } catch {
     accounts = [];
   }
-  return Array.isArray(accounts)
-    ? accounts.map((account) => ({
-        ...account,
-        password: "",
-      }))
-    : [];
+
+  return accounts.map((account) => ({
+    ...account,
+    password: "",
+  }));
 }
 
 function adminAccountsForBusiness(businessId = currentBusinessId()) {
@@ -4475,10 +4578,11 @@ function adminAccountsForBusiness(businessId = currentBusinessId()) {
 }
 
 function saveAdminAccounts(accounts) {
-  const normalized = (Array.isArray(accounts) ? accounts : []).map((account) => ({
-    ...account,
-    password: "",
-  }));
+  const normalized = accounts
+    .map((account) => ({
+      ...account,
+      password: "",
+    }));
   localStorage.setItem(ADMIN_ACCOUNTS_KEY, JSON.stringify(normalized));
 }
 
@@ -5212,13 +5316,18 @@ function currentBusiness() {
   const activeApp = app && typeof app === "object" ? app : null;
   const activeStore = runtimeStore();
   if (activeApp?.view === "super-admin") {
-    return defaultBusiness();
+    return neutralBootstrapBusiness();
   }
   const slug = String(activeApp?.currentBusinessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
   const resolution = activeStore?.businessResolution(slug) || null;
   const persistedBusinessRow = activeStore?.getPersistentBusinessIdentity?.(slug) || null;
   const persistedBusiness = persistedBusinessRow ? mapRowToBusiness(persistedBusinessRow) : null;
-  return requestedBusiness() || resolution?.business || persistedBusiness || placeholderBusinessForSlug(slug);
+  return (
+    requestedBusiness() ||
+    resolution?.business ||
+    persistedBusiness ||
+    placeholderBusinessForSlug(slug)
+  );
 }
 
 function requestedBusiness() {
@@ -5232,28 +5341,18 @@ function requestedBusiness() {
 function currentBusinessResolution() {
   const activeApp = app && typeof app === "object" ? app : null;
   if (activeApp?.view === "super-admin") {
-    return { status: "success", business: defaultBusiness() };
+    return { status: "idle", business: null };
   }
   const slug = String(activeApp?.currentBusinessSlug || DEFAULT_BUSINESS_SLUG).trim().toLowerCase() || DEFAULT_BUSINESS_SLUG;
   const activeStore = runtimeStore();
   if (!activeStore) {
-    return { status: "idle" };
+    return { status: "idle", business: null };
   }
   const business = requestedBusiness();
   if (business) return { status: "success", business };
   const resolved = activeStore.businessResolution(slug);
   if (resolved) return resolved;
-  const waitedForRemoteResolution =
-    activeStore.remoteReady ||
-    (activeStore.remoteAttemptedAt && Date.now() - activeStore.remoteAttemptedAt > 1500);
-  if (
-    waitedForRemoteResolution &&
-    !activeStore.getPersistentBusinessIdentity?.(slug) &&
-    !activeStore.businessBySlug?.(slug)
-  ) {
-    return { status: "not_found", business: null };
-  }
-  return { status: "idle" };
+  return { status: "idle", business: null };
 }
 
 function ensureCurrentBusinessResolution() {
@@ -5273,12 +5372,15 @@ function currentBusinessId() {
 }
 
 function currentWritableBusinessId() {
+  const activeStore = runtimeStore();
   const directBusiness = requestedBusiness();
   if (directBusiness?.id && !isPlaceholderBusiness(directBusiness)) return directBusiness.id;
   const resolvedBusiness = currentBusinessResolution().business;
   if (resolvedBusiness?.id && !isPlaceholderBusiness(resolvedBusiness)) return resolvedBusiness.id;
   const route = resolveRoute(location.pathname);
-  const activeStore = runtimeStore();
+  const persistedBusinessRow = activeStore?.getPersistentBusinessIdentity?.(route.businessSlug || "") || null;
+  const persistedBusiness = persistedBusinessRow ? mapRowToBusiness(persistedBusinessRow) : null;
+  if (persistedBusiness?.id && !isPlaceholderBusiness(persistedBusiness)) return persistedBusiness.id;
   const cachedBusiness = activeStore?.businessBySlug(route.businessSlug || "");
   if (cachedBusiness?.id && !isPlaceholderBusiness(cachedBusiness)) return cachedBusiness.id;
   return null;
@@ -5291,16 +5393,6 @@ function currentDocumentTitle() {
     Boolean(app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG) &&
     ["idle", "pending"].includes(resolution.status);
   if (scopedBusinessPending) return "Cargando negocio...";
-  if (resolution.status === "not_found") {
-    if (app.view === "public" || app.view === "business-test") return "Negocio no encontrado | Reservas";
-    if (app.view === "admin" || app.view === "barber") return "Negocio no encontrado | Panel";
-    return "Negocio no encontrado";
-  }
-  if (resolution.status === "error") {
-    if (app.view === "public" || app.view === "business-test") return "Error al cargar negocio | Reservas";
-    if (app.view === "admin" || app.view === "barber") return "Error al cargar negocio | Panel";
-    return "Error al cargar negocio";
-  }
   const businessName = resolution.business?.name || currentBusiness()?.name || "Barberia";
   if (app.view === "public" || app.view === "business-test") return `${businessName} | Reservas`;
   if (app.view === "admin" || app.view === "barber") return `${businessName} | Panel`;
@@ -5310,7 +5402,7 @@ function currentDocumentTitle() {
 function expectedScopeForCurrentRoute() {
   const route = resolveRoute(location.pathname);
   if (route.view === "super-admin") return "super-admin:global";
-  const business = requestedBusiness() || store.businessResolution(route.businessSlug)?.business || (route.businessSlug === DEFAULT_BUSINESS_SLUG ? store.businessById(DEFAULT_BUSINESS_ID) || null : null);
+  const business = requestedBusiness() || store.businessResolution(route.businessSlug)?.business || null;
   const scopeView = route.shell === "internal" ? "internal" : route.view;
   return `${scopeView}:${business?.id || "global"}:${route.businessSlug || DEFAULT_BUSINESS_SLUG}`;
 }
@@ -5470,6 +5562,61 @@ function publicServicePriceMarkup(service, businessId = currentBusinessId()) {
 
 function publicServiceBadgeLabel(businessId = currentBusinessId()) {
   return publicPricesVisibleForBusiness(businessId) ? "$" : "S";
+}
+
+function businessWhatsappForBusiness(business = currentBusiness(), businessId = business?.id || currentBusinessId()) {
+  const settings = store.businessSettingsForBusiness(businessId);
+  const meta = settings?.meta || {};
+  return moneylessPhone(
+    business?.whatsapp ||
+      business?.phone ||
+      meta.whatsapp ||
+      meta.phone ||
+      meta.contactWhatsapp ||
+      meta.contactPhone ||
+      ""
+  );
+}
+
+function renderBookingConfirmationDialog() {
+  if (!app.bookingConfirmation) return "";
+  const businessPhone = businessWhatsappForBusiness();
+  return `<dialog id="booking-confirm-dialog">
+    <div class="modal-card confirm-card booking-confirm-card booking-confirm-card-v2">
+      <div class="booking-confirm-card-v2__hero">
+        <div class="booking-confirm-card-v2__icon" aria-hidden="true">✓</div>
+        <div class="booking-confirm-card-v2__copy">
+          <h3>Reserva creada</h3>
+          <p>Tu cita quedo registrada correctamente. Conserva este resumen para llegar con todo listo.</p>
+        </div>
+      </div>
+      <div class="booking-confirm-card-v2__summary">
+        <div class="booking-confirm-card-v2__row">
+          <span>Barbero</span><strong>${escapeHTML(app.bookingConfirmation.barberName)}</strong>
+        </div>
+        <div class="booking-confirm-card-v2__row">
+          <span>Servicio</span><strong>${escapeHTML(app.bookingConfirmation.serviceName)}</strong>
+        </div>
+        <div class="booking-confirm-card-v2__row">
+          <span>Fecha</span><strong>${escapeHTML(app.bookingConfirmation.date)}</strong>
+        </div>
+        <div class="booking-confirm-card-v2__row">
+          <span>Hora</span><strong>${escapeHTML(app.bookingConfirmation.range)}</strong>
+        </div>
+        <div class="booking-confirm-card-v2__row">
+          <span>WhatsApp</span><strong>${escapeHTML(app.bookingConfirmation.whatsapp)}</strong>
+        </div>
+      </div>
+      <div class="booking-confirm-card-v2__tips">
+        <span class="booking-confirm-card-v2__tips-title">Recomendaciones</span>
+        <p>Llega unos minutos antes, mantente atento al WhatsApp y usa este mismo chat si necesitas reprogramar.</p>
+      </div>
+      <div class="button-row booking-confirm-card-v2__actions">
+        ${businessPhone ? `<a class="secondary-action booking-confirm-card-v2__whatsapp" href="https://wa.me/${businessPhone}" target="_blank" rel="noreferrer">Abrir WhatsApp</a>` : ""}
+        <button class="primary-action booking-confirm-card-v2__close" type="button" data-close-booking-confirm>Entendido</button>
+      </div>
+    </div>
+  </dialog>`;
 }
 
 function isReservableService(service = {}) {
@@ -5759,7 +5906,7 @@ async function resolveLoginBarber(backendBarber, user, password, businessId = cu
 }
 
 function isPrincipalAdmin() {
-  return app.adminSession?.role === PRINCIPAL_ADMIN.role;
+  return app.adminSession?.role === PRINCIPAL_ADMIN_ROLE;
 }
 
 function loadBackgroundMediaMap() {
@@ -5816,6 +5963,7 @@ function loadSoundPreference() {
   return localStorage.getItem(SOUND_PREF_KEY) === "true";
 }
 
+ensureCanonicalLegacyPath();
 const initialRoute = resolveRoute(location.pathname);
 
 app = {
@@ -5858,7 +6006,7 @@ app = {
   adminBarberMessage: "",
   adminServiceMessage: "",
   adminScheduleMessage: "",
-  backgroundMedia: loadBackgroundMedia(DEFAULT_BUSINESS_ID),
+  backgroundMedia: null,
   backgroundMessage: "",
   pendingBackgroundVideo: null,
   soundEnabled: loadSoundPreference(),
@@ -6009,15 +6157,6 @@ function viewPath(view) {
   return `/barberia/${slug}`;
 }
 
-function resolveLegacyRedirectPath(pathname = location.pathname) {
-  // Canonicalize obsolete entrypoints so they no longer behave like runtime
-  // bootstrap routes; they now redirect into explicit tenant URLs.
-  if (pathname === "/") return `/barberia/${DEFAULT_BUSINESS_SLUG}`;
-  if (pathname === "/admin-vip") return `/panel/${DEFAULT_BUSINESS_SLUG}?modo=admin`;
-  if (pathname === "/gestion-equipo") return `/panel/${DEFAULT_BUSINESS_SLUG}?modo=barbero`;
-  return "";
-}
-
 function routeShellType() {
   if (app.view === "super-admin") return "super-admin";
   return app.route?.shell || (app.view === "admin" || app.view === "barber" ? "internal" : "public");
@@ -6091,7 +6230,7 @@ function renderLayoutShell() {
       </div>
     `;
   }
-  const business = currentBusiness();
+  const business = currentBusiness() || neutralBootstrapBusiness();
   const shellType = routeShellType();
   const tabs = shellType === "internal"
     ? [
@@ -6102,8 +6241,8 @@ function renderLayoutShell() {
   return `
     <header class="topbar">
       <button class="brand" data-public-link aria-label="Ir a agenda publica">
-        ${businessLogoMarkup(business || defaultBusiness())}
-        <span><strong>${escapeHTML(business?.name || "Vision")}</strong></span>
+        ${businessLogoMarkup(business)}
+        <span><strong>${escapeHTML(business?.name || "Cargando negocio")}</strong></span>
       </button>
       ${tabs.length ? `<nav class="nav-tabs internal-nav-tabs" aria-label="Navegacion interna">
         ${tabs.map(([id, label]) => `<button class="${app.view === id ? "active" : ""}" data-view="${id}">${label}</button>`).join("")}
@@ -6118,7 +6257,7 @@ function renderLayoutShell() {
 }
 
 function businessThemeStyle(business = currentBusiness()) {
-  const colors = visualColorsForBusiness(business || defaultBusiness());
+  const colors = visualColorsForBusiness(business || neutralBootstrapBusiness());
   return [
     `--color-primary:${colors.primary}`,
     `--color-secondary:${colors.secondary}`,
@@ -6150,7 +6289,7 @@ function businessThemeStyle(business = currentBusiness()) {
 }
 
 function businessLogoMarkup(business = currentBusiness()) {
-  const safeBusiness = business || defaultBusiness();
+  const safeBusiness = business || neutralBootstrapBusiness();
   return safeBusiness?.logoUrl
     ? `<span class="brand-mark business-logo-mark has-logo"><img src="${escapeHTML(safeBusiness.logoUrl)}" alt="Logo ${escapeHTML(safeBusiness.name || "barberia")}" loading="eager" decoding="async" fetchpriority="high" /></span>`
     : `<span class="brand-mark business-logo-mark empty-logo">${escapeHTML((safeBusiness?.name || "B").slice(0, 1).toUpperCase())}</span>`;
@@ -6158,10 +6297,10 @@ function businessLogoMarkup(business = currentBusiness()) {
 
 function refreshPersistentShellBrand() {
   if (app.view === "super-admin") {
-    applyThemeColorsToRoot(visualColorsForBusiness(defaultBusiness()));
+    applyThemeColorsToRoot(visualColorsForBusiness(neutralBootstrapBusiness()));
     return;
   }
-  const business = currentBusiness();
+  const business = currentBusiness() || neutralBootstrapBusiness();
   const colors = visualColorsForBusiness(business);
   applyThemeColorsToRoot(colors);
   const brand = document.querySelector(".brand");
@@ -6186,6 +6325,19 @@ function renderWeekSelector(selected, onClickAttr = "data-date", options = {}) {
       <strong>${dayNumberForISODate(date)}</strong>
     </button>`;
   }).join("")}</div>`;
+}
+
+function renderPublicWeekSelector(selected, onClickAttr = "data-public-date", options = {}) {
+  const { disabledDate = null, anchorDate = selected || todayISO() } = options;
+  return `<div class="public-week-selector" role="list" aria-label="Seleccion de dia">${getWeekDatesMemo(dateAnchor(anchorDate))
+    .map((date) => {
+      const disabled = typeof disabledDate === "function" ? !!disabledDate(date) : false;
+      return `<button class="public-week-card ${date === selected ? "active" : ""} ${disabled ? "past-date" : ""}" ${onClickAttr}="${date}" ${disabled ? "disabled" : ""}>
+        <span>${escapeHTML(dayNameForISODate(date))}</span>
+        <strong>${escapeHTML(dayNumberForISODate(date))}</strong>
+      </button>`;
+    })
+    .join("")}</div>`;
 }
 
 function dsIcon(name = "dot") {
@@ -6324,6 +6476,92 @@ function publicFlowCard({ step, title, state = "locked", summary = "", actions =
     </div>
     ${state === "open" ? `<div class="flow-card-body">${body}</div>` : ""}
   </section>`;
+}
+
+function publicProgressStepper(currentStep = "services") {
+  const steps = [
+    { key: "services", number: "01", label: "Servicio" },
+    { key: "barbers", number: "02", label: "Barbero" },
+    { key: "days", number: "03", label: "Fecha" },
+    { key: "slots", number: "04", label: "Hora" },
+    { key: "details", number: "05", label: "Confirmar" },
+  ];
+  const activeIndex = Math.max(steps.findIndex((step) => step.key === currentStep), 0);
+  return `<div class="public-progress" aria-label="Progreso de la reserva">
+    ${steps
+      .map((step, index) => {
+        const state = index < activeIndex ? "done" : index === activeIndex ? "active" : "idle";
+        return `<div class="public-progress__item ${state}">
+          <span class="public-progress__dot">${step.number}</span>
+          <small>${step.label}</small>
+        </div>`;
+      })
+      .join("")}
+  </div>`;
+}
+
+function publicSelectionPill({ icon = "services", eyebrow = "", title = "", meta = "" }) {
+  return `<article class="public-selection-pill">
+    <span class="public-selection-pill__icon">${dsIcon(icon)}</span>
+    <div class="public-selection-pill__copy">
+      ${eyebrow ? `<small>${escapeHTML(eyebrow)}</small>` : ""}
+      <strong>${escapeHTML(title)}</strong>
+      ${meta ? `<span>${escapeHTML(meta)}</span>` : ""}
+    </div>
+  </article>`;
+}
+
+function publicServiceCard(service, businessId, isSelected) {
+  return `<button class="service-card public-service-card-v2 ${isSelected ? "active" : ""}" data-select-service="${service.id}">
+    <div class="public-service-card-v2__head">
+      <span class="public-service-card-v2__icon">${dsIcon("services")}</span>
+      ${publicPricesVisibleForBusiness(businessId) ? `<span class="public-service-card-v2__price">${escapeHTML(formatCOP(service.value))}</span>` : ""}
+    </div>
+    <div class="public-service-card-v2__body">
+      <strong>${escapeHTML(service.name)}</strong>
+    </div>
+  </button>`;
+}
+
+function renderPublicBookingShell({
+  business,
+  currentStep,
+  bookingCardTitle,
+  bookingCardMicrocopy,
+  bookingCardSummary,
+  bookingCardActions,
+  bookingCardBody,
+}) {
+  const backgroundMedia = currentBackgroundMedia();
+  return appShell(`
+    <section class="hero public-reservation-hero public-reservation-hero-v2">
+      <div class="hero-bg ${backgroundMedia?.type === "video" ? "video-backed" : ""}"></div>
+      <div class="public-reservation-hero-v2__overlay"></div>
+      <div class="workspace public-reservation-hero-v2__content">
+        <div class="public-reservation-hero-v2__intro">
+          <span class="eyebrow">Agenda online</span>
+          <h1>${escapeHTML(business?.name || "Barberia")}</h1>
+          <p>Reserva en pocos pasos con una experiencia elegante, clara y fluida.</p>
+        </div>
+        <section class="public-booking-panel-v2 public-booking-panel-v2--${escapeHTML(currentStep)}">
+          <div class="public-booking-panel-v2__head public-motion-enter public-motion-enter--base">
+            <div class="public-booking-panel-v2__title">
+              <span class="section-kicker">${currentStep === "services" ? "01" : currentStep === "barbers" ? "02" : currentStep === "days" ? "03" : currentStep === "slots" ? "04" : "05"}</span>
+              <div>
+                <h2>${escapeHTML(bookingCardTitle)}</h2>
+                <p class="microcopy public-booking-panel-v2__microcopy">${escapeHTML(bookingCardMicrocopy)}</p>
+              </div>
+            </div>
+            ${publicProgressStepper(currentStep)}
+          </div>
+          ${bookingCardSummary ? `<div class="public-booking-panel-v2__summary public-motion-enter public-motion-enter--delay-1">${bookingCardSummary}</div>` : ""}
+          ${bookingCardActions ? `<div class="public-booking-panel-v2__actions public-motion-enter public-motion-enter--delay-2">${bookingCardActions}</div>` : ""}
+          <div class="public-booking-panel-v2__body public-motion-enter public-motion-enter--delay-3">${bookingCardBody}</div>
+        </section>
+      </div>
+    </section>
+    ${renderBookingConfirmationDialog()}
+  `);
 }
 
 function serviceById(id, businessId = currentBusinessId()) {
@@ -6469,54 +6707,15 @@ function BusinessPublicTemplate({
   bookingCardActions,
   bookingCardBody,
 }) {
-  const backgroundMedia = currentBackgroundMedia();
-  return appShell(`
-    <section class="hero public-reservation-hero">
-      <div class="hero-bg ${backgroundMedia?.type === "video" ? "video-backed" : ""}"></div>
-    </section>
-
-    <section class="workspace public-flow">
-      <section class="flow-card open single-booking-card">
-        <div class="flow-card-head">
-          <div class="booking-card-top">
-            <div>
-              <div class="section-title">
-                <span>${currentStep === "services" ? "01" : currentStep === "barbers" ? "02" : currentStep === "days" ? "03" : currentStep === "slots" ? "04" : "05"}</span>
-                <h2>${bookingCardTitle}</h2>
-              </div>
-              <p class="microcopy">${escapeHTML(bookingCardMicrocopy)}</p>
-            </div>
-            ${bookingStepper}
-          </div>
-          ${bookingCardSummary ? `<div class="flow-summary">${bookingCardSummary}</div>` : ""}
-          ${bookingCardActions ? `<div class="step-toolbar flow-toolbar">${bookingCardActions}</div>` : ""}
-        </div>
-        <div class="flow-card-body booking-card-body">
-          ${bookingCardBody}
-        </div>
-      </section>
-    </section>
-    ${
-      app.bookingConfirmation
-        ? `<dialog id="booking-confirm-dialog">
-          <div class="modal-card confirm-card booking-confirm-card">
-            <h3>Cita reservada</h3>
-            <p>Estimado/a ${escapeHTML(app.bookingConfirmation.clientName)}, su cita fue reservada exitosamente.</p>
-            <div class="confirmation-summary">
-              <span>Barbero</span><strong>${escapeHTML(app.bookingConfirmation.barberName)}</strong>
-              <span>Servicio</span><strong>${escapeHTML(app.bookingConfirmation.serviceName)}</strong>
-              <span>Fecha</span><strong>${escapeHTML(app.bookingConfirmation.date)}</strong>
-              <span>Horario</span><strong>${escapeHTML(app.bookingConfirmation.range)}</strong>
-              <span>WhatsApp</span><strong>${escapeHTML(app.bookingConfirmation.whatsapp)}</strong>
-            </div>
-            <div class="button-row">
-              <button class="primary-action" type="button" data-close-booking-confirm>Entendido</button>
-            </div>
-          </div>
-        </dialog>`
-        : ""
-    }
-  `);
+  return renderPublicBookingShell({
+    business,
+    currentStep,
+    bookingCardTitle,
+    bookingCardMicrocopy,
+    bookingCardSummary,
+    bookingCardActions,
+    bookingCardBody,
+  });
 }
 
 function renderBusinessPublicTest() {
@@ -6610,9 +6809,18 @@ function renderBusinessPublicTest() {
 function renderPublic() {
   const resolution = currentBusinessResolution();
   const requested = requestedBusiness();
-  const missingRequestedBusiness =
-    Boolean(app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested);
-  if (missingRequestedBusiness && resolution.status === "error") {
+  let businessDataLoading =
+    (!requested && isCurrentBusinessLoading()) ||
+    Boolean(app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && ["idle", "pending"].includes(resolution.status));
+  if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && resolution.status === "not_found") {
+    return appShell(`
+      <section class="booking-surface">
+        <div class="section-title"><span>!</span><h2>Entorno no disponible</h2></div>
+        <p class="microcopy">Negocio no encontrado.</p>
+      </section>
+    `);
+  }
+  if (app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && resolution.status === "error") {
     return appShell(`
       <section class="booking-surface">
         <div class="section-title"><span>!</span><h2>No fue posible cargar el negocio</h2></div>
@@ -6621,17 +6829,6 @@ function renderPublic() {
       </section>
     `);
   }
-  if (missingRequestedBusiness && !isCurrentBusinessLoading()) {
-    return appShell(`
-      <section class="booking-surface">
-        <div class="section-title"><span>!</span><h2>Entorno no disponible</h2></div>
-        <p class="microcopy">Negocio no encontrado.</p>
-      </section>
-    `);
-  }
-  let businessDataLoading =
-    (!requested && isCurrentBusinessLoading()) ||
-    Boolean(app.currentBusinessSlug && app.currentBusinessSlug !== DEFAULT_BUSINESS_SLUG && !requested && ["idle", "pending"].includes(resolution.status));
   if (requested && requested.active === false) {
     return appShell(`
       <section class="booking-surface">
@@ -6676,13 +6873,6 @@ function renderPublic() {
     ? `${dayNameForISODate(app.selectedDate, true)} · ${app.selectedDate}`
     : "";
   const bookingDayLabel = hasSelectedDay ? `${dayNameForISODate(app.selectedDate, true)} · ${app.selectedDate}` : "";
-  const bookingStepper = `<div class="booking-stepper">
-      <span class="${currentStep === "services" ? "active" : hasSelectedService ? "done" : ""}">1</span>
-      <span class="${currentStep === "barbers" ? "active" : hasSelectedBarber ? "done" : ""}">2</span>
-      <span class="${currentStep === "days" ? "active" : hasSelectedDay || hasSelectedSlot ? "done" : ""}">3</span>
-      <span class="${currentStep === "slots" ? "active" : hasSelectedSlot ? "done" : ""}">4</span>
-      <span class="${currentStep === "details" ? "active" : ""}">5</span>
-    </div>`;
   let bookingCardTitle = "Seleccionar servicio";
   let bookingCardMicrocopy = "Elige el servicio que deseas reservar.";
   let bookingCardActions = "";
@@ -6695,21 +6885,16 @@ function renderPublic() {
       ? servicesLoadState.slow
         ? "Estamos cargando los servicios..."
         : "Preparando servicios disponibles."
-      : "Elige el servicio que deseas reservar.";
-    bookingCardBody = `<div class="barber-list">
+      : "Selecciona el servicio principal para continuar con la reserva.";
+    bookingCardBody = `<div class="public-service-step-v2">
+      <div class="public-service-step-v2__grid">
       ${
         servicesLoading
           ? `<div class="business-component-skeleton public-component-skeleton public-service-skeleton"><span></span><span></span></div>`
           : publicServices.length
           ? publicServices
         .map(
-          (service) => `
-          <div class="barber-option">
-            <button class="barber-card ${service.id === app.selectedServiceId ? "active" : ""}" data-select-service="${service.id}">
-              <div class="summary-badge service-badge">${publicServiceBadgeLabel(businessId)}</div>
-              <span><strong>${escapeHTML(service.name)}</strong>${publicServicePriceMarkup(service, businessId)}</span>
-            </button>
-          </div>`
+          (service) => `${publicServiceCard(service, businessId, service.id === app.selectedServiceId)}`
         )
         .join("")
           : `<div class="empty-state-card">
@@ -6717,30 +6902,36 @@ function renderPublic() {
               ${servicesLoadState.error ? `<button class="secondary-action" type="button" data-retry-public-services>Reintentar</button>` : ""}
             </div>`
       }
+      </div>
     </div>`;
   }
 
   if (currentStep === "barbers") {
     bookingCardTitle = "Elegir barbero";
     bookingCardMicrocopy = "Selecciona el profesional disponible para este servicio.";
-    bookingCardSummary = `<div class="selected-card compact-selected">
-      <div class="summary-badge service-badge">${publicServiceBadgeLabel(businessId)}</div>
-      <div>
-        <strong>${escapeHTML(selectedService?.name || "")}</strong>
-        ${selectedService ? publicServicePriceMarkup(selectedService, businessId) : ""}
+    bookingCardSummary = `<div class="public-step-two-summary">
+      <div class="public-step-two-summary__service">
+        ${publicSelectionPill({
+          icon: "services",
+          eyebrow: publicServiceBadgeLabel(businessId),
+          title: selectedService?.name || "",
+          meta: selectedService && showPublicPrices ? formatCOP(selectedService.value) : "",
+        })}
       </div>
+      <button class="secondary-action public-step-two-summary__change" type="button" data-reset-service>Cambiar servicio</button>
     </div>`;
-    bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button>`;
+    bookingCardActions = "";
     bookingCardBody = `<div class="barber-list public-barber-grid">
       ${
         activeBarbers.length
           ? activeBarbers
               .map(
                 (barber) => `
-          <button class="barber-card public-barber-card ${barber.id === app.selectedBarberId ? "active" : ""}" data-select-barber="${barber.id}">
+          <button class="barber-card public-barber-card public-barber-card-v2 ${barber.id === app.selectedBarberId ? "active" : ""}" data-select-barber="${barber.id}">
             ${avatar(barber, "lg")}
             <span class="public-barber-copy">
               <strong>${escapeHTML(barber.name)}</strong>
+              <small class="public-barber-status">Disponible</small>
             </span>
           </button>`
               )
@@ -6754,71 +6945,65 @@ function renderPublic() {
 
   if (currentStep === "days") {
     bookingCardTitle = "Seleccionar dia";
-    bookingCardMicrocopy = "Elige el dia para consultar horarios disponibles.";
-    bookingCardSummary = `<div class="booking-selection-stack">
-      <div class="selected-card compact-selected">
-        <div class="summary-badge service-badge">${publicServiceBadgeLabel(businessId)}</div>
-        <div>
-          <strong>${escapeHTML(selectedService?.name || "")}</strong>
-          ${selectedService ? publicServicePriceMarkup(selectedService, businessId) : ""}
-        </div>
-      </div>
-      <div class="selected-card compact-selected">
-        ${selected ? avatar(selected, "md") : ""}
-        <div>
-          <strong>${escapeHTML(selected?.name || "")}</strong>
-          <small>${escapeHTML(selected?.specialty || "Servicio premium")}</small>
-        </div>
+    bookingCardMicrocopy = "Explora la semana y elige el dia ideal para continuar con tu reserva.";
+    bookingCardSummary = `<div class="public-step-three-summary">
+      ${publicSelectionPill({
+        icon: "services",
+        eyebrow: publicServiceBadgeLabel(businessId),
+        title: selectedService?.name || "",
+        meta: selectedService && showPublicPrices ? formatCOP(selectedService.value) : "",
+      })}
+      ${publicSelectionPill({
+        icon: "barbers",
+        eyebrow: "Barbero",
+        title: selected?.name || "",
+        meta: selected?.specialty || "Servicio premium",
+      })}
+    </div>`;
+    bookingCardActions = `<button class="secondary-action public-step-three-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action public-step-three-action" type="button" data-reset-barber>Cambiar barbero</button>`;
+    bookingCardBody = `<div class="public-step-three-body">
+      <div class="public-step-three-calendar">
+        ${renderPublicWeekSelector(app.selectedDate, "data-public-date", {
+          anchorDate: app.selectedDate,
+          disabledDate: (date) => !publicDateAvailableMemo(selected.id, date, businessId),
+        })}
       </div>
     </div>`;
-    bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button>`;
-    bookingCardBody = `<div class="date-strip">${getWeekDatesMemo()
-      .map((date) => {
-        const disabled = !publicDateAvailableMemo(selected.id, date, businessId);
-        return `<button class="${date === app.selectedDate ? "active" : ""} ${disabled ? "past-date" : ""}" data-public-date="${date}" ${disabled ? "disabled" : ""}>
-          <span>${dayNameForISODate(date)}</span>
-          <strong>${dayNumberForISODate(date)}</strong>
-        </button>`;
-      })
-      .join("")}</div>`;
   }
 
   if (currentStep === "slots") {
     bookingCardTitle = "Seleccionar horario";
-    bookingCardMicrocopy = bookingDayLabel;
-    bookingCardSummary = `<div class="booking-selection-stack">
-      <div class="selected-card compact-selected">
-        <div class="summary-badge service-badge">${publicServiceBadgeLabel(businessId)}</div>
-        <div>
-          <strong>${escapeHTML(selectedService?.name || "")}</strong>
-          ${selectedService ? publicServicePriceMarkup(selectedService, businessId) : ""}
-        </div>
-      </div>
-      <div class="selected-card compact-selected">
-        ${selected ? avatar(selected, "md") : ""}
-        <div>
-          <strong>${escapeHTML(selected?.name || "")}</strong>
-          <small>${escapeHTML(selected?.specialty || "Servicio premium")}</small>
-        </div>
-      </div>
-      <div class="selected-card compact-selected">
-        <div class="summary-badge">${dayNameForISODate(app.selectedDate)}</div>
-        <div>
-          <strong>${escapeHTML(bookingDayLabel)}</strong>
-          <small>Dia seleccionado</small>
-        </div>
-      </div>
+    bookingCardMicrocopy = "Elige un horario disponible para completar la reserva.";
+    bookingCardSummary = `<div class="public-step-four-summary">
+      ${publicSelectionPill({
+        icon: "services",
+        eyebrow: publicServiceBadgeLabel(businessId),
+        title: selectedService?.name || "",
+        meta: selectedService && showPublicPrices ? formatCOP(selectedService.value) : "",
+      })}
+      ${publicSelectionPill({
+        icon: "barbers",
+        eyebrow: "Barbero",
+        title: selected?.name || "",
+        meta: selected?.specialty || "Servicio premium",
+      })}
+      ${publicSelectionPill({
+        icon: "reservations",
+        eyebrow: "Fecha",
+        title: bookingDayLabel,
+        meta: "Dia seleccionado",
+      })}
     </div>`;
-    bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action" type="button" data-reset-day>Cambiar fecha</button>`;
-    bookingCardBody = `<div class="slot-grid public-slots">
+    bookingCardActions = `<button class="secondary-action public-step-four-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action public-step-four-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action public-step-four-action" type="button" data-reset-day>Cambiar fecha</button>`;
+    bookingCardBody = `<div class="public-slot-grid-v2">
       ${availability
         .map(({ time, status, appointment, dayBlocked }) => {
           const unavailable = isUnavailableSlot(app.selectedDate, time, status);
           const disabled = status !== "available" || unavailable;
-          return `<button class="slot ${STATUS[status].tone} ${unavailable ? "unavailable" : ""} ${time === app.selectedSlot ? "picked" : ""}" data-slot="${time}" ${disabled ? "disabled" : ""}>
-            <small class="slot-state">${publicSlotStateTag(status, dayBlocked, unavailable && status === "available")}</small>
-            <strong>${slotRange(time)}</strong>
-            <span>${unavailable && status === "available" ? "No disponible" : publicSlotLabel(status, dayBlocked)}</span>
+          const visualState = disabled ? "Ocupado" : "Disponible";
+          return `<button class="slot public-slot-card-v2 ${STATUS[status].tone} ${unavailable ? "unavailable" : ""} ${time === app.selectedSlot ? "picked" : ""}" data-slot="${time}" ${disabled ? "disabled" : ""}>
+            <small class="public-slot-card-v2__state">${visualState}</small>
+            <strong class="public-slot-card-v2__time">${slotRange(time)}</strong>
           </button>`;
         })
         .join("")}
@@ -6827,94 +7012,64 @@ function renderPublic() {
 
   if (currentStep === "details") {
     bookingCardTitle = "Confirmar reserva";
-    bookingCardMicrocopy = "Completa tus datos para confirmar la reserva.";
-    bookingCardSummary = `<div class="booking-selection-stack">
-      <div class="selected-card compact-selected">
-        <div class="summary-badge service-badge">${publicServiceBadgeLabel(businessId)}</div>
-        <div>
-          <strong>${escapeHTML(selectedService?.name || "")}</strong>
-          ${selectedService ? publicServicePriceMarkup(selectedService, businessId) : ""}
-        </div>
-      </div>
-      <div class="selected-card compact-selected">
-        ${selected ? avatar(selected, "md") : ""}
-        <div>
-          <strong>${escapeHTML(selected?.name || "")}</strong>
-          <small>${escapeHTML(bookingDayLabel)}</small>
-        </div>
-      </div>
-      <div class="selected-card compact-selected">
-        <div class="summary-badge">03</div>
-        <div>
-          <strong>${slotRange(app.selectedSlot)}</strong>
-          <small>Horario seleccionado</small>
-        </div>
-      </div>
+    bookingCardMicrocopy = "Revisa el resumen y completa tus datos para finalizar la reserva.";
+    bookingCardSummary = `<div class="public-step-five-summary">
+      ${publicSelectionPill({
+        icon: "services",
+        eyebrow: publicServiceBadgeLabel(businessId),
+        title: selectedService?.name || "",
+        meta: selectedService && showPublicPrices ? formatCOP(selectedService.value) : "",
+      })}
+      ${publicSelectionPill({
+        icon: "barbers",
+        eyebrow: "Barbero",
+        title: selected?.name || "",
+        meta: bookingDayLabel,
+      })}
+      ${publicSelectionPill({
+        icon: "reservations",
+        eyebrow: "Horario",
+        title: slotRange(app.selectedSlot),
+        meta: "Horario seleccionado",
+      })}
     </div>`;
-    bookingCardActions = `<button class="secondary-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action" type="button" data-reset-day>Cambiar fecha</button><button class="secondary-action" type="button" data-reset-slot>Cambiar hora</button>`;
-    bookingCardBody = `<form id="public-booking-form" class="form-stack">
+    bookingCardActions = `<button class="secondary-action public-step-five-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action public-step-five-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action public-step-five-action" type="button" data-reset-day>Cambiar fecha</button><button class="secondary-action public-step-five-action" type="button" data-reset-slot>Cambiar hora</button>`;
+    bookingCardBody = `<form id="public-booking-form" class="form-stack public-booking-form-v2">
         ${app.bookingError ? `<p class="form-feedback error">${escapeHTML(app.bookingError)}</p>` : ""}
-        <div class="confirmation-summary">
-          <span>Servicio</span><strong>${escapeHTML(selectedService?.name || "")}</strong>
-          <span>Barbero</span><strong>${escapeHTML(selected?.name || "")}</strong>
-          <span>Fecha</span><strong>${escapeHTML(app.selectedDate)}</strong>
-          <span>Hora</span><strong>${slotRange(app.selectedSlot || businessScheduleConfig(businessId).openingTime, businessId)}</strong>
+        <div class="public-confirmation-card-v2">
+          <div class="public-confirmation-card-v2__row">
+            <span>Servicio</span><strong>${escapeHTML(selectedService?.name || "")}</strong>
+          </div>
+          <div class="public-confirmation-card-v2__row">
+            <span>Barbero</span><strong>${escapeHTML(selected?.name || "")}</strong>
+          </div>
+          <div class="public-confirmation-card-v2__row">
+            <span>Fecha</span><strong>${escapeHTML(app.selectedDate)}</strong>
+          </div>
+          <div class="public-confirmation-card-v2__row">
+            <span>Hora</span><strong>${slotRange(app.selectedSlot || businessScheduleConfig(businessId).openingTime, businessId)}</strong>
+          </div>
         </div>
-        <label>Nombre<input name="clientName" required placeholder="Tu nombre" /></label>
-        <label>WhatsApp<input name="whatsapp" required inputmode="tel" placeholder="300 123 4567" /></label>
-        <button class="primary-action" ${app.bookingSubmitting ? "disabled" : ""}>${app.bookingSubmitting ? "Reservando..." : "Confirmar cita"}</button>
+        <div class="public-booking-form-v2__fields">
+          <label class="public-booking-field-v2">Nombre<input name="clientName" required placeholder="Tu nombre" /></label>
+          <label class="public-booking-field-v2">WhatsApp<input name="whatsapp" required inputmode="tel" placeholder="300 123 4567" /></label>
+        </div>
+        <div class="public-booking-form-v2__footer">
+          <button class="primary-action public-confirm-submit-v2" ${app.bookingSubmitting ? "disabled" : ""}>${app.bookingSubmitting ? "Reservando..." : "Confirmar cita"}</button>
+        </div>
       </form>
-      <p class="microcopy">Disponibilidad validada en tiempo real para evitar reservas duplicadas en el mismo horario.</p>`;
+      <p class="microcopy public-confirmation-note-v2">Disponibilidad validada en tiempo real para evitar reservas duplicadas en el mismo horario.</p>`;
   }
 
-  const backgroundMedia = currentBackgroundMedia();
-  return appShell(`
-    <section class="hero public-reservation-hero">
-      <div class="hero-bg ${backgroundMedia?.type === "video" ? "video-backed" : ""}"></div>
-    </section>
-
-    <section class="workspace public-flow">
-      <section class="flow-card open single-booking-card">
-        <div class="flow-card-head">
-          <div class="booking-card-top">
-            <div>
-              <div class="section-title">
-                <span>${currentStep === "services" ? "01" : currentStep === "barbers" ? "02" : currentStep === "days" ? "03" : currentStep === "slots" ? "04" : "05"}</span>
-                <h2>${bookingCardTitle}</h2>
-              </div>
-              <p class="microcopy">${escapeHTML(bookingCardMicrocopy)}</p>
-            </div>
-            ${bookingStepper}
-          </div>
-          ${bookingCardSummary ? `<div class="flow-summary">${bookingCardSummary}</div>` : ""}
-          ${bookingCardActions ? `<div class="step-toolbar flow-toolbar">${bookingCardActions}</div>` : ""}
-        </div>
-        <div class="flow-card-body booking-card-body">
-          ${bookingCardBody}
-        </div>
-      </section>
-    </section>
-    ${
-      app.bookingConfirmation
-        ? `<dialog id="booking-confirm-dialog">
-          <div class="modal-card confirm-card booking-confirm-card">
-            <h3>Cita reservada</h3>
-            <p>Estimado/a ${escapeHTML(app.bookingConfirmation.clientName)}, su cita fue reservada exitosamente.</p>
-            <div class="confirmation-summary">
-              <span>Barbero</span><strong>${escapeHTML(app.bookingConfirmation.barberName)}</strong>
-              <span>Servicio</span><strong>${escapeHTML(app.bookingConfirmation.serviceName)}</strong>
-              <span>Fecha</span><strong>${escapeHTML(app.bookingConfirmation.date)}</strong>
-              <span>Horario</span><strong>${escapeHTML(app.bookingConfirmation.range)}</strong>
-              <span>WhatsApp</span><strong>${escapeHTML(app.bookingConfirmation.whatsapp)}</strong>
-            </div>
-            <div class="button-row">
-              <button class="primary-action" type="button" data-close-booking-confirm>Entendido</button>
-            </div>
-          </div>
-        </dialog>`
-        : ""
-    }
-  `);
+  return renderPublicBookingShell({
+    business,
+    currentStep,
+    bookingCardTitle,
+    bookingCardMicrocopy,
+    bookingCardSummary,
+    bookingCardActions,
+    bookingCardBody,
+  });
 }
 
 function renderAdmin() {
@@ -7174,7 +7329,7 @@ function adminAccountsSection() {
     <div class="admin-account-list ds-card-list">
       ${accounts
         .map((account) => {
-          const principal = account.id === PRINCIPAL_ADMIN.id;
+          const principal = account.role === PRINCIPAL_ADMIN_ROLE;
           return `<article class="admin-account-card ds-form-card ${principal ? "locked" : ""}">
             <div>
               <p class="eyebrow">${principal ? "Administrador principal" : account.active ? "Activo" : "Inactivo"}</p>
@@ -7221,7 +7376,7 @@ function adminAccountsSection() {
     <div class="admin-account-list">
       ${accounts
         .map((account) => {
-          const principal = account.id === PRINCIPAL_ADMIN.id;
+          const principal = account.role === PRINCIPAL_ADMIN_ROLE;
           return `<article class="admin-account-card ${principal ? "locked" : ""}">
             <div>
               <p class="eyebrow">${principal ? "Administrador principal" : account.active ? "Activo" : "Inactivo"}</p>
@@ -7495,7 +7650,7 @@ function renderSuperAdmin() {
     .map((business) => {
       const urls = businessUrlSet(business);
       const admins = loadAdminAccounts().filter(
-        (account) => account.businessId === business.id && account.role !== PRINCIPAL_ADMIN.role
+        (account) => account.businessId === business.id
       );
       const admin = admins[0] || null;
       const adminList = admins.length
@@ -7656,7 +7811,7 @@ function renderSuperAdmin() {
     const reservationCount = businessTodayReservationCount(business.id);
     const environmentAttachment = businessEnvironmentAttachment(business.id);
     const admins = loadAdminAccounts().filter(
-      (account) => account.businessId === business.id && account.role !== PRINCIPAL_ADMIN.role
+      (account) => account.businessId === business.id
     );
     const admin = admins[0] || null;
     const adminList = admins.length
@@ -7844,7 +7999,7 @@ function renderSuperAdmin() {
     const activeServiceCount = businessActiveServiceCount(business.id);
     const reservationCount = businessTodayReservationCount(business.id);
     const environmentAttachment = businessEnvironmentAttachment(business.id);
-    const admins = loadAdminAccounts().filter((account) => account.businessId === business.id && account.role !== PRINCIPAL_ADMIN.role);
+      const admins = loadAdminAccounts().filter((account) => account.businessId === business.id);
     const admin = admins[0] || null;
     const themeChoices = Object.entries(BUSINESS_THEMES).map(([key, theme]) => ({ value: key, label: theme.label }));
     const adminList = admins.length
@@ -8142,7 +8297,7 @@ function renderSuperAdminV2() {
         </div>
       </article>`;
       const admins = loadAdminAccounts().filter(
-        (account) => account.businessId === business.id && account.role !== PRINCIPAL_ADMIN.role
+        (account) => account.businessId === business.id
       );
       const admin = admins[0] || null;
       const adminList = admins.length
@@ -8268,7 +8423,7 @@ function renderSuperAdminV2() {
     const reservationCount = businessTodayReservationCount(business.id);
     const environmentAttachment = businessEnvironmentAttachment(business.id);
     const admins = loadAdminAccounts().filter(
-      (account) => account.businessId === business.id && account.role !== PRINCIPAL_ADMIN.role
+      (account) => account.businessId === business.id
     );
     const admin = admins[0] || null;
     const adminList = admins.length
@@ -9221,13 +9376,7 @@ async function handleDeleteBusinessSubmit(formElement) {
 function render() {
   const perf = perfMark("render");
   const root = document.querySelector("#app");
-  const legacyRedirectPath = resolveLegacyRedirectPath(location.pathname);
-  if (legacyRedirectPath) {
-    const currentFullPath = `${location.pathname}${location.search || ""}`;
-    if (currentFullPath !== legacyRedirectPath) {
-      history.replaceState(null, "", legacyRedirectPath);
-    }
-  }
+  ensureCanonicalLegacyPath();
   app.route = resolveRoute(location.pathname);
   app.view = app.route.view;
   app.currentBusinessSlug = app.route.businessSlug;
@@ -9765,9 +9914,7 @@ function bindEvents() {
       const businessId = event.currentTarget.dataset.businessId;
       const current = store.businessById(businessId);
       if (!current) return;
-      const nextName = String(form.get("name") || "").trim() || current.name;
-      const previousSlug = current.slug || "";
-      const slug = uniqueBusinessSlug(nextName, current.id);
+      const slug = uniqueBusinessSlug(form.get("slug") || current.slug, current.id);
       const theme = String(form.get("theme") || current.theme || DEFAULT_BUSINESS_THEME_KEY);
       const themePatch = businessThemePatch(theme);
       let logoUrl = current.logoUrl;
@@ -9791,7 +9938,7 @@ function bindEvents() {
       }
       const updated = store.saveBusiness({
         id: current.id,
-        name: nextName,
+        name: String(form.get("name") || "").trim(),
         slug,
         logoUrl,
         ...themePatch,
@@ -9810,16 +9957,9 @@ function bindEvents() {
           account.businessId === updated.id ? { ...account, businessSlug: updated.slug } : account
         )
       );
-      if (previousSlug && previousSlug !== updated.slug) {
-        clearScopedBusinessSession(ADMIN_SESSION_KEY, previousSlug);
-        clearScopedBusinessSession(BARBER_SESSION_KEY, previousSlug);
-      }
       app.superAdminPendingLogos = { ...app.superAdminPendingLogos, [current.id]: "" };
       app.superAdminPendingLogoFiles = { ...app.superAdminPendingLogoFiles, [current.id]: null };
-      app.superAdminMessage =
-        previousSlug && previousSlug !== updated.slug
-          ? `Negocio actualizado: ${updated.name}. Nueva URL: /barberia/${updated.slug}`
-          : `Negocio actualizado: ${updated.name}`;
+      app.superAdminMessage = `Negocio actualizado: ${updated.name}`;
       render();
     });
   });
@@ -10604,7 +10744,6 @@ function bindEvents() {
       event.preventDefault();
       if (!isPrincipalAdmin()) return;
       const id = event.currentTarget.dataset.adminAccountId;
-      if (id === PRINCIPAL_ADMIN.id) return;
       const form = new FormData(event.currentTarget);
       const allAccounts = loadAdminAccounts();
       const businessAccounts = adminAccountsForBusiness(currentBusinessId());
@@ -10655,7 +10794,6 @@ function bindEvents() {
     button.addEventListener("click", async () => {
       if (!isPrincipalAdmin()) return;
       const id = button.dataset.deleteAdminAccount;
-      if (id === PRINCIPAL_ADMIN.id) return;
       const account = loadAdminAccounts().find((item) => item.id === id);
       saveAdminAccounts(loadAdminAccounts().filter((accountItem) => accountItem.id !== id));
       setVisibleAdminPassword(id, null);
