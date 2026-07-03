@@ -4118,7 +4118,7 @@ body[data-device="mobile"] *::after {
 
 /* Public booking redesign */
 .public-reservation-hero-v2 {
-  min-height: max(720px, calc(100vh - 88px));
+  min-height: max(560px, calc(100vh - 88px));
   padding: 0;
   align-items: stretch;
 }
@@ -4143,11 +4143,12 @@ body[data-device="mobile"] *::after {
 .public-reservation-hero-v2__content {
   position: relative;
   z-index: 1;
-  min-height: max(720px, calc(100vh - 88px));
-  display: grid;
-  grid-template-columns: minmax(260px, 0.82fr) minmax(320px, 1.18fr);
-  gap: clamp(24px, 4vw, 56px);
-  align-items: center;
+  min-height: max(560px, calc(100vh - 88px));
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: clamp(18px, 3vw, 34px);
+  padding-bottom: clamp(18px, 3vw, 34px);
 }
 
 .public-reservation-hero-v2__intro {
@@ -4175,6 +4176,7 @@ body[data-device="mobile"] *::after {
 .public-booking-panel-v2 {
   position: relative;
   overflow: hidden;
+  width: min(100%, 980px);
   border: 1px solid rgba(126, 216, 255, 0.18);
   border-radius: 32px;
   background:
@@ -4515,15 +4517,8 @@ body[data-device="mobile"] *::after {
 
   .public-reservation-hero-v2__content {
     min-height: auto;
-    grid-template-columns: 1fr;
-    align-items: start;
-    padding-top: 34px;
-    padding-bottom: 34px;
-  }
-
-  .public-reservation-hero-v2__intro {
-    max-width: 100%;
-    gap: 12px;
+    padding-top: 20px;
+    padding-bottom: 22px;
   }
 
   .public-booking-panel-v2__title {
@@ -4534,8 +4529,9 @@ body[data-device="mobile"] *::after {
 
 @media (max-width: 768px) {
   .public-reservation-hero-v2__content {
-    gap: 22px;
     padding-inline: 18px;
+    padding-top: 12px;
+    padding-bottom: 18px;
   }
 
   .public-booking-panel-v2 {
@@ -4585,10 +4581,6 @@ body[data-device="mobile"] *::after {
 }
 
 @media (max-width: 520px) {
-  .public-reservation-hero-v2__intro h1 {
-    font-size: clamp(34px, 12vw, 52px);
-  }
-
   .public-booking-panel-v2__head {
     gap: 18px;
   }

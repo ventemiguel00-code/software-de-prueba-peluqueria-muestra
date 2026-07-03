@@ -6538,11 +6538,6 @@ function renderPublicBookingShell({
       <div class="hero-bg ${backgroundMedia?.type === "video" ? "video-backed" : ""}"></div>
       <div class="public-reservation-hero-v2__overlay"></div>
       <div class="workspace public-reservation-hero-v2__content">
-        <div class="public-reservation-hero-v2__intro">
-          <span class="eyebrow">Agenda online</span>
-          <h1>${escapeHTML(business?.name || "Barberia")}</h1>
-          <p>Reserva en pocos pasos con una experiencia elegante, clara y fluida.</p>
-        </div>
         <section class="public-booking-panel-v2 public-booking-panel-v2--${escapeHTML(currentStep)}">
           <div class="public-booking-panel-v2__head public-motion-enter public-motion-enter--base">
             <div class="public-booking-panel-v2__title">
