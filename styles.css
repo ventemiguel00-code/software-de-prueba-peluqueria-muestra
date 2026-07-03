@@ -4126,9 +4126,9 @@ body[data-device="mobile"] *::after {
 .public-reservation-hero-v2 .hero-bg {
   transform: none;
   background:
-    linear-gradient(180deg, rgba(4, 8, 14, 0.76), rgba(4, 8, 14, 0.42) 34%, rgba(4, 8, 14, 0.74)),
-    radial-gradient(circle at 18% 18%, rgba(0, 191, 255, 0.16), transparent 24rem),
-    radial-gradient(circle at 82% 22%, rgba(65, 236, 255, 0.1), transparent 22rem),
+    linear-gradient(180deg, rgba(4, 8, 14, 0.56), rgba(4, 8, 14, 0.18) 34%, rgba(4, 8, 14, 0.5)),
+    radial-gradient(circle at 18% 18%, rgba(0, 191, 255, 0.14), transparent 24rem),
+    radial-gradient(circle at 82% 22%, rgba(65, 236, 255, 0.08), transparent 22rem),
     url("./assets/atelier-luxury-hero.png") center/cover;
 }
 
@@ -4136,8 +4136,8 @@ body[data-device="mobile"] *::after {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(180deg, rgba(3, 7, 11, 0.2), rgba(3, 7, 11, 0.48)),
-    linear-gradient(120deg, rgba(7, 14, 22, 0.66) 0%, rgba(7, 14, 22, 0.34) 44%, rgba(7, 14, 22, 0.62) 100%);
+    linear-gradient(180deg, rgba(3, 7, 11, 0.08), rgba(3, 7, 11, 0.24)),
+    linear-gradient(120deg, rgba(7, 14, 22, 0.42) 0%, rgba(7, 14, 22, 0.18) 44%, rgba(7, 14, 22, 0.4) 100%);
 }
 
 .public-reservation-hero-v2__content {
