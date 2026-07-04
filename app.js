@@ -68,9 +68,11 @@ const PUBLIC_APPOINTMENT_SELECT_COLUMNS =
   "id,business_id,barber_id,date,time,status,week_key,block_origin";
 const BLOCKED_DAY_SELECT_COLUMNS = "id,business_id,barber_id,date";
 const SERVICE_SELECT_COLUMNS =
-  "id,business_id,service_name,service_value,admin_percentage,barber_percentage,active,created_at";
+  "id,business_id,service_name,service_value,admin_percentage,barber_percentage,service_icon_id,active,created_at";
 const PUBLIC_SERVICE_SELECT_COLUMNS =
-  "id,business_id,service_name,service_value,active,created_at";
+  "id,business_id,service_name,service_value,service_icon_id,active,created_at";
+const SERVICE_ICON_SELECT_COLUMNS =
+  "id,name,image_data,mime_type,active,created_at";
 const BARBER_SERVICE_SELECT_COLUMNS = "id,business_id,barber_id,service_id,active,created_at";
 const ADMIN_ACCOUNT_SELECT_COLUMNS =
   "id,business_id,admin_name,admin_user,password,password_hash,role,active,created_at,updated_at";
@@ -1033,6 +1035,7 @@ function neutralBootstrapState() {
     appointments: [],
     blockedDays: [],
     services: [],
+    serviceIcons: [],
     barberServices: [],
   };
 }
@@ -1119,8 +1122,28 @@ function normalizeTenantState(state = {}) {
     appointments: (state.appointments || []).map(attachBusiness),
     blockedDays: (state.blockedDays || []).map(attachBusiness),
     services: (state.services || []).map(attachBusiness),
+    serviceIcons: (state.serviceIcons || []).map((icon) => ({
+      id: icon.id,
+      name: icon.name || "",
+      imageData: icon.imageData || icon.image_data || "",
+      mimeType: icon.mimeType || icon.mime_type || "image/png",
+      active: parseActiveFlag(icon.active, true),
+      createdAt: icon.createdAt || icon.created_at || todayISO(),
+    })),
     barberServices: (state.barberServices || []).map(attachBusiness),
   };
+}
+
+function sanitizeStateForPersistence(state = {}) {
+  const normalized = normalizeTenantState(state);
+  return {
+    ...normalized,
+    serviceIcons: [],
+  };
+}
+
+function persistAppStateSnapshot(state = {}) {
+  localStorage.setItem(APP_KEY, JSON.stringify(sanitizeStateForPersistence(state)));
 }
 
 function mergeBusinessesById(...groups) {
@@ -1537,12 +1560,13 @@ const defaultState = () => ({
   ],
   blockedDays: [],
   services: [
-    { id: "service_corte_clasico", negocioId: DEFAULT_BUSINESS_ID, name: "Corte clasico", value: 20000, adminPercentage: 50, barberPercentage: 50, active: true },
-    { id: "service_corte_barba", negocioId: DEFAULT_BUSINESS_ID, name: "Corte + barba", value: 30000, adminPercentage: 50, barberPercentage: 50, active: true },
-    { id: "service_barba", negocioId: DEFAULT_BUSINESS_ID, name: "Barba", value: 18000, adminPercentage: 50, barberPercentage: 50, active: true },
-    { id: "service_cejas", negocioId: DEFAULT_BUSINESS_ID, name: "Cejas", value: 12000, adminPercentage: 50, barberPercentage: 50, active: true },
-    { id: "service_diseno", negocioId: DEFAULT_BUSINESS_ID, name: "Diseno", value: 15000, adminPercentage: 50, barberPercentage: 50, active: true },
+    { id: "service_corte_clasico", negocioId: DEFAULT_BUSINESS_ID, name: "Corte clasico", value: 20000, adminPercentage: 50, barberPercentage: 50, serviceIconId: "", active: true },
+    { id: "service_corte_barba", negocioId: DEFAULT_BUSINESS_ID, name: "Corte + barba", value: 30000, adminPercentage: 50, barberPercentage: 50, serviceIconId: "", active: true },
+    { id: "service_barba", negocioId: DEFAULT_BUSINESS_ID, name: "Barba", value: 18000, adminPercentage: 50, barberPercentage: 50, serviceIconId: "", active: true },
+    { id: "service_cejas", negocioId: DEFAULT_BUSINESS_ID, name: "Cejas", value: 12000, adminPercentage: 50, barberPercentage: 50, serviceIconId: "", active: true },
+    { id: "service_diseno", negocioId: DEFAULT_BUSINESS_ID, name: "Diseno", value: 15000, adminPercentage: 50, barberPercentage: 50, serviceIconId: "", active: true },
   ],
+  serviceIcons: [],
   barberServices: [
     { id: "barber_service_seed_1", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_mateo", serviceId: "service_corte_clasico", active: true },
     { id: "barber_service_seed_2", negocioId: DEFAULT_BUSINESS_ID, barberId: "barber_mateo", serviceId: "service_corte_barba", active: true },
@@ -1751,8 +1775,9 @@ function composeAppointmentNotes(appointment) {
   return notesBody ? `${serviceLine}\n${notesBody}` : serviceLine;
 }
 
-function mapServiceToRow(service) {
-  return {
+function mapServiceToRow(service, options = {}) {
+  const { includeIconId = true } = options;
+  const row = {
     id: service.id,
     business_id: service.negocioId || DEFAULT_BUSINESS_ID,
     service_name: service.name,
@@ -1761,6 +1786,30 @@ function mapServiceToRow(service) {
     barber_percentage: Number(service.barberPercentage) || 0,
     active: service.active ?? true,
   };
+  if (includeIconId) {
+    row.service_icon_id = service.serviceIconId || null;
+  }
+  return row;
+}
+
+function mapServiceIconToRow(icon) {
+  return {
+    id: icon.id,
+    name: icon.name || "",
+    image_data: icon.imageData || "",
+    mime_type: icon.mimeType || "image/png",
+    active: icon.active ?? true,
+    created_at: icon.createdAt || todayISO(),
+  };
+}
+
+function errorMentionsSchemaToken(error, token = "") {
+  if (!error || !token) return false;
+  const haystack = [error.message, error.details, error.hint, error.code]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(String(token).toLowerCase());
 }
 
 function mapBarberServiceToRow(item) {
@@ -1827,7 +1876,19 @@ function mapRowToService(row) {
     value: Number(row.service_value ?? row.valor_servicio ?? row.value ?? row.valor) || 0,
     adminPercentage: Number(row.admin_percentage ?? row.porcentaje_admin) || 0,
     barberPercentage: Number(row.barber_percentage ?? row.porcentaje_barbero) || 0,
+    serviceIconId: row.service_icon_id || row.serviceIconId || "",
     active: parseActiveFlag(row.active ?? row.activo, true),
+  };
+}
+
+function mapRowToServiceIcon(row) {
+  return {
+    id: row.id,
+    name: row.name || "",
+    imageData: row.image_data || row.imageData || "",
+    mimeType: row.mime_type || row.mimeType || "image/png",
+    active: parseActiveFlag(row.active, true),
+    createdAt: row.created_at || todayISO(),
   };
 }
 
@@ -1974,7 +2035,11 @@ class StudioStore {
     const raw = localStorage.getItem(APP_KEY);
     if (!raw) return neutralBootstrapState();
     try {
-      return normalizeTenantState(JSON.parse(raw));
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        parsed.serviceIcons = [];
+      }
+      return normalizeTenantState(parsed);
     } catch {
       return neutralBootstrapState();
     }
@@ -1997,7 +2062,7 @@ class StudioStore {
       this.invalidateRemoteCache(changedBusinessId);
     }
     this.state = this.stateWithRuntimeScope(this.state);
-    localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+    persistAppStateSnapshot(this.state);
     if (changedBusinessId) {
       const currentScopeKey = this.currentRuntimeScopeKey(resolveRoute(location.pathname));
       if (event.table === "barbers") {
@@ -2525,7 +2590,7 @@ class StudioStore {
           };
           this.invalidateBusinessBuckets();
           invalidateDerivedBusinessCache();
-          localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+          persistAppStateSnapshot(this.state);
           if (typeof scheduleRender === "function") {
             scheduleRender();
           }
@@ -2567,7 +2632,7 @@ class StudioStore {
             [persistedBusiness]
           ),
         };
-        localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+        persistAppStateSnapshot(this.state);
         this.invalidateBusinessBuckets();
         invalidateDerivedBusinessCache();
       } else {
@@ -2619,7 +2684,7 @@ class StudioStore {
         this.remoteReady = true;
         this.setCachedBusinessRows(`business:${normalizedSlug}`, [data]);
         this.setPersistentBusinessIdentity(normalizedSlug, data);
-        localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+        persistAppStateSnapshot(this.state);
         invalidateDerivedBusinessCache();
         this.invalidateBusinessBuckets();
         this.invalidateStableBusinessCache(business.id);
@@ -2651,7 +2716,7 @@ class StudioStore {
     this.state = nextState;
     this.invalidateBusinessBuckets();
     invalidateDerivedBusinessCache();
-    localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+        persistAppStateSnapshot(this.state);
     this.remoteLoadedScopeKey = syncScopeKey;
     this.remoteLoadedScopes.add(syncScopeKey);
     this.remoteScopeLoadRequestedAt.delete(syncScopeKey);
@@ -2842,6 +2907,7 @@ class StudioStore {
           servicesStatusResult,
           barbersSummaryResult,
           appointmentsSummaryResult,
+          serviceIconsResult,
         ] = await Promise.all([
           this.trackedQuery(
             "business_settings",
@@ -2867,11 +2933,19 @@ class StudioStore {
               .select("id,business_id,date,status")
               .eq("date", todayISO())
           ),
+          this.trackedQuery(
+            "service_icons",
+            "super-admin",
+            this.supabase.from("service_icons").select(SERVICE_ICON_SELECT_COLUMNS).order("created_at", { ascending: true })
+          ),
         ]);
         perfStep("super-admin settings+summary", settingsPerf);
 
         if (businessSettingsResult.error && businessSettingsResult.error.code !== "42P01") {
           throw businessSettingsResult.error;
+        }
+        if (serviceIconsResult.error && serviceIconsResult.error.code !== "42P01") {
+          throw serviceIconsResult.error;
         }
 
         let businessSummaryById = {};
@@ -2910,6 +2984,7 @@ class StudioStore {
         }
 
         const businessSettingsRows = businessSettingsResult.data || [];
+        const serviceIconsRows = serviceIconsResult.error ? [] : serviceIconsResult.data || [];
         const themedBusinesses = applyBusinessSettingsThemeColors(mergedBusinesses, businessSettingsRows);
         cacheBusinessThemes(themedBusinesses);
         this.syncBusinessSettingsToLocal(businessSettingsRows, null);
@@ -2924,13 +2999,14 @@ class StudioStore {
             remoteView: route.view,
             remoteBusinessSlug: route.businessSlug || DEFAULT_BUSINESS_SLUG,
           },
-          businesses: themedBusinesses.length ? themedBusinesses : neutralBootstrapState().businesses,
-          barbers: this.state.barbers || [],
-          appointments: this.state.appointments || [],
-          blockedDays: this.state.blockedDays || [],
-          services: this.state.services || [],
-          barberServices: this.state.barberServices || [],
-        };
+        businesses: themedBusinesses.length ? themedBusinesses : neutralBootstrapState().businesses,
+        barbers: this.state.barbers || [],
+        appointments: this.state.appointments || [],
+        blockedDays: this.state.blockedDays || [],
+        services: this.state.services || [],
+        serviceIcons: serviceIconsRows.map(mapRowToServiceIcon),
+        barberServices: this.state.barberServices || [],
+      };
 
         await this.syncAdminAccountsFromRemote(null, nextState.businesses);
 
@@ -3015,9 +3091,13 @@ class StudioStore {
         this.beginResourceLoading("services", scopedBusinessId, syncScopeKey);
         this.beginResourceLoading("appointments", scopedBusinessId, syncScopeKey);
       }
+      const cachedServiceIconRows =
+        !force && Array.isArray(this.state.serviceIcons) && this.state.serviceIcons.length
+          ? this.state.serviceIcons.map(mapServiceIconToRow)
+          : null;
       const stableQueryResult = { data: null, error: null, fromStableCache: true };
       const scopedDataPerf = perfMark("business scoped data");
-      const [barbersResult, appointmentsBaseResult, blockedDaysResult, servicesResult, barberServicesResult, businessSettingsResult] = await Promise.all([
+      const [barbersResult, appointmentsBaseResult, blockedDaysResult, servicesResult, barberServicesResult, businessSettingsResult, serviceIconsResult] = await Promise.all([
         // These scoped reads intentionally stay parallel and filtered by business_id to keep each tenant isolated.
         canReuseStableBusinessData
           ? Promise.resolve(stableQueryResult)
@@ -3041,6 +3121,13 @@ class StudioStore {
             ),
         canReuseStableBusinessData ? Promise.resolve(stableQueryResult) : queryScoped("barber_services", "created_at", true),
         canReuseStableBusinessData ? Promise.resolve(stableQueryResult) : queryScoped("business_settings", "created_at", true),
+        cachedServiceIconRows
+          ? Promise.resolve({ data: cachedServiceIconRows, error: null, fromStateCache: true })
+          : this.trackedQuery(
+              "service_icons",
+              `shared:${route.view}:${route.businessSlug || scopedBusinessId || "global"}`,
+              this.supabase.from("service_icons").select(SERVICE_ICON_SELECT_COLUMNS).order("created_at", { ascending: true })
+            ),
       ]);
       perfStep("business scoped data", scopedDataPerf, `(${route.view}:${route.businessSlug || scopedBusinessId || "global"})`);
 
@@ -3051,6 +3138,9 @@ class StudioStore {
       if (barberServicesResult.error) console.warn("Scoped barber services query skipped", barberServicesResult.error);
       if (businessSettingsResult.error && businessSettingsResult.error.code !== "42P01") {
         console.warn("Scoped business settings query skipped", businessSettingsResult.error);
+      }
+      if (serviceIconsResult.error && serviceIconsResult.error.code !== "42P01") {
+        console.warn("Service icons query skipped", serviceIconsResult.error);
       }
 
       const appointmentsResult = {
@@ -3071,6 +3161,10 @@ class StudioStore {
       const barberServicesData = barberServicesResult.fromStableCache
         ? stableBucket.barberServices
         : (barberServicesResult.error ? [] : (barberServicesResult.data || []).map(mapRowToBarberService));
+      const serviceIconsData =
+        serviceIconsResult.error && serviceIconsResult.error.code !== "42P01"
+          ? this.state.serviceIcons || []
+          : (serviceIconsResult.data || []).map(mapRowToServiceIcon);
       const scopedBusinessSettingsRows = businessSettingsResult.fromStableCache || businessSettingsResult.error ? [] : businessSettingsResult.data || [];
       const currentWeek = getWeekKey();
       if (scopedBusinessId) {
@@ -3130,6 +3224,7 @@ class StudioStore {
           .filter((item) => item.status !== "reserved" || item.weekKey === currentWeek),
         blockedDays: (blockedDaysResult.error ? [] : blockedDaysResult.data || []).map(mapRowToBlockedDay),
         services: servicesData,
+        serviceIcons: serviceIconsData,
         barberServices: barberServicesData,
       };
 
@@ -3483,9 +3578,15 @@ class StudioStore {
         return;
       }
       if (!event.record) return;
-      const { error } = await this.supabase
+      const primaryRow = mapServiceToRow(event.record);
+      let { error } = await this.supabase
         .from("services")
-        .upsert(mapServiceToRow(event.record), { onConflict: "id" });
+        .upsert(primaryRow, { onConflict: "id" });
+      if (error && errorMentionsSchemaToken(error, "service_icon_id")) {
+        ({ error } = await this.supabase
+          .from("services")
+          .upsert(mapServiceToRow(event.record, { includeIconId: false }), { onConflict: "id" }));
+      }
       if (error) throw error;
       return;
     }
@@ -4036,6 +4137,77 @@ class StudioStore {
     return true;
   }
 
+  saveServiceIconLocal(icon) {
+    if (!icon?.id) return null;
+    const normalized = {
+      id: icon.id,
+      name: String(icon.name || "").trim(),
+      imageData: String(icon.imageData || ""),
+      mimeType: String(icon.mimeType || "image/png"),
+      active: parseActiveFlag(icon.active, true),
+      createdAt: icon.createdAt || todayISO(),
+    };
+    const exists = this.state.serviceIcons.some((item) => item.id === normalized.id);
+    this.state.serviceIcons = exists
+      ? this.state.serviceIcons.map((item) => (item.id === normalized.id ? { ...item, ...normalized } : item))
+      : [...this.state.serviceIcons, normalized];
+    this.state = this.stateWithRuntimeScope(this.state);
+    this.invalidateBusinessBuckets();
+    persistAppStateSnapshot(this.state);
+    return normalized;
+  }
+
+  removeServiceIconLocal(iconId) {
+    if (!iconId) return false;
+    this.state.serviceIcons = this.state.serviceIcons.filter((icon) => icon.id !== iconId);
+    this.state.services = this.state.services.map((service) =>
+      service.serviceIconId === iconId ? { ...service, serviceIconId: "" } : service
+    );
+    this.state = this.stateWithRuntimeScope(this.state);
+    this.invalidateBusinessBuckets();
+    persistAppStateSnapshot(this.state);
+    return true;
+  }
+
+  async upsertServiceIconRemote(icon) {
+    if (!this.supabase || !icon?.id) return true;
+    const { data, error } = await this.supabase
+      .from("service_icons")
+      .upsert(mapServiceIconToRow(icon), { onConflict: "id" })
+      .select(SERVICE_ICON_SELECT_COLUMNS)
+      .maybeSingle();
+    if (error) {
+      if (error.code === "42P01") return false;
+      throw error;
+    }
+    if (data?.id) {
+      this.saveServiceIconLocal(mapRowToServiceIcon(data));
+    }
+    return true;
+  }
+
+  async deleteServiceIconRemote(iconId) {
+    if (!this.supabase || !iconId) return { ok: true, deleted: false };
+    const usageResult = await this.supabase
+      .from("services")
+      .select("id", { head: true, count: "exact" })
+      .eq("service_icon_id", iconId);
+    if (usageResult.error && usageResult.error.code !== "42703") {
+      throw usageResult.error;
+    }
+    const usageCount = Number(usageResult.count || 0);
+    if (usageCount > 0) {
+      return { ok: false, inUse: true, usageCount };
+    }
+    const { error } = await this.supabase.from("service_icons").delete().eq("id", iconId);
+    if (error) {
+      if (error.code === "42P01") return { ok: false, missingTable: true };
+      throw error;
+    }
+    this.removeServiceIconLocal(iconId);
+    return { ok: true, deleted: true, usageCount: 0 };
+  }
+
   async deleteAdminAccountRemote(id, businessId = null) {
     if (!this.supabase || !id) return true;
     let query = this.supabase.from("admin_accounts").delete().eq("id", id);
@@ -4098,7 +4270,7 @@ class StudioStore {
     this.state.blockedDays = this.state.blockedDays.filter((blockedDay) => blockedDay.negocioId !== businessId);
     this.state.barberServices = this.state.barberServices.filter((relation) => relation.negocioId !== businessId);
     this.state = this.stateWithRuntimeScope(this.state);
-    localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+    persistAppStateSnapshot(this.state);
     return true;
   }
 
@@ -4146,7 +4318,7 @@ class StudioStore {
     this.state = this.stateWithRuntimeScope(this.state);
     this.invalidateBusinessBuckets();
     invalidateDerivedBusinessCache();
-    localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+    persistAppStateSnapshot(this.state);
     this.emit({ type: "SYNC", table: "businesses", reason: "business_delete_local" });
     return true;
   }
@@ -4274,7 +4446,7 @@ class StudioStore {
     this.invalidateBusinessBuckets();
     invalidateDerivedBusinessCache();
     this.state = this.stateWithRuntimeScope(this.state);
-    localStorage.setItem(APP_KEY, JSON.stringify(this.state));
+    persistAppStateSnapshot(this.state);
     const localEvent = { type: "INSERT", table: "appointments", record: appointment, source: "public_remote_safe" };
     this.emit(localEvent);
     this.channel?.postMessage(localEvent);
@@ -4495,6 +4667,7 @@ const AUTH_BLOCK_MS = 20 * 60 * 1000;
 const AUTH_MAX_ATTEMPTS = 5;
 const MAX_BACKGROUND_VIDEO_BYTES = 10 * 1024 * 1024;
 const MAX_ENV_ARCHIVE_BYTES = 25 * 1024 * 1024;
+const MAX_SERVICE_ICON_BYTES = 1 * 1024 * 1024;
 const DEFAULT_BACKGROUND_VIDEO = {
   type: "video",
   src: "/assets/v2_watermarked-a5df2acc-b2b0-45a5-9132-e0006456c345.mp4",
@@ -5901,7 +6074,7 @@ async function resolveLoginBarber(backendBarber, user, password, businessId = cu
     fallbackBarber,
   ];
   store.state = store.stateWithRuntimeScope(store.state);
-  localStorage.setItem(APP_KEY, JSON.stringify(store.state));
+  persistAppStateSnapshot(store.state);
   return fallbackBarber;
 }
 
@@ -5995,6 +6168,8 @@ app = {
   superAdminPendingLogos: {},
   superAdminPendingLogoFiles: {},
   superAdminPendingEnvironmentArchives: {},
+  superAdminServiceIconDraft: null,
+  superAdminServiceIconBusy: false,
   superAdminOpenBusinessId: "",
   superAdminDeleteTarget: null,
   superAdminDeleting: false,
@@ -6438,6 +6613,43 @@ function dsFileField(label, name, accept, dataAttr, options = {}) {
   );
 }
 
+function serviceIconPickerField(selectedIconId = "", fieldName = "serviceIconId") {
+  const selectedIcon = serviceIconById(selectedIconId);
+  const visibleIcons = [
+    ...activeServiceIcons(),
+    ...(selectedIcon && !parseActiveFlag(selectedIcon.active, true) ? [selectedIcon] : []),
+  ];
+  const uniqueIcons = Array.from(new Map(visibleIcons.map((icon) => [icon.id, icon])).values());
+  const icons = [...uniqueIcons].sort((left, right) =>
+    String(left.name || "").localeCompare(String(right.name || ""), "es")
+  );
+  return `<div class="ds-service-icon-picker">
+    <div class="ds-service-icon-picker__header">
+      <span class="ds-field__label">Icono del servicio</span>
+      <small class="ds-field__hint">Selecciona un icono guardado en base de datos o deja el servicio sin icono.</small>
+    </div>
+    <div class="ds-service-icon-picker__grid">
+      <label class="ds-service-icon-option ${!selectedIconId ? "active" : ""}">
+        <input type="radio" name="${escapeHTML(fieldName)}" value="" ${!selectedIconId ? "checked" : ""} />
+        <span class="ds-service-icon-option__preview ds-service-icon-option__preview--empty">Sin icono</span>
+      </label>
+      ${
+        icons.length
+          ? icons
+              .map(
+                (icon) => `<label class="ds-service-icon-option ${icon.id === selectedIconId ? "active" : ""}">
+            <input type="radio" name="${escapeHTML(fieldName)}" value="${escapeHTML(icon.id)}" ${icon.id === selectedIconId ? "checked" : ""} />
+            <span class="ds-service-icon-option__preview">${serviceIconImgMarkup(icon, "ds-service-icon-option__image")}</span>
+            <span class="ds-service-icon-option__name">${escapeHTML(icon.name)}${parseActiveFlag(icon.active, true) ? "" : " · inactivo"}</span>
+          </label>`
+              )
+              .join("")
+          : `<div class="ds-service-icon-picker__empty">No hay iconos cargados todavia.</div>`
+      }
+    </div>
+  </div>`;
+}
+
 function renderBusinessIdentityBlock(business, options = {}) {
   const { pendingLogo = "", showUrl = true } = options;
   const logoSrc = pendingLogo || business.logoUrl || "";
@@ -6512,10 +6724,14 @@ function publicSelectionPill({ icon = "services", eyebrow = "", title = "", meta
 }
 
 function publicServiceCard(service, businessId, isSelected) {
+  const serviceIcon = serviceIconById(service.serviceIconId);
   return `<button class="service-card public-service-card-v2 ${isSelected ? "active" : ""}" data-select-service="${service.id}">
     <div class="public-service-card-v2__head">
       <span class="public-service-card-v2__icon">${dsIcon("services")}</span>
-      ${publicPricesVisibleForBusiness(businessId) ? `<span class="public-service-card-v2__price">${escapeHTML(formatCOP(service.value))}</span>` : ""}
+      <div class="public-service-card-v2__meta">
+        ${publicPricesVisibleForBusiness(businessId) ? `<span class="public-service-card-v2__price">${escapeHTML(formatCOP(service.value))}</span>` : ""}
+        ${serviceIcon ? `<span class="public-service-card-v2__asset">${serviceIconImgMarkup(serviceIcon, "public-service-card-v2__asset-image")}</span>` : ""}
+      </div>
     </div>
     <div class="public-service-card-v2__body">
       <strong>${escapeHTML(service.name)}</strong>
@@ -6561,6 +6777,31 @@ function renderPublicBookingShell({
 
 function serviceById(id, businessId = currentBusinessId()) {
   return getBusinessBucket(businessId).servicesById.get(id) || null;
+}
+
+function serviceIconById(id) {
+  if (!id) return null;
+  return (store.state.serviceIcons || []).find((icon) => icon.id === id) || null;
+}
+
+function activeServiceIcons() {
+  return (store.state.serviceIcons || []).filter((icon) => parseActiveFlag(icon.active, true));
+}
+
+function serviceIconDataUrl(icon) {
+  if (!icon?.imageData) return "";
+  return `data:${icon.mimeType || "image/png"};base64,${icon.imageData}`;
+}
+
+function serviceIconImgMarkup(icon, className = "service-icon-chip__image") {
+  const src = serviceIconDataUrl(icon);
+  if (!src) return "";
+  return `<img class="${escapeHTML(className)}" src="${escapeHTML(src)}" alt="${escapeHTML(icon.name || "Icono del servicio")}" loading="lazy" decoding="async" />`;
+}
+
+function serviceIconUsageCount(iconId = "") {
+  if (!iconId) return 0;
+  return store.state.services.filter((service) => service.serviceIconId === iconId).length;
 }
 
 function serviceNameForAppointment(appointment) {
@@ -7465,6 +7706,7 @@ function serviceEditorCard(service) {
         ${dsInputField("% administrador", "adminPercentage", { required: true, value: service.adminPercentage, extra: 'inputmode="numeric"' })}
         ${dsInputField("% barbero", "barberPercentage", { required: true, value: service.barberPercentage, extra: 'inputmode="numeric"' })}
       </div>
+      ${serviceIconPickerField(service.serviceIconId || "")}
       <label class="toggle-line ds-toggle-line"><input name="active" type="checkbox" ${service.active ? "checked" : ""} /> Servicio activo</label>
       <div class="button-row ds-button-row">
         <button class="primary-action">Guardar servicio</button>
@@ -7517,6 +7759,7 @@ function servicesSection() {
         ${dsInputField("% administrador", "adminPercentage", { required: true, placeholder: "50", extra: 'inputmode="numeric"' })}
         ${dsInputField("% barbero", "barberPercentage", { required: true, placeholder: "50", extra: 'inputmode="numeric"' })}
       </div>
+      ${serviceIconPickerField("")}
       <label class="toggle-line ds-toggle-line"><input name="active" type="checkbox" checked /> Servicio activo</label>
       <div class="button-row ds-button-row">
         <button class="primary-action">Crear servicio</button>
@@ -8578,6 +8821,75 @@ function renderSuperAdminV2() {
     </div>
   </article>`;
 
+  const renderServiceIconsManagerPanel = () => {
+    const icons = [...(store.state.serviceIcons || [])].sort((left, right) =>
+      String(left.name || "").localeCompare(String(right.name || ""), "es")
+    );
+    const draft = app.superAdminServiceIconDraft || null;
+    return `<article class="admin-account-card super-business-card is-open">
+      <div class="super-business-summary">
+        <div class="super-business-summary__trigger super-business-summary__trigger--static">
+          <div class="super-business-summary__brand">
+            <div class="super-business-summary__logo"><span>I</span></div>
+            <div class="super-business-summary__copy">
+              <h3>Biblioteca global de iconos</h3>
+              <p>Los iconos cargados aqui quedan disponibles para todas las barberias.</p>
+            </div>
+          </div>
+          <div class="super-business-summary__stats">
+            <span><strong>${icons.filter((icon) => parseActiveFlag(icon.active, true)).length}</strong> activos</span>
+            <span><strong>${icons.length}</strong> totales</span>
+          </div>
+        </div>
+      </div>
+      <div class="super-business-panel">
+        ${app.superAdminMessage ? `<p class="form-note">${escapeHTML(app.superAdminMessage)}</p>` : ""}
+        <form id="service-icon-create-form" class="editor-card ds-form-card ds-crud-form">
+          <div class="form-grid ds-form-grid">
+            ${dsInputField("Nombre del icono", "name", { required: true, placeholder: "Bigote" })}
+            ${dsTextField(
+              "Imagen",
+              `<label class="file-control ds-upload-field">Seleccionar imagen<input name="icon" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" data-service-icon-input="create" /></label>`,
+              {
+                hint: "Formatos permitidos: PNG, JPG, JPEG y WEBP. Maximo 1 MB.",
+              }
+            )}
+          </div>
+          <div class="super-admin-logo-preview ds-media-preview service-icon-upload-preview">${draft?.previewSrc ? `<img src="${escapeHTML(draft.previewSrc)}" alt="Vista previa icono" loading="lazy" decoding="async" />` : `<span>Vista previa del icono</span>`}</div>
+          <div class="button-row ds-button-row">
+            <button class="primary-action" ${app.superAdminServiceIconBusy ? "disabled" : ""}>Guardar icono</button>
+          </div>
+        </form>
+        <div class="admin-account-list ds-card-list service-icon-admin-grid">
+          ${
+            icons.length
+              ? icons
+                  .map(
+                    (icon) => `<article class="ds-form-card service-icon-admin-card ${parseActiveFlag(icon.active, true) ? "is-active" : "is-inactive"}">
+              <div class="service-icon-admin-card__preview">
+                ${serviceIconImgMarkup(icon, "service-icon-admin-card__image")}
+              </div>
+              <div class="service-icon-admin-card__copy">
+                <div>
+                  <strong>${escapeHTML(icon.name)}</strong>
+                  ${dsStatusBadge(parseActiveFlag(icon.active, true), "Activo", "Inactivo")}
+                </div>
+                <small>${serviceIconUsageCount(icon.id)} servicio(s) usando este icono.</small>
+              </div>
+              <div class="button-row ds-button-row service-icon-admin-card__actions">
+                <button class="secondary-action inline-action" type="button" data-toggle-service-icon="${escapeHTML(icon.id)}">${parseActiveFlag(icon.active, true) ? "Desactivar" : "Activar"}</button>
+                <button class="secondary-action danger inline-action" type="button" data-delete-service-icon="${escapeHTML(icon.id)}">Eliminar</button>
+              </div>
+            </article>`
+                  )
+                  .join("")
+              : `<div class="empty-state-card ds-empty-card"><p class="microcopy">Aun no hay iconos cargados. Sube el primero desde este modulo.</p></div>`
+          }
+        </div>
+      </div>
+    </article>`;
+  };
+
   const deleteTarget = app.superAdminDeleteTarget
     ? store.businessById(app.superAdminDeleteTarget.id) || app.superAdminDeleteTarget
     : null;
@@ -8658,6 +8970,9 @@ function renderSuperAdminV2() {
       <button class="super-admin-module-card" type="button" data-super-admin-view="create">
         <span>02</span><strong>Crear negocio</strong><small>Alta guiada de nueva barberia con entorno independiente.</small>
       </button>
+      <button class="super-admin-module-card" type="button" data-super-admin-view="service-icons">
+        <span>03</span><strong>Iconos de servicios</strong><small>Galeria global reutilizable para cualquier barberia.</small>
+      </button>
       <button class="super-admin-module-card" type="button" data-super-admin-view="operations">
         <span>03</span><strong>Operación SaaS</strong><small>Configuracion, sesiones independientes y estado operativo en una sola vista.</small>
       </button>
@@ -8672,6 +8987,10 @@ function renderSuperAdminV2() {
   const createContent = `<section class="admin-main super-admin-create-shell">
     ${backToolbar("Alta guiada", "Crear negocio")}
     ${renderCreateBusinessPanel()}
+  </section>`;
+  const serviceIconsContent = `<section class="admin-main super-admin-create-shell">
+    ${backToolbar("Recursos globales", "Iconos de servicios")}
+    ${renderServiceIconsManagerPanel()}
   </section>`;
   const settingsContent = `<section class="admin-main super-admin-command-board">
     ${backToolbar("Configuracion", "Configuracion general")}
@@ -8714,6 +9033,8 @@ function renderSuperAdminV2() {
         ? businessesContent
         : activeSuperAdminView === "create"
           ? createContent
+          : activeSuperAdminView === "service-icons"
+            ? serviceIconsContent
           : activeSuperAdminView === "business-detail"
             ? renderSuperBusinessDetailPanel(selectedSuperBusiness)
             : activeSuperAdminView === "settings"
@@ -9758,6 +10079,122 @@ function bindEvents() {
     });
   });
 
+  document.querySelectorAll("[data-service-icon-input]").forEach((input) => {
+    input.addEventListener("change", async (event) => {
+      const file = event.currentTarget.files?.[0];
+      if (!file) {
+        app.superAdminServiceIconDraft = null;
+        render();
+        return;
+      }
+      const prepared = await prepareServiceIconAsset(file);
+      if (!prepared.valid) {
+        app.superAdminServiceIconDraft = null;
+        app.superAdminMessage = prepared.error || "No fue posible preparar el icono.";
+        event.currentTarget.value = "";
+        render();
+        return;
+      }
+      app.superAdminServiceIconDraft = {
+        previewSrc: prepared.previewSrc,
+        imageData: prepared.imageData,
+        mimeType: prepared.mimeType,
+      };
+      app.superAdminMessage = "Icono listo para guardarse en la base de datos.";
+      render();
+    });
+  });
+
+  document.querySelector("#service-icon-create-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("name") || "").trim();
+    const draft = app.superAdminServiceIconDraft;
+    if (!name || !draft?.imageData || !draft?.mimeType) {
+      app.superAdminMessage = "Escribe un nombre y selecciona una imagen valida.";
+      render();
+      return;
+    }
+    if ((store.state.serviceIcons || []).some((icon) => String(icon.name || "").trim().toLowerCase() === name.toLowerCase())) {
+      app.superAdminMessage = "Ya existe un icono con ese nombre.";
+      render();
+      return;
+    }
+    const nextIcon = {
+      id: uid("service_icon"),
+      name,
+      imageData: draft.imageData,
+      mimeType: draft.mimeType,
+      active: true,
+      createdAt: todayISO(),
+    };
+    app.superAdminServiceIconBusy = true;
+    app.superAdminMessage = "Guardando icono global...";
+    render();
+    try {
+      await store.upsertServiceIconRemote(nextIcon);
+      app.superAdminServiceIconDraft = null;
+      app.superAdminServiceIconBusy = false;
+      app.superAdminMessage = `Icono guardado: ${name}.`;
+      render();
+    } catch (error) {
+      app.superAdminServiceIconBusy = false;
+      app.superAdminMessage = "No fue posible guardar el icono del servicio.";
+      console.error("Service icon create failed", error);
+      render();
+    }
+  });
+
+  document.querySelectorAll("[data-toggle-service-icon]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const iconId = button.dataset.toggleServiceIcon || "";
+      const currentIcon = serviceIconById(iconId);
+      if (!currentIcon) return;
+      const nextIcon = { ...currentIcon, active: !parseActiveFlag(currentIcon.active, true) };
+      app.superAdminMessage = parseActiveFlag(nextIcon.active, true)
+        ? `Activando icono ${currentIcon.name}...`
+        : `Desactivando icono ${currentIcon.name}...`;
+      render();
+      try {
+        await store.upsertServiceIconRemote(nextIcon);
+        app.superAdminMessage = parseActiveFlag(nextIcon.active, true)
+          ? `Icono activado: ${currentIcon.name}.`
+          : `Icono desactivado: ${currentIcon.name}.`;
+      } catch (error) {
+        app.superAdminMessage = `No fue posible actualizar el icono ${currentIcon.name}.`;
+        console.error("Service icon toggle failed", error);
+      }
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-service-icon]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const iconId = button.dataset.deleteServiceIcon || "";
+      const currentIcon = serviceIconById(iconId);
+      if (!currentIcon) return;
+      if (serviceIconUsageCount(iconId) > 0) {
+        app.superAdminMessage = "Este icono esta siendo usado por servicios y no puede eliminarse.";
+        render();
+        return;
+      }
+      app.superAdminMessage = `Eliminando icono ${currentIcon.name}...`;
+      render();
+      try {
+        const result = await store.deleteServiceIconRemote(iconId);
+        if (result?.inUse) {
+          app.superAdminMessage = "Este icono esta siendo usado por servicios y no puede eliminarse.";
+        } else {
+          app.superAdminMessage = `Icono eliminado: ${currentIcon.name}.`;
+        }
+      } catch (error) {
+        app.superAdminMessage = `No fue posible eliminar el icono ${currentIcon.name}.`;
+        console.error("Service icon delete failed", error);
+      }
+      render();
+    });
+  });
+
   document.querySelector("#super-business-create")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -10617,6 +11054,7 @@ function bindEvents() {
       value: String(form.get("value") || "").trim(),
       adminPercentage: Number(form.get("adminPercentage")),
       barberPercentage: Number(form.get("barberPercentage")),
+      serviceIconId: String(form.get("serviceIconId") || "").trim(),
       active: form.get("active") === "on",
     };
     const error = validateServicePayload(payload);
@@ -10679,6 +11117,7 @@ function bindEvents() {
         value: String(form.get("value") || "").trim(),
         adminPercentage: Number(form.get("adminPercentage")),
         barberPercentage: Number(form.get("barberPercentage")),
+        serviceIconId: String(form.get("serviceIconId") || "").trim(),
         active: form.get("active") === "on",
       };
       const error = validateServicePayload(payload);
@@ -11399,6 +11838,76 @@ function fileToDataURL(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+function dataUrlParts(dataUrl = "") {
+  const value = String(dataUrl || "");
+  const match = value.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) return { mimeType: "", imageData: "" };
+  return {
+    mimeType: match[1] || "",
+    imageData: match[2] || "",
+  };
+}
+
+function validateServiceIconFile(file) {
+  if (!file) {
+    return { valid: false, error: "Debes seleccionar una imagen para el icono." };
+  }
+  const extension = archiveExtension(file.name);
+  const validType = /^image\/(png|jpeg|jpg|webp)$/i.test(file.type || "") || ["png", "jpg", "jpeg", "webp"].includes(extension);
+  if (!validType) {
+    return { valid: false, error: "Formato no permitido. Usa PNG, JPG, JPEG o WEBP." };
+  }
+  if (file.size > MAX_SERVICE_ICON_BYTES) {
+    return { valid: false, error: "El icono es demasiado pesado. Usa una imagen menor a 1 MB." };
+  }
+  return { valid: true };
+}
+
+async function optimizeServiceIconDataUrl(dataUrl, mimeType = "image/png") {
+  if (typeof document === "undefined" || !dataUrl) return String(dataUrl || "");
+  const image = await new Promise((resolve, reject) => {
+    const element = new Image();
+    element.onload = () => resolve(element);
+    element.onerror = reject;
+    element.src = String(dataUrl || "");
+  }).catch(() => null);
+  if (!image) return String(dataUrl || "");
+
+  const maxSize = 160;
+  const ratio = Math.min(1, maxSize / Math.max(image.width || maxSize, image.height || maxSize));
+  const width = Math.max(1, Math.round((image.width || maxSize) * ratio));
+  const height = Math.max(1, Math.round((image.height || maxSize) * ratio));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { alpha: true });
+  if (!ctx) return String(dataUrl || "");
+  ctx.clearRect(0, 0, width, height);
+  ctx.drawImage(image, 0, 0, width, height);
+  const outputMimeType = /png/i.test(mimeType) ? "image/png" : "image/webp";
+  return canvas.toDataURL(outputMimeType, outputMimeType === "image/png" ? undefined : 0.9);
+}
+
+async function prepareServiceIconAsset(file) {
+  const validation = validateServiceIconFile(file);
+  if (!validation.valid) return validation;
+  const sourceDataUrl = String((await fileToDataURL(file).catch(() => "")) || "");
+  if (!sourceDataUrl) {
+    return { valid: false, error: "No fue posible leer la imagen seleccionada." };
+  }
+  const optimizedDataUrl = await optimizeServiceIconDataUrl(sourceDataUrl, file.type || "image/png");
+  const { mimeType, imageData } = dataUrlParts(optimizedDataUrl || sourceDataUrl);
+  if (!imageData) {
+    return { valid: false, error: "No fue posible convertir la imagen para guardarla." };
+  }
+  return {
+    valid: true,
+    previewSrc: optimizedDataUrl || sourceDataUrl,
+    mimeType: mimeType || file.type || "image/png",
+    imageData,
+  };
 }
 
 store.subscribe((state, event) => {
