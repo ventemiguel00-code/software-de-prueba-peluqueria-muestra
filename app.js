@@ -4583,9 +4583,19 @@ class StudioStore {
   saveService(payload, options = {}) {
     const businessId = payload.negocioId || currentWritableBusinessId() || currentBusinessId();
     if (payload.id) {
+      const currentService =
+        this.state.services.find((service) => service.id === payload.id && service.negocioId === businessId) || null;
+      const nextPayload = {
+        ...payload,
+        negocioId: businessId,
+        serviceIconId:
+          Object.prototype.hasOwnProperty.call(payload, "serviceIconId")
+            ? payload.serviceIconId || ""
+            : currentService?.serviceIconId || "",
+      };
       this.state.services = this.state.services.map((service) =>
         service.id === payload.id && service.negocioId === businessId
-          ? { ...service, ...payload, negocioId: businessId }
+          ? { ...service, ...nextPayload }
           : service
       );
       this.persist({
@@ -5747,6 +5757,51 @@ function parseShowPublicPricesSetting(source = null) {
   return false;
 }
 
+function publicServiceIconsReady(services = []) {
+  const requiredIconIds = [...new Set((services || []).map((service) => String(service.serviceIconId || "").trim()).filter(Boolean))];
+  if (!requiredIconIds.length) return true;
+  const availableIcons = new Set((store.state.serviceIcons || []).map((icon) => String(icon.id || "").trim()).filter(Boolean));
+  return requiredIconIds.every((iconId) => availableIcons.has(iconId));
+}
+
+function publicServiceIconsLoadState(businessId = currentBusinessId(), services = []) {
+  const requiredIconIds = [...new Set((services || []).map((service) => String(service.serviceIconId || "").trim()).filter(Boolean))];
+  if (!requiredIconIds.length) {
+    return { loading: false, slow: false };
+  }
+  if (publicServiceIconsReady(services)) {
+    return { loading: false, slow: false };
+  }
+  const currentScopeLoaded =
+    currentBusinessResolution().status === "success" &&
+    store.remoteLoadedScopeKey === expectedScopeForCurrentRoute() &&
+    !store.syncInFlight;
+  if (currentScopeLoaded) {
+    return { loading: false, slow: false };
+  }
+  app.emptyBusinessDataRefreshAt = app.emptyBusinessDataRefreshAt || {};
+  const now = Date.now();
+  const lastAttempt = app.emptyBusinessDataRefreshAt[businessId] || 0;
+  const recentlyRequested = lastAttempt && now - lastAttempt < EMPTY_BUSINESS_DATA_REFRESH_COOLDOWN_MS;
+  if (!recentlyRequested) {
+    app.emptyBusinessDataRefreshAt[businessId] = now;
+    store.invalidateStableBusinessCache(businessId);
+    store.invalidateRemoteCache(businessId);
+    store.queueRemoteSync({
+      quiet: true,
+      force: true,
+      origin: "public-service-icons-refresh",
+      component: "BusinessRenderPublic",
+      hook: "publicServiceIconsLoadState",
+    });
+  }
+  const elapsed = now - (app.emptyBusinessDataRefreshAt[businessId] || now);
+  return {
+    loading: store.syncInFlight || elapsed < PUBLIC_SERVICES_LOADING_MS,
+    slow: elapsed >= PUBLIC_SERVICES_LOADING_MS,
+  };
+}
+
 function publicPricesVisibleForBusiness(businessId = currentBusinessId()) {
   const settings = store.businessSettingsForBusiness(businessId);
   return settings.publicPricesResolved && settings.showPublicPrices === true;
@@ -6657,6 +6712,15 @@ function serviceIconPickerField(selectedIconId = "", fieldName = "serviceIconId"
         <span class="ds-service-icon-option__preview ds-service-icon-option__preview--empty">Sin icono</span>
       </label>
       ${
+        selectedIconId && !selectedIcon
+          ? `<label class="ds-service-icon-option active">
+              <input type="radio" name="${escapeHTML(fieldName)}" value="${escapeHTML(selectedIconId)}" checked />
+              <span class="ds-service-icon-option__preview ds-service-icon-option__preview--empty">Actual</span>
+              <span class="ds-service-icon-option__name">Icono asignado</span>
+            </label>`
+          : ""
+      }
+      ${
         icons.length
           ? icons
               .map(
@@ -6749,15 +6813,12 @@ function publicSelectionPill({ icon = "services", eyebrow = "", title = "", meta
 function publicServiceCard(service, businessId, isSelected) {
   const serviceIcon = serviceIconById(service.serviceIconId);
   return `<button class="service-card public-service-card-v2 ${isSelected ? "active" : ""}" data-select-service="${service.id}">
-    <div class="public-service-card-v2__head">
-      <span class="public-service-card-v2__icon">${dsIcon("services")}</span>
+    <div class="public-service-card-v2__body">
+      <strong>${escapeHTML(service.name)}</strong>
       <div class="public-service-card-v2__meta">
         ${publicPricesVisibleForBusiness(businessId) ? `<span class="public-service-card-v2__price">${escapeHTML(formatCOP(service.value))}</span>` : ""}
         ${serviceIcon ? `<span class="public-service-card-v2__asset">${serviceIconImgMarkup(serviceIcon, "public-service-card-v2__asset-image")}</span>` : ""}
       </div>
-    </div>
-    <div class="public-service-card-v2__body">
-      <strong>${escapeHTML(service.name)}</strong>
     </div>
   </button>`;
 }
@@ -7106,7 +7167,8 @@ function renderPublic() {
   const publicServices = reservableServicesForBusiness(businessId);
   const showPublicPrices = publicPricesVisibleForBusiness(businessId);
   const servicesLoadState = publicServices.length ? { loading: false, slow: false, error: "" } : publicServicesLoadState(businessId);
-  const servicesLoading = !publicServices.length && servicesLoadState.loading;
+  const iconLoadState = publicServiceIconsLoadState(businessId, publicServices);
+  const servicesLoading = (!publicServices.length && servicesLoadState.loading) || (publicServices.length && iconLoadState.loading);
   businessDataLoading = businessDataLoading || servicesLoading;
   const activeBarbers = app.selectedServiceId ? barbersForService(app.selectedServiceId) : store.activeBarbersByBusiness(businessId);
   const waitingBarbersForPublic = !activeBarbers.length && isBusinessDataRefreshPending(businessId);
@@ -7141,7 +7203,7 @@ function renderPublic() {
   if (currentStep === "services") {
     bookingCardTitle = "Seleccionar servicio";
     bookingCardMicrocopy = servicesLoading
-      ? servicesLoadState.slow
+      ? servicesLoadState.slow || iconLoadState.slow
         ? "Estamos cargando los servicios..."
         : "Preparando servicios disponibles."
       : "Selecciona el servicio principal para continuar con la reserva.";
@@ -7700,6 +7762,12 @@ function validateServicePayload(payload) {
     return "Los porcentajes deben sumar 100%.";
   }
   return "";
+}
+
+function submittedServiceIconId(formData, fallbackValue = "") {
+  if (!formData || typeof formData.get !== "function") return String(fallbackValue || "").trim();
+  if (!formData.has("serviceIconId")) return String(fallbackValue || "").trim();
+  return String(formData.get("serviceIconId") || "").trim();
 }
 
 function validateBarberPayload(payload, editingId = "") {
@@ -11085,7 +11153,7 @@ function bindEvents() {
       value: String(form.get("value") || "").trim(),
       adminPercentage: Number(form.get("adminPercentage")),
       barberPercentage: Number(form.get("barberPercentage")),
-      serviceIconId: String(form.get("serviceIconId") || "").trim(),
+      serviceIconId: submittedServiceIconId(form, ""),
       active: form.get("active") === "on",
     };
     const error = validateServicePayload(payload);
@@ -11142,13 +11210,15 @@ function bindEvents() {
         return;
       }
       const form = new FormData(event.currentTarget);
+      const existingService =
+        servicesForBusiness(businessId).find((service) => service.id === event.currentTarget.dataset.serviceId) || null;
       const payload = {
         id: event.currentTarget.dataset.serviceId,
         name: String(form.get("name") || "").trim(),
         value: String(form.get("value") || "").trim(),
         adminPercentage: Number(form.get("adminPercentage")),
         barberPercentage: Number(form.get("barberPercentage")),
-        serviceIconId: String(form.get("serviceIconId") || "").trim(),
+        serviceIconId: submittedServiceIconId(form, existingService?.serviceIconId || ""),
         active: form.get("active") === "on",
       };
       const error = validateServicePayload(payload);
