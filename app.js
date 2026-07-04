@@ -28,6 +28,7 @@ const PERF_SUBSCRIBE_METRICS_KEY = "barber-delux-subscribe-metrics-v1";
 const THEME_CACHE_PREFIX = "theme_cache_";
 const BUSINESS_IDENTITY_CACHE_KEY = "barber-delux-business-identity-v1";
 const PUBLIC_SERVICES_LOCAL_CACHE_KEY = "barber-delux-public-services-v1";
+const PUBLIC_SERVICE_ICONS_LOCAL_CACHE_KEY = "barber-delux-public-service-icons-v1";
 const REMOTE_SYNC_DEBOUNCE_MS = 650;
 const REMOTE_SCOPE_CACHE_TTL_MS = 4 * 60 * 1000;
 const SUPER_ADMIN_CACHE_TTL_MS = 3 * 60 * 1000;
@@ -2574,30 +2575,49 @@ class StudioStore {
   async prefetchPublicServices(businessId = "", { force = false } = {}) {
     if (!this.supabase || !businessId) return [];
     const cached = !force ? this.getCachedPublicServices(businessId) : null;
-    if (cached) return cached;
+    const cachedIcons = !force ? cachedPublicServiceIcons() : [];
+    if (cached && cachedIcons.length) return cached;
     const existing = this.publicServicesInFlight.get(businessId);
     if (existing) return existing;
-    const promise = this.trackedQuery(
-      "services:public_prefetch",
-      `public:${businessId}`,
-      this.supabase
-        .from("services")
-        .select(PUBLIC_SERVICE_SELECT_COLUMNS)
-        .eq("business_id", businessId)
-        .eq("active", true)
-        .order("created_at", { ascending: true })
-    )
-      .then(({ data, error }) => {
-        if (error) throw error;
-        const services = (data || []).map(mapRowToService);
+    const prefetchPerf = perfMark("public services prefetch");
+    const promise = Promise.all([
+      this.trackedQuery(
+        "services:public_prefetch",
+        `public:${businessId}`,
+        this.supabase
+          .from("services")
+          .select(PUBLIC_SERVICE_SELECT_COLUMNS)
+          .eq("business_id", businessId)
+          .eq("active", true)
+          .order("created_at", { ascending: true })
+      ),
+      this.trackedQuery(
+        "service_icons:public_prefetch",
+        `public:${businessId}`,
+        this.supabase.from("service_icons").select(SERVICE_ICON_SELECT_COLUMNS).order("created_at", { ascending: true })
+      ),
+    ])
+      .then(([servicesResult, iconsResult]) => {
+        if (servicesResult.error) throw servicesResult.error;
+        if (iconsResult.error && iconsResult.error.code !== "42P01") throw iconsResult.error;
+        const hydratePerf = perfMark("public services hydrate");
+        const services = (servicesResult.data || []).map(mapRowToService);
+        const serviceIcons = (iconsResult.data || []).map(mapRowToServiceIcon);
         this.setCachedPublicServices(businessId, services);
-        if (services.length) {
+        if (serviceIcons.length) {
+          persistPublicServiceIcons(serviceIcons);
+        }
+        perfStep("public services hydrate", hydratePerf, `(${businessId}:services=${services.length},icons=${serviceIcons.length})`);
+        if (services.length || serviceIcons.length) {
           this.state = {
             ...this.state,
-            services: [
-              ...this.state.services.filter((service) => service.negocioId !== businessId),
-              ...services,
-            ],
+            services: services.length
+              ? [
+                  ...this.state.services.filter((service) => service.negocioId !== businessId),
+                  ...services,
+                ]
+              : this.state.services || [],
+            serviceIcons: serviceIcons.length ? serviceIcons : this.state.serviceIcons || [],
           };
           this.invalidateBusinessBuckets();
           invalidateDerivedBusinessCache();
@@ -2606,6 +2626,7 @@ class StudioStore {
             scheduleRender();
           }
         }
+        perfEnd(prefetchPerf, `(${businessId}:services=${services.length},icons=${serviceIcons.length})`);
         return services;
       })
       .catch((error) => {
@@ -2625,6 +2646,7 @@ class StudioStore {
   }
 
   async resolveBusinessBySlug(slug = "") {
+    const resolvePerf = perfMark("resolveBusinessBySlug");
     const normalizedSlug = slugify(slug) || DEFAULT_BUSINESS_SLUG;
     const persistedBusinessRow = this.getPersistentBusinessIdentity(normalizedSlug);
     if (persistedBusinessRow) {
@@ -2657,6 +2679,7 @@ class StudioStore {
       const result = { status: "success", business: cachedBusiness, checkedAt: Date.now() };
       this.businessResolutionBySlug.set(normalizedSlug, result);
       if (cachedBusiness.id) this.prefetchPublicServices(cachedBusiness.id).catch(() => {});
+      perfEnd(resolvePerf, `(cache:${normalizedSlug})`);
       return result;
     }
     const current = this.businessResolutionBySlug.get(normalizedSlug);
@@ -2701,21 +2724,25 @@ class StudioStore {
         this.invalidateStableBusinessCache(business.id);
         this.invalidateRemoteCache(business.id);
         this.prefetchPublicServices(business.id).catch(() => {});
+        const activeRoute = resolveRoute(location.pathname);
+        const shouldForcePostResolveSync = activeRoute.view === "admin" || activeRoute.view === "barber";
         const result = { status: "success", business, checkedAt: Date.now() };
         this.businessResolutionBySlug.set(normalizedSlug, result);
         this.emit({ type: "BUSINESS_RESOLVED", table: "businesses", businessId: business.id });
         this.queueRemoteSync({
           quiet: true,
-          force: true,
+          force: shouldForcePostResolveSync,
           origin: "resolve-business-by-slug",
           component: "StudioStore",
           hook: "resolveBusinessBySlug",
         });
+        perfEnd(resolvePerf, `(remote:${normalizedSlug})`);
         return result;
       })
       .catch((error) => {
         const result = { status: "error", error: error?.message || "No fue posible consultar el negocio.", checkedAt: Date.now() };
         this.businessResolutionBySlug.set(normalizedSlug, result);
+        perfEnd(resolvePerf, `(error:${normalizedSlug})`);
         return result;
       });
     this.businessResolutionBySlug.set(normalizedSlug, { status: "pending", promise, checkedAt: Date.now() });
@@ -2996,6 +3023,9 @@ class StudioStore {
 
         const businessSettingsRows = businessSettingsResult.data || [];
         const serviceIconsRows = serviceIconsResult.error ? [] : serviceIconsResult.data || [];
+        if (serviceIconsRows.length) {
+          persistPublicServiceIcons(serviceIconsRows.map(mapRowToServiceIcon));
+        }
         const themedBusinesses = applyBusinessSettingsThemeColors(mergedBusinesses, businessSettingsRows);
         cacheBusinessThemes(themedBusinesses);
         this.syncBusinessSettingsToLocal(businessSettingsRows, null);
@@ -3092,6 +3122,21 @@ class StudioStore {
       const stableBucketHasBusinessData = Boolean(
         stableBucket.barbers.length || stableBucket.services.length || stableBucket.barberServices.length
       );
+      const cachedPrefetchedPublicServices =
+        !force && isPublicRoute && scopedBusinessId ? this.getCachedPublicServices(scopedBusinessId) || [] : [];
+      const cachedPrefetchedPublicIcons =
+        !force && isPublicRoute ? cachedPublicServiceIcons() : [];
+      const prefetchedPublicIconIds = new Set(
+        cachedPrefetchedPublicIcons.map((icon) => String(icon.id || "").trim()).filter(Boolean)
+      );
+      const canReusePrefetchedPublicData =
+        isPublicRoute &&
+        scopedBusinessId &&
+        cachedPrefetchedPublicServices.length > 0 &&
+        cachedPrefetchedPublicServices.every((service) => {
+          const iconId = String(service.serviceIconId || "").trim();
+          return !iconId || prefetchedPublicIconIds.has(iconId);
+        });
       const canReuseStableBusinessData =
         !force &&
         scopedBusinessId &&
@@ -3127,6 +3172,12 @@ class StudioStore {
         ),
         canReuseStableBusinessData
           ? Promise.resolve(stableQueryResult)
+          : canReusePrefetchedPublicData
+            ? Promise.resolve({
+                data: cachedPrefetchedPublicServices.map((service) => mapServiceToRow(service)),
+                error: null,
+                fromPublicPrefetch: true,
+              })
           : queryScoped("services", "created_at", true, (query) =>
               isPublicRoute || route.view === "barber" ? query.eq("active", true) : query
             ),
@@ -3134,6 +3185,12 @@ class StudioStore {
         canReuseStableBusinessData ? Promise.resolve(stableQueryResult) : queryScoped("business_settings", "created_at", true),
         cachedServiceIconRows
           ? Promise.resolve({ data: cachedServiceIconRows, error: null, fromStateCache: true })
+          : canReusePrefetchedPublicData
+            ? Promise.resolve({
+                data: cachedPrefetchedPublicIcons.map(mapServiceIconToRow),
+                error: null,
+                fromPublicPrefetch: true,
+              })
           : this.trackedQuery(
               "service_icons",
               `shared:${route.view}:${route.businessSlug || scopedBusinessId || "global"}`,
@@ -3176,6 +3233,9 @@ class StudioStore {
         serviceIconsResult.error && serviceIconsResult.error.code !== "42P01"
           ? this.state.serviceIcons || []
           : (serviceIconsResult.data || []).map(mapRowToServiceIcon);
+      if (serviceIconsData.length) {
+        persistPublicServiceIcons(serviceIconsData);
+      }
       const scopedBusinessSettingsRows = businessSettingsResult.fromStableCache || businessSettingsResult.error ? [] : businessSettingsResult.data || [];
       const currentWeek = getWeekKey();
       if (scopedBusinessId) {
@@ -5665,16 +5725,7 @@ function publicServicesLoadState(businessId = currentBusinessId()) {
   const recentlyRequested = lastAttempt && now - lastAttempt < EMPTY_BUSINESS_DATA_REFRESH_COOLDOWN_MS;
   if (!recentlyRequested) {
     app.emptyBusinessDataRefreshAt[businessId] = now;
-    store.invalidateStableBusinessCache(businessId);
-    store.invalidateRemoteCache(businessId);
     store.prefetchPublicServices(businessId, { force: true }).catch(() => {});
-    store.queueRemoteSync({
-      quiet: true,
-      force: true,
-      origin: "public-services-refresh",
-      component: "BusinessRenderPublic",
-      hook: "publicServicesLoadState",
-    });
   }
   const elapsed = now - (app.emptyBusinessDataRefreshAt[businessId] || now);
   if (businessResolved && elapsed >= PUBLIC_SERVICES_LOADING_MS) {
@@ -5760,7 +5811,7 @@ function parseShowPublicPricesSetting(source = null) {
 function publicServiceIconsReady(services = []) {
   const requiredIconIds = [...new Set((services || []).map((service) => String(service.serviceIconId || "").trim()).filter(Boolean))];
   if (!requiredIconIds.length) return true;
-  const availableIcons = new Set((store.state.serviceIcons || []).map((icon) => String(icon.id || "").trim()).filter(Boolean));
+  const availableIcons = new Set(cachedPublicServiceIcons().map((icon) => String(icon.id || "").trim()).filter(Boolean));
   return requiredIconIds.every((iconId) => availableIcons.has(iconId));
 }
 
@@ -5785,19 +5836,11 @@ function publicServiceIconsLoadState(businessId = currentBusinessId(), services 
   const recentlyRequested = lastAttempt && now - lastAttempt < EMPTY_BUSINESS_DATA_REFRESH_COOLDOWN_MS;
   if (!recentlyRequested) {
     app.emptyBusinessDataRefreshAt[businessId] = now;
-    store.invalidateStableBusinessCache(businessId);
-    store.invalidateRemoteCache(businessId);
-    store.queueRemoteSync({
-      quiet: true,
-      force: true,
-      origin: "public-service-icons-refresh",
-      component: "BusinessRenderPublic",
-      hook: "publicServiceIconsLoadState",
-    });
+    store.prefetchPublicServices(businessId, { force: true }).catch(() => {});
   }
   const elapsed = now - (app.emptyBusinessDataRefreshAt[businessId] || now);
   return {
-    loading: store.syncInFlight || elapsed < PUBLIC_SERVICES_LOADING_MS,
+    loading: Boolean(store.publicServicesInFlight?.get(businessId)) || elapsed < PUBLIC_SERVICES_LOADING_MS,
     slow: elapsed >= PUBLIC_SERVICES_LOADING_MS,
   };
 }
@@ -6863,13 +6906,51 @@ function serviceById(id, businessId = currentBusinessId()) {
   return getBusinessBucket(businessId).servicesById.get(id) || null;
 }
 
+let serviceIconLookupCache = {
+  source: null,
+  map: new Map(),
+};
+
+function cachedPublicServiceIcons() {
+  const runtimeIcons = store?.state?.serviceIcons || [];
+  if (runtimeIcons.length) return runtimeIcons;
+  try {
+    const cached = JSON.parse(localStorage.getItem(PUBLIC_SERVICE_ICONS_LOCAL_CACHE_KEY) || "[]");
+    return Array.isArray(cached) ? cached.map(mapRowToServiceIcon) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistPublicServiceIcons(icons = []) {
+  try {
+    localStorage.setItem(
+      PUBLIC_SERVICE_ICONS_LOCAL_CACHE_KEY,
+      JSON.stringify((icons || []).map(mapServiceIconToRow))
+    );
+  } catch {
+    // Service icon cache is only used to accelerate public visual hydration.
+  }
+}
+
 function serviceIconById(id) {
   if (!id) return null;
-  return (store.state.serviceIcons || []).find((icon) => icon.id === id) || null;
+  const icons = cachedPublicServiceIcons();
+  if (serviceIconLookupCache.source !== icons) {
+    serviceIconLookupCache = {
+      source: icons,
+      map: new Map(
+        icons
+          .filter((icon) => icon?.id)
+          .map((icon) => [icon.id, icon])
+      ),
+    };
+  }
+  return serviceIconLookupCache.map.get(id) || null;
 }
 
 function activeServiceIcons() {
-  return (store.state.serviceIcons || []).filter((icon) => parseActiveFlag(icon.active, true));
+  return cachedPublicServiceIcons().filter((icon) => parseActiveFlag(icon.active, true));
 }
 
 function serviceIconDataUrl(icon) {
@@ -7207,17 +7288,24 @@ function renderPublic() {
         ? "Estamos cargando los servicios..."
         : "Preparando servicios disponibles."
       : "Selecciona el servicio principal para continuar con la reserva.";
+    const serviceCardsPerf = perfMark("public service cards render");
+    const serviceCardsMarkup = publicServices.length
+      ? publicServices
+          .map(
+            (service) => `${publicServiceCard(service, businessId, service.id === app.selectedServiceId)}`
+          )
+          .join("")
+      : "";
+    if (publicServices.length) {
+      perfEnd(serviceCardsPerf, `(${businessId}:cards=${publicServices.length})`);
+    }
     bookingCardBody = `<div class="public-service-step-v2">
       <div class="public-service-step-v2__grid">
       ${
         servicesLoading
           ? `<div class="business-component-skeleton public-component-skeleton public-service-skeleton"><span></span><span></span></div>`
           : publicServices.length
-          ? publicServices
-        .map(
-          (service) => `${publicServiceCard(service, businessId, service.id === app.selectedServiceId)}`
-        )
-        .join("")
+          ? serviceCardsMarkup
           : `<div class="empty-state-card">
               <p>${servicesLoadState.error ? "No fue posible cargar los servicios." : "No hay servicios disponibles para reservar."}</p>
               ${servicesLoadState.error ? `<button class="secondary-action" type="button" data-retry-public-services>Reintentar</button>` : ""}
