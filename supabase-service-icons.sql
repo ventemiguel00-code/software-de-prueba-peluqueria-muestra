@@ -49,7 +49,93 @@ begin
     to authenticated
     using (true);
   end if;
+
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'service_icons'
+      and policyname = 'service_icons_insert_anon'
+  ) then
+    create policy service_icons_insert_anon
+    on public.service_icons
+    for insert
+    to anon
+    with check (true);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'service_icons'
+      and policyname = 'service_icons_insert_authenticated'
+  ) then
+    create policy service_icons_insert_authenticated
+    on public.service_icons
+    for insert
+    to authenticated
+    with check (true);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'service_icons'
+      and policyname = 'service_icons_update_anon'
+  ) then
+    create policy service_icons_update_anon
+    on public.service_icons
+    for update
+    to anon
+    using (true)
+    with check (true);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'service_icons'
+      and policyname = 'service_icons_update_authenticated'
+  ) then
+    create policy service_icons_update_authenticated
+    on public.service_icons
+    for update
+    to authenticated
+    using (true)
+    with check (true);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'service_icons'
+      and policyname = 'service_icons_delete_anon'
+  ) then
+    create policy service_icons_delete_anon
+    on public.service_icons
+    for delete
+    to anon
+    using (true);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'service_icons'
+      and policyname = 'service_icons_delete_authenticated'
+  ) then
+    create policy service_icons_delete_authenticated
+    on public.service_icons
+    for delete
+    to authenticated
+    using (true);
+  end if;
 end
 $$;
 
-grant select on public.service_icons to anon, authenticated;
+grant select, insert, update, delete on public.service_icons to anon, authenticated;

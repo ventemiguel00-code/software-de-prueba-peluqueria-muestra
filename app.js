@@ -4178,6 +4178,12 @@ class StudioStore {
       .maybeSingle();
     if (error) {
       if (error.code === "42P01") return false;
+      if (error.code === "42501") {
+        const permissionError = new Error("No tienes permisos para guardar iconos en service_icons.");
+        permissionError.code = error.code;
+        permissionError.details = error.message || "";
+        throw permissionError;
+      }
       throw error;
     }
     if (data?.id) {
@@ -4202,6 +4208,12 @@ class StudioStore {
     const { error } = await this.supabase.from("service_icons").delete().eq("id", iconId);
     if (error) {
       if (error.code === "42P01") return { ok: false, missingTable: true };
+      if (error.code === "42501") {
+        const permissionError = new Error("No tienes permisos para eliminar iconos en service_icons.");
+        permissionError.code = error.code;
+        permissionError.details = error.message || "";
+        throw permissionError;
+      }
       throw error;
     }
     this.removeServiceIconLocal(iconId);
@@ -10132,14 +10144,17 @@ function bindEvents() {
     app.superAdminMessage = "Guardando icono global...";
     render();
     try {
-      await store.upsertServiceIconRemote(nextIcon);
+      const saved = await store.upsertServiceIconRemote(nextIcon);
+      if (!saved) {
+        throw new Error("La tabla service_icons aun no esta disponible en Supabase.");
+      }
       app.superAdminServiceIconDraft = null;
       app.superAdminServiceIconBusy = false;
       app.superAdminMessage = `Icono guardado: ${name}.`;
       render();
     } catch (error) {
       app.superAdminServiceIconBusy = false;
-      app.superAdminMessage = "No fue posible guardar el icono del servicio.";
+      app.superAdminMessage = error?.message || "No fue posible guardar el icono del servicio.";
       console.error("Service icon create failed", error);
       render();
     }
@@ -10156,12 +10171,15 @@ function bindEvents() {
         : `Desactivando icono ${currentIcon.name}...`;
       render();
       try {
-        await store.upsertServiceIconRemote(nextIcon);
+        const saved = await store.upsertServiceIconRemote(nextIcon);
+        if (!saved) {
+          throw new Error("La tabla service_icons aun no esta disponible en Supabase.");
+        }
         app.superAdminMessage = parseActiveFlag(nextIcon.active, true)
           ? `Icono activado: ${currentIcon.name}.`
           : `Icono desactivado: ${currentIcon.name}.`;
       } catch (error) {
-        app.superAdminMessage = `No fue posible actualizar el icono ${currentIcon.name}.`;
+        app.superAdminMessage = error?.message || `No fue posible actualizar el icono ${currentIcon.name}.`;
         console.error("Service icon toggle failed", error);
       }
       render();
@@ -10184,11 +10202,13 @@ function bindEvents() {
         const result = await store.deleteServiceIconRemote(iconId);
         if (result?.inUse) {
           app.superAdminMessage = "Este icono esta siendo usado por servicios y no puede eliminarse.";
+        } else if (result?.missingTable) {
+          app.superAdminMessage = "La tabla service_icons aun no esta disponible en Supabase.";
         } else {
           app.superAdminMessage = `Icono eliminado: ${currentIcon.name}.`;
         }
       } catch (error) {
-        app.superAdminMessage = `No fue posible eliminar el icono ${currentIcon.name}.`;
+        app.superAdminMessage = error?.message || `No fue posible eliminar el icono ${currentIcon.name}.`;
         console.error("Service icon delete failed", error);
       }
       render();
