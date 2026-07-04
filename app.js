@@ -208,6 +208,17 @@ function uid(prefix = "id") {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
 }
 
+function uuidId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  const bytes = window.crypto?.getRandomValues
+    ? window.crypto.getRandomValues(new Uint8Array(16))
+    : Uint8Array.from({ length: 16 }, () => Math.floor(Math.random() * 256));
+  bytes[6] = (bytes[6] & 15) | 64;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const hex = [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 function bogotaNowParts(date = new Date()) {
   const parts = Object.fromEntries(
     BOGOTA_DATE_PARTS_FORMATTER
@@ -10133,7 +10144,7 @@ function bindEvents() {
       return;
     }
     const nextIcon = {
-      id: uid("service_icon"),
+      id: uuidId(),
       name,
       imageData: draft.imageData,
       mimeType: draft.mimeType,
