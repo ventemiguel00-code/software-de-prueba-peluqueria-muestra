@@ -1865,119 +1865,6 @@ input:focus {
   gap: 12px;
 }
 
-.admin-dashboard-hero__pills {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-.admin-dashboard-hero__pills span {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 0 14px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--color-primary) 22%, transparent);
-  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
-  color: var(--white);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.admin-dashboard-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin-top: 8px;
-}
-
-.admin-dashboard-meta__toggle {
-  margin: 0;
-}
-
-.admin-dashboard-meta__notice {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
-  padding: 0 14px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--color-primary) 20%, transparent);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.admin-quick-shell {
-  border-radius: 28px;
-  border: 1px solid color-mix(in srgb, var(--color-primary) 18%, transparent);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
-    rgba(8, 12, 16, 0.84);
-  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.2), var(--inner-light);
-}
-
-.admin-quick-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 14px;
-  margin-top: 18px;
-}
-
-.admin-quick-card {
-  display: grid;
-  gap: 16px;
-  min-height: 196px;
-  padding: 20px;
-  border-radius: 22px;
-  border: 1px solid color-mix(in srgb, var(--color-primary) 16%, transparent);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--color-primary) 8%, transparent), rgba(255, 255, 255, 0.02)),
-    rgba(10, 14, 18, 0.88);
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.18), var(--inner-light);
-}
-
-.admin-quick-card__icon {
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 16px;
-  border: 1px solid color-mix(in srgb, var(--color-primary) 34%, transparent);
-  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
-}
-
-.admin-quick-card__copy {
-  display: grid;
-  gap: 8px;
-}
-
-.admin-quick-card__copy h3 {
-  margin: 0;
-  font-size: 20px;
-}
-
-.admin-quick-card__copy p {
-  margin: 0;
-  color: var(--muted);
-}
-
-.admin-quick-card__muted {
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.admin-quick-card__action {
-  display: flex;
-  align-items: flex-end;
-}
-
 .admin-barber-board {
   border-radius: 28px;
   border: 1px solid color-mix(in srgb, var(--color-primary) 18%, transparent);
@@ -2143,10 +2030,6 @@ input:focus {
     width: 100%;
     justify-items: stretch;
   }
-
-  .admin-dashboard-hero__pills {
-    justify-content: flex-start;
-  }
 }
 
 @media (max-width: 768px) {
@@ -2176,17 +2059,6 @@ input:focus {
     font-size: clamp(28px, 8vw, 38px);
   }
 
-  .admin-dashboard-meta {
-    align-items: stretch;
-  }
-
-  .admin-quick-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .admin-quick-card {
-    min-height: 0;
-  }
 }
 
 .background-preview {

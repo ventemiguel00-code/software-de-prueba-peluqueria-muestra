@@ -9272,15 +9272,11 @@ function backgroundSettingsSection() {
 function adminDashboardSection() {
   const businessId = currentBusinessId();
   const today = todayISO();
-  const businessBarbers = barbersForBusiness(businessId);
-  const businessServices = servicesForBusiness(businessId);
   const businessAppointments = store.state.appointments.filter((item) => item.negocioId === businessId);
   const todayAppointments = businessAppointments.filter((item) => item.date === today);
   const currentWeekDates = getWeekDatesMemo(dateAnchor(today)).filter((date) => date <= today);
   const currentWeekSet = new Set(currentWeekDates);
   const reservedToday = todayAppointments.filter((item) => COUNTABLE_STATUSES.has(item.status)).length;
-  const activeBarbersCount = businessBarbers.filter((item) => item.active !== false).length;
-  const activeServicesCount = businessServices.filter((item) => item.active !== false).length;
   const realizedToday = todayAppointments.filter(isRealizedAppointment);
   const realizedWeek = businessAppointments.filter(
     (item) => isRealizedAppointment(item) && currentWeekSet.has(item.date)
@@ -9306,42 +9302,9 @@ function adminDashboardSection() {
       dsMetricCard({ icon: "income", label: "Ingresos de la semana actual", value: formatCOP(incomeWeek) }),
       dsMetricCard({ icon: "admin", label: "Ganancias del administrador", value: formatCOP(gainsToday.admin) }),
       dsMetricCard({ icon: "barbers", label: "Ganancias de los barberos", value: formatCOP(gainsToday.barber) }),
-      dsMetricCard({ icon: "users", label: "Barberos activos", value: activeBarbersCount }),
-      dsMetricCard({ icon: "services", label: "Servicios activos", value: activeServicesCount }),
     ],
-    `<div class="admin-dashboard-meta">
-      <label class="toggle-line sound-toggle admin-dashboard-meta__toggle"><input type="checkbox" data-sound-toggle ${app.soundEnabled ? "checked" : ""} /> Sonido sutil para nueva reserva</label>
-      <div class="admin-dashboard-meta__notice">${dsIcon("notifications")}<span>Todo el contenido de este panel sigue aislado por business_id.</span></div>
-    </div>`
+    `<label class="toggle-line sound-toggle"><input type="checkbox" data-sound-toggle ${app.soundEnabled ? "checked" : ""} /> Sonido sutil para nueva reserva</label>`
   );
-}
-
-function adminQuickActionsSection() {
-  const cards = [
-    { icon: "+", title: "Nuevo barbero", description: "Registra un nuevo profesional para este negocio.", action: `<button class="primary-action" type="button" data-admin-panel="new-barber">Crear barbero</button>` },
-    { icon: "S", title: "Nuevo servicio", description: "Configura servicios y precios del negocio.", action: `<button class="secondary-action" type="button" data-admin-panel="services">Gestionar servicios</button>` },
-    { icon: "H", title: "Horarios", description: "Ajusta disponibilidad y jornada de atencion.", action: `<button class="secondary-action" type="button" data-admin-panel="attention-hours">Abrir horarios</button>` },
-    { icon: "U", title: "Fondo dinamico", description: "Personaliza el entorno visual del negocio.", action: `<button class="secondary-action" type="button" data-admin-panel="dynamic-bg">Configurar fondo</button>` },
-    { icon: "A", title: "Nueva reserva", description: "Ve al bloque de barberos para abrir una agenda y reservar.", action: `<a class="secondary-action" href="#admin-barbers-board">Ir a la agenda</a>` },
-    { icon: "G", title: "Configuracion", description: "Administra accesos y estructura del panel.", action: `${isPrincipalAdmin() ? `<button class="secondary-action" type="button" data-admin-panel="admin-accounts">Gestionar admins</button>` : `<span class="admin-quick-card__muted">Gestion centralizada del negocio</span>`}` },
-  ];
-  return `<section class="admin-main admin-quick-shell">
-    <div class="section-title"><span>R</span><h2>Acciones rapidas</h2></div>
-    <div class="admin-quick-grid">
-      ${cards
-        .map(
-          (card) => `<article class="admin-quick-card">
-            <div class="admin-quick-card__icon">${escapeHTML(card.icon)}</div>
-            <div class="admin-quick-card__copy">
-              <strong>${escapeHTML(card.title)}</strong>
-              <p>${escapeHTML(card.description)}</p>
-            </div>
-            <div class="admin-quick-card__action">${card.action}</div>
-          </article>`
-        )
-        .join("")}
-    </div>
-  </section>`;
 }
 
 function clientHistorySummary(record) {
@@ -9453,8 +9416,6 @@ function renderAdminV2() {
     .filter(Boolean);
   const singleSelectedRecord = selectedRecords.length === 1 ? selectedRecords[0] : null;
   const currentBusinessRecord = currentBusiness();
-  const activeServicesCount = servicesForBusiness(currentBusinessId()).filter((item) => item.active !== false).length;
-  const activeBarbersCount = businessBarbers.filter((item) => item.active !== false).length;
 
   return appShell(`
     <section class="dashboard-head admin-dashboard-hero">
@@ -9467,10 +9428,6 @@ function renderAdminV2() {
         </div>
       </div>
       <div class="admin-dashboard-hero__side">
-        <div class="admin-dashboard-hero__pills">
-          <span>${dsIcon("users")} ${activeBarbersCount} barberos activos</span>
-          <span>${dsIcon("services")} ${activeServicesCount} servicios activos</span>
-        </div>
         <button class="secondary-action" data-admin-logout>Cerrar sesion</button>
       </div>
     </section>
@@ -9479,7 +9436,6 @@ function renderAdminV2() {
       !selected || app.adminView === "home"
         ? `<section class="admin-stack admin-dashboard-shell">
         ${adminDashboardSection()}
-        ${adminQuickActionsSection()}
         <section class="admin-main admin-barber-board" id="admin-barbers-board">
           <div class="section-title"><span>A</span><h2>Barberos</h2></div>
           <p class="microcopy">Selecciona un barbero para abrir automaticamente su agenda del dia actual.</p>
