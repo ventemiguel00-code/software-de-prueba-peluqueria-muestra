@@ -6884,11 +6884,7 @@ function renderPublicBookingShell({
         <section class="public-booking-panel-v2 public-booking-panel-v2--${escapeHTML(currentStep)}">
           <div class="public-booking-panel-v2__head public-motion-enter public-motion-enter--base">
             <div class="public-booking-panel-v2__title">
-              <span class="section-kicker">${currentStep === "services" ? "01" : currentStep === "barbers" ? "02" : currentStep === "days" ? "03" : currentStep === "slots" ? "04" : "05"}</span>
-              <div>
-                <h2>${escapeHTML(bookingCardTitle)}</h2>
-                <p class="microcopy public-booking-panel-v2__microcopy">${escapeHTML(bookingCardMicrocopy)}</p>
-              </div>
+              <h2>${escapeHTML(bookingCardTitle)}</h2>
             </div>
             ${publicProgressStepper(currentStep)}
           </div>

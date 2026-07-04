@@ -4380,42 +4380,23 @@ body[data-device="mobile"] *::after {
 
 .public-booking-panel-v2__head {
   display: grid;
-  gap: 22px;
-  padding: 30px 30px 20px;
+  gap: 16px;
+  padding: 22px 30px 14px;
   border-bottom: 1px solid rgba(126, 216, 255, 0.12);
 }
 
 .public-booking-panel-v2__title {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px;
-}
-
-.section-kicker {
-  display: inline-grid;
-  place-items: center;
-  min-width: 50px;
-  height: 50px;
-  border-radius: 18px;
-  border: 1px solid rgba(126, 216, 255, 0.24);
-  background: linear-gradient(180deg, rgba(0, 191, 255, 0.18), rgba(0, 191, 255, 0.06));
-  color: var(--petrol-bright);
-  font-size: 13px;
-  font-weight: 900;
-  letter-spacing: 0.14em;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
 .public-booking-panel-v2__title h2 {
   margin: 0;
-  font-size: clamp(28px, 3vw, 40px);
+  font-size: clamp(26px, 3vw, 36px);
   line-height: 1;
   letter-spacing: -0.04em;
-}
-
-.public-booking-panel-v2__microcopy {
-  margin: 8px 0 0;
-  color: rgba(220, 232, 240, 0.72);
 }
 
 .public-progress {
@@ -4477,15 +4458,15 @@ body[data-device="mobile"] *::after {
 }
 
 .public-booking-panel-v2__summary {
-  padding-top: 20px;
+  padding-top: 16px;
 }
 
 .public-booking-panel-v2__actions {
-  padding-top: 18px;
+  padding-top: 14px;
 }
 
 .public-booking-panel-v2__body {
-  padding-top: 18px;
+  padding-top: 14px;
   padding-bottom: 30px;
 }
 
@@ -4696,8 +4677,7 @@ body[data-device="mobile"] *::after {
   }
 
   .public-booking-panel-v2__title {
-    flex-direction: column;
-    align-items: flex-start;
+    justify-content: center;
   }
 }
 
@@ -4720,11 +4700,14 @@ body[data-device="mobile"] *::after {
   }
 
   .public-booking-panel-v2__head {
-    padding-top: 22px;
+    gap: 14px;
+    padding-top: 18px;
+    padding-bottom: 12px;
   }
 
   .public-booking-panel-v2__body {
-    padding-bottom: 22px;
+    padding-top: 12px;
+    padding-bottom: 20px;
   }
 
   .public-progress {
@@ -4761,7 +4744,11 @@ body[data-device="mobile"] *::after {
 
 @media (max-width: 520px) {
   .public-booking-panel-v2__head {
-    gap: 18px;
+    gap: 12px;
+  }
+
+  .public-booking-panel-v2__title h2 {
+    font-size: clamp(22px, 7vw, 28px);
   }
 
   .public-progress {
