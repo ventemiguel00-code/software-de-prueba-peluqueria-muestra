@@ -1926,18 +1926,57 @@ input:focus {
 
 .admin-barber-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 14px;
 }
 
 .admin-person-card {
-  min-height: 112px;
+  min-height: 96px;
   grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 22px;
+  align-items: center;
+}
+
+.admin-person-card .avatar.md {
+  width: 60px;
+  height: 60px;
+  border-radius: 18px;
+  border-color: color-mix(in srgb, var(--color-primary) 30%, rgba(238, 243, 242, 0.2));
+  box-shadow:
+    inset 0 0 0 1px rgba(5, 6, 7, 0.35),
+    0 10px 22px rgba(0, 0, 0, 0.26);
 }
 
 .barber-card-copy,
 .barber-heading-copy {
   min-width: 0;
+}
+
+.admin-person-card .barber-card-copy {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+}
+
+.admin-person-card .barber-card-copy strong {
+  font-size: 18px;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+}
+
+.admin-person-card .barber-card-copy small {
+  font-size: 12px;
+  line-height: 1.28;
+  color: color-mix(in srgb, var(--color-text-secondary) 92%, transparent);
+  overflow-wrap: anywhere;
+}
+
+.admin-person-card .barber-card-copy small:last-child {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--color-text-secondary) 72%, transparent);
 }
 
 .counter-badge {
@@ -1962,6 +2001,35 @@ input:focus {
   text-align: center;
   vertical-align: middle;
   flex-shrink: 0;
+}
+
+.admin-person-card .counter-badge {
+  justify-self: end;
+  width: auto;
+  min-width: 78px;
+  height: auto;
+  min-height: 58px;
+  padding: 8px 12px 10px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  font-size: 22px;
+  line-height: 1;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-button-hover) 12%, transparent), rgba(255, 255, 255, 0.03)),
+    rgba(8, 15, 21, 0.82);
+}
+
+.admin-person-card .counter-badge::before {
+  content: "Reservas";
+  display: block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  line-height: 1;
 }
 
 .header-counter {
@@ -2656,11 +2724,36 @@ dialog::backdrop {
   }
 
   .admin-person-card {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    min-height: 88px;
+    gap: 10px;
+    padding: 11px 12px;
   }
 
   .admin-person-card .counter-badge {
     justify-self: end;
+    min-width: 64px;
+    min-height: 52px;
+    padding: 7px 10px 9px;
+    font-size: 20px;
+  }
+
+  .admin-person-card .avatar.md {
+    width: 54px;
+    height: 54px;
+    border-radius: 16px;
+  }
+
+  .admin-person-card .barber-card-copy strong {
+    font-size: 16px;
+  }
+
+  .admin-person-card .barber-card-copy small {
+    font-size: 11.5px;
+  }
+
+  .admin-person-card .counter-badge::before {
+    font-size: 9px;
   }
 
   .row-actions {
