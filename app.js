@@ -6320,6 +6320,7 @@ app = {
   pendingBackgroundVideo: null,
   soundEnabled: loadSoundPreference(),
   barberDate: todayISO(),
+  barberOpenPanel: "",
   barberScheduleView: "hours",
   barberSession: loadScopedBusinessSession(BARBER_SESSION_KEY, initialRoute.businessSlug),
   barberLoginError: "",
@@ -7627,6 +7628,24 @@ function renderBarber() {
   }
   const date = todayISO();
   const rows = slotRowsForBarberDate(barber.id, date, currentBusinessId());
+  const counterSummary = buildCounterSummary(date);
+  const business = currentBusiness();
+  const hasOperationalRows = rows.some(({ status, dayBlocked, appointment }) => dayBlocked || status !== "available" || appointment);
+  const activeBarberModule = app.barberOpenPanel || "";
+  return appShell(`
+    ${renderBarberWelcomeCard(barber, business, counterSummary)}
+    ${
+      activeBarberModule
+        ? renderBarberDedicatedModule(activeBarberModule, {
+            barber,
+            business,
+            rows,
+            counterSummary,
+            hasOperationalRows,
+          })
+        : renderBarberModuleHub()
+    }
+  `);
   return appShell(`
     <section class="dashboard-head">
       <div class="barber-heading">
@@ -9494,6 +9513,202 @@ function renderAdminWelcomeCard(account, business) {
   `;
 }
 
+function renderBarberWelcomeCard(barber, business, counterSummary) {
+  const accountName = barber?.name || app.barberSession?.name || "Barbero";
+  const businessName = business?.name || "Barberia";
+  const now = new Date();
+  const rawDateLabel = BOGOTA_LONG_DATE_FORMATTER.format(now);
+  const todayLabel = rawDateLabel ? `${rawDateLabel.charAt(0).toUpperCase()}${rawDateLabel.slice(1)}` : "";
+  const timeLabel = BOGOTA_TIME_FORMATTER.format(now);
+  const online = typeof navigator === "undefined" ? true : navigator.onLine !== false;
+  const statusLabel = online ? "En linea" : "Sin conexion";
+
+  return `
+    <section class="dashboard-head admin-dashboard-hero barber-dashboard-hero">
+      <div class="admin-dashboard-hero__brand">
+        <div class="admin-dashboard-hero__copy">
+          <p class="eyebrow">Panel barbero</p>
+          <h1>Bienvenido, ${escapeHTML(accountName)}</h1>
+          <span>${escapeHTML(`Barbero · ${businessName}`)}</span>
+        </div>
+        <div class="admin-dashboard-hero__facts" aria-label="Resumen del entorno del barbero">
+          <article class="admin-dashboard-hero__fact">
+            <small>Fecha</small>
+            <strong>${escapeHTML(todayLabel)}</strong>
+          </article>
+          <article class="admin-dashboard-hero__fact">
+            <small>Hora actual</small>
+            <strong>${escapeHTML(timeLabel)}</strong>
+          </article>
+          <article class="admin-dashboard-hero__fact">
+            <small>Estado del sistema</small>
+            <strong class="admin-dashboard-hero__status ${online ? "is-online" : "is-offline"}">${escapeHTML(statusLabel)}</strong>
+          </article>
+          <article class="admin-dashboard-hero__fact">
+            <small>Reservas semanales</small>
+            <strong>${escapeHTML(String(counterValue(counterSummary.weeklyByBarber, barber?.id)))}</strong>
+          </article>
+        </div>
+      </div>
+      <div class="admin-dashboard-hero__side">
+        <button class="secondary-action" data-logout>Cerrar sesion</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderBarberModuleToolbar(title) {
+  return `<section class="admin-main admin-module-toolbar-card">
+    <div class="admin-module-toolbar">
+      <button class="secondary-action" type="button" data-barber-module-back>Atras</button>
+      <div class="admin-module-toolbar__copy">
+        <p class="eyebrow">Panel barbero</p>
+        <h2>${escapeHTML(title)}</h2>
+      </div>
+    </div>
+  </section>`;
+}
+
+function renderBarberModuleCard(id, label, title, description) {
+  return `<button class="super-admin-module-card barber-module-card" type="button" data-barber-panel="${escapeHTML(id)}">
+    <span>${escapeHTML(label)}</span>
+    <strong>${escapeHTML(title)}</strong>
+    <small>${escapeHTML(description)}</small>
+  </button>`;
+}
+
+function renderBarberProfilePanel(barber, business, counterSummary) {
+  return `<section class="admin-main admin-barber-board barber-profile-card">
+    <div class="section-title"><span>P</span><h2>Perfil</h2></div>
+    <div class="barber-heading">
+      ${avatar(barber, "lg")}
+      <div class="barber-heading-copy">
+        <p class="eyebrow">${barber.active ? "Barbero activo" : "Barbero inactivo"}</p>
+        <h1>${escapeHTML(barber.name)}</h1>
+        <span>Usuario: ${escapeHTML(barber.user)} · ${escapeHTML(barber.specialty || "Servicio premium")}</span>
+      </div>
+      ${renderCounter(counterValue(counterSummary.weeklyByBarber, barber.id), "header-counter")}
+    </div>
+    <div class="admin-dashboard-hero__facts barber-profile-facts">
+      <article class="admin-dashboard-hero__fact">
+        <small>WhatsApp</small>
+        <strong>${escapeHTML(barber.whatsapp ? displayPhone(barber.whatsapp) : "Sin WhatsApp")}</strong>
+      </article>
+      <article class="admin-dashboard-hero__fact">
+        <small>Negocio</small>
+        <strong>${escapeHTML(business?.name || "Barberia")}</strong>
+      </article>
+      <article class="admin-dashboard-hero__fact">
+        <small>Estado</small>
+        <strong class="admin-dashboard-hero__status ${barber.active ? "is-online" : "is-offline"}">${barber.active ? "Disponible" : "Inactivo"}</strong>
+      </article>
+    </div>
+  </section>`;
+}
+
+function renderBarberDaysPanel() {
+  return `<section class="admin-main admin-barber-board barber-schedule-panel">
+    <div class="section-title"><span>D</span><h2>Seleccionar dia</h2></div>
+    ${renderWeekSelector(app.barberDate, "data-barber-date", { anchorDate: app.barberDate })}
+  </section>`;
+}
+
+function renderBarberAgendaPanel(rows, counterSummary, hasOperationalRows) {
+  return `<section class="admin-main admin-barber-board barber-schedule-panel">
+    <div class="agenda-toolbar">
+      <div>
+        <div class="section-title"><span>H</span><h2>Agenda del dia</h2></div>
+        <p class="microcopy">${dayNameForISODate(app.barberDate, true)} · ${app.barberDate}</p>
+      </div>
+      <button class="secondary-action" data-barber-days>Cambiar dia</button>
+    </div>
+    <div class="status-legend">
+      ${Object.entries(STATUS).map(([, item]) => `<span class="${item.tone}"><i></i>${item.label}</span>`).join("")}
+    </div>
+    <div class="status-legend visit-legend">
+      ${Object.entries(VISIT_STATE_META).map(([, item]) => `<span class="visit-state-pill ${item.tone}">${escapeHTML(item.label)}</span>`).join("")}
+    </div>
+    ${
+      !hasOperationalRows
+        ? `<div class="empty-state-card">
+            <p>Aun no tienes citas, bloqueos ni citas fijadas para este dia.</p>
+            <p>Cuando el administrador o los clientes registren movimientos, apareceran aqui en tiempo real.</p>
+          </div>`
+        : ""
+    }
+    <div class="admin-slots readonly">
+      ${rows
+        .map(({ time, status, appointment, dayBlocked }) => {
+          const unavailable = isUnavailableSlot(app.barberDate, time, status);
+          const serviceName = serviceNameForAppointment(appointment);
+          const statusLabel = operationalStatusLabel({ appointment, status, dayBlocked, unavailable });
+          return `
+        <article class="slot-row ${STATUS[status].tone} ${unavailable ? "unavailable" : ""}">
+          <div><strong>${slotRange(time)}</strong><span>${statusLabel}</span></div>
+          <div class="slot-client">
+            <strong>${escapeHTML(appointment?.clientName || (status === "available" ? "Disponible" : "Sin cliente"))}</strong>
+            <small>${appointment?.whatsapp ? displayPhone(appointment.whatsapp) : "Solo lectura"}</small>
+            ${appointment ? `<small>Servicio: ${escapeHTML(serviceName)}</small>` : ""}
+            ${appointment ? renderVisitStatePill(appointment.visitState) : ""}
+          </div>
+        </article>`;
+        })
+        .join("")}
+    </div>
+    <div class="day-counter-row">
+      ${renderCounter(counterValue(counterSummary.dailyByBarber, app.barberSession?.id), "day-counter")}
+    </div>
+  </section>`;
+}
+
+function renderBarberModuleHub() {
+  return `<section class="admin-stack admin-dashboard-shell barber-dashboard-shell">
+    <section class="admin-main ds-card barber-dashboard-home">
+      <div class="section-title"><span>I</span><h2>Dashboard del barbero</h2></div>
+      <div class="super-admin-module-grid barber-module-grid">
+        ${renderBarberModuleCard("summary", "01", "Resumen de hoy", "Consulta tus ganancias y reservas del dia en una vista compacta.")}
+        ${renderBarberModuleCard("agenda", "02", "Agenda del dia", "Visualiza los horarios, reservas, bloqueos y citas fijadas del dia seleccionado.")}
+        ${renderBarberModuleCard("days", "03", "Seleccionar dia", "Explora la semana y cambia rapidamente la fecha activa de tu agenda.")}
+        ${renderBarberModuleCard("profile", "04", "Perfil", "Revisa tu cuenta, contacto, estado actual y el negocio al que perteneces.")}
+      </div>
+    </section>
+  </section>`;
+}
+
+function renderBarberDedicatedModule(moduleId, context) {
+  const { barber, business, rows = [], counterSummary, hasOperationalRows = false } = context || {};
+
+  if (moduleId === "summary") {
+    return `<section class="admin-stack admin-module-stack barber-module-stack">
+      ${renderBarberModuleToolbar("Resumen de hoy")}
+      ${barberSummaryCards(barber, todayISO(), "barber")}
+    </section>`;
+  }
+
+  if (moduleId === "agenda") {
+    return `<section class="admin-stack admin-module-stack barber-module-stack">
+      ${renderBarberModuleToolbar("Agenda del dia")}
+      ${renderBarberAgendaPanel(rows, counterSummary, hasOperationalRows)}
+    </section>`;
+  }
+
+  if (moduleId === "days") {
+    return `<section class="admin-stack admin-module-stack barber-module-stack">
+      ${renderBarberModuleToolbar("Seleccionar dia")}
+      ${renderBarberDaysPanel()}
+    </section>`;
+  }
+
+  if (moduleId === "profile") {
+    return `<section class="admin-stack admin-module-stack barber-module-stack">
+      ${renderBarberModuleToolbar("Perfil")}
+      ${renderBarberProfilePanel(barber, business, counterSummary)}
+    </section>`;
+  }
+
+  return renderBarberModuleHub();
+}
+
 function clientHistorySummary(record) {
   if (!record?.clientName && !record?.whatsapp) return `<p class="microcopy">Sin historial disponible.</p>`;
   const businessId = record?.negocioId || currentBusinessId();
@@ -9865,6 +10080,23 @@ function renderBarberV2() {
   const rows = slotRowsForBarberDate(barber.id, app.barberDate, currentBusinessId());
   const counterSummary = buildCounterSummary(app.barberDate);
   const hasOperationalRows = rows.some(({ status, dayBlocked, appointment }) => dayBlocked || status !== "available" || appointment);
+  const business = currentBusiness();
+  const activeBarberModule = app.barberOpenPanel || "";
+
+  return appShell(`
+    ${renderBarberWelcomeCard(barber, business, counterSummary)}
+    ${
+      activeBarberModule
+        ? renderBarberDedicatedModule(activeBarberModule, {
+            barber,
+            business,
+            rows,
+            counterSummary,
+            hasOperationalRows,
+          })
+        : renderBarberModuleHub()
+    }
+  `);
 
   return appShell(`
     <section class="dashboard-head">
@@ -11937,7 +12169,25 @@ function bindEvents() {
 
   document.querySelector("[data-barber-agenda]")?.addEventListener("click", () => {
     app.barberScheduleView = "hours";
+    app.barberOpenPanel = "agenda";
     render();
+  });
+
+  document.querySelectorAll("[data-barber-panel]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const panel = button.dataset.barberPanel || "";
+      app.barberOpenPanel = panel;
+      if (panel === "days") app.barberScheduleView = "days";
+      if (panel === "agenda") app.barberScheduleView = "hours";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-barber-module-back]").forEach((button) => {
+    button.addEventListener("click", () => {
+      app.barberOpenPanel = "";
+      render();
+    });
   });
 
   document.querySelectorAll("[data-admin-slot]").forEach((button) => {
@@ -12059,6 +12309,7 @@ function bindEvents() {
 
   document.querySelector("[data-barber-days]")?.addEventListener("click", () => {
     app.barberScheduleView = "days";
+    app.barberOpenPanel = "days";
     render();
   });
 
@@ -12067,6 +12318,7 @@ function bindEvents() {
       app.barberDate = button.dataset.barberDate;
       store.state.meta.selectedDate = app.barberDate;
       app.barberScheduleView = "hours";
+      app.barberOpenPanel = "agenda";
       store.queueRemoteSync({ quiet: true, origin: "barber-date-change", component: "BarberAgenda", hook: "datePicker" });
       render();
     });
@@ -12118,6 +12370,7 @@ function bindEvents() {
     clearAuthAttemptState("barber", app.currentBusinessSlug, user);
     app.barberDate = todayISO();
     store.state.meta.selectedDate = app.barberDate;
+    app.barberOpenPanel = "";
     app.barberScheduleView = "hours";
     await claimRemoteSession("barber", app.barberSession);
     saveScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug, app.barberSession);
@@ -12128,6 +12381,7 @@ function bindEvents() {
     await closeRemoteSession("barber", app.barberSession, "manual_logout");
     app.barberSession = null;
     app.barberLoginError = "";
+    app.barberOpenPanel = "";
     clearScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug);
     render();
   });
