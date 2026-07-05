@@ -9305,18 +9305,25 @@ function adminDashboardSection() {
     },
     { admin: 0, barber: 0 }
   );
+  const open = app.adminOpenPanel === "dashboard-summary";
 
-  return dsMetricSection(
-    "Resumen de hoy",
+  return renderAccordionPanel(
+    "dashboard-summary",
     "D",
-    [
-      dsMetricCard({ icon: "reservations", label: "Reservas de hoy", value: reservedToday }),
-      dsMetricCard({ icon: "income", label: "Ingresos de hoy", value: formatCOP(incomeToday) }),
-      dsMetricCard({ icon: "income", label: "Ingresos de la semana actual", value: formatCOP(incomeWeek) }),
-      dsMetricCard({ icon: "admin", label: "Ganancias del administrador", value: formatCOP(gainsToday.admin) }),
-      dsMetricCard({ icon: "barbers", label: "Ganancias de los barberos", value: formatCOP(gainsToday.barber) }),
-    ],
-    `<label class="toggle-line sound-toggle"><input type="checkbox" data-sound-toggle ${app.soundEnabled ? "checked" : ""} /> Sonido sutil para nueva reserva</label>`
+    "Resumen de hoy",
+    `
+      <div class="dashboard-cards ds-metric-grid">
+        ${[
+          dsMetricCard({ icon: "reservations", label: "Reservas de hoy", value: reservedToday }),
+          dsMetricCard({ icon: "income", label: "Ingresos de hoy", value: formatCOP(incomeToday) }),
+          dsMetricCard({ icon: "income", label: "Ingresos de la semana actual", value: formatCOP(incomeWeek) }),
+          dsMetricCard({ icon: "admin", label: "Ganancias del administrador", value: formatCOP(gainsToday.admin) }),
+          dsMetricCard({ icon: "barbers", label: "Ganancias de los barberos", value: formatCOP(gainsToday.barber) }),
+        ].join("")}
+      </div>
+      <label class="toggle-line sound-toggle"><input type="checkbox" data-sound-toggle ${app.soundEnabled ? "checked" : ""} /> Sonido sutil para nueva reserva</label>
+    `,
+    open
   );
 }
 

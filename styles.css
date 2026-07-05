@@ -1322,6 +1322,10 @@ input:focus {
 
 .ds-metric-grid {
   align-items: stretch;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .ds-metric-card {
@@ -1338,6 +1342,10 @@ input:focus {
     linear-gradient(140deg, color-mix(in srgb, var(--color-primary) 10%, transparent), rgba(255, 255, 255, 0.025)),
     rgba(9, 13, 17, 0.84);
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.22), var(--inner-light);
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .ds-metric-card__icon {
@@ -1360,17 +1368,20 @@ input:focus {
   display: grid;
   align-content: start;
   gap: 8px;
+  min-width: 0;
 }
 
 .ds-metric-card__copy span,
 .ds-metric-card__copy small {
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .ds-metric-card__copy strong {
   font-size: clamp(24px, 4vw, 34px);
   line-height: 1;
   color: var(--white);
+  overflow-wrap: anywhere;
 }
 
 .ds-card {
@@ -1793,11 +1804,17 @@ input:focus {
   padding: clamp(18px, 4vw, 44px);
   display: grid;
   gap: 18px;
+  max-width: 100%;
+  overflow-x: hidden;
+  box-sizing: border-box;
 }
 
 .admin-dashboard-shell {
   width: min(1320px, 100%);
   gap: 22px;
+  max-width: 100%;
+  overflow-x: hidden;
+  box-sizing: border-box;
 }
 
 .admin-dashboard-hero {
@@ -2069,7 +2086,10 @@ input:focus {
   .admin-dashboard-shell,
   .admin-stack {
     width: 100%;
+    max-width: 100%;
     padding-inline: 14px;
+    overflow-x: hidden;
+    box-sizing: border-box;
   }
 
   .admin-dashboard-hero {
@@ -2090,6 +2110,39 @@ input:focus {
     font-size: clamp(28px, 8vw, 38px);
   }
 
+  .ds-metric-grid,
+  .dashboard-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  .ds-metric-card,
+  .dashboard-cards > div,
+  .dashboard-cards > article {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    content-visibility: visible;
+    contain: none;
+    contain-intrinsic-size: auto;
+  }
+
+  .ds-metric-card__copy,
+  .ds-metric-card__icon {
+    min-width: 0;
+    flex-shrink: 1;
+  }
+}
+
+@media (max-width: 480px) {
+  .ds-metric-grid,
+  .dashboard-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .background-preview {
