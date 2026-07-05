@@ -127,6 +127,19 @@ const BOGOTA_WEEKDAY_FORMATTER = new Intl.DateTimeFormat("en-US", {
   timeZone: BUSINESS_TIMEZONE,
   weekday: "short",
 });
+const BOGOTA_LONG_DATE_FORMATTER = new Intl.DateTimeFormat("es-CO", {
+  timeZone: BUSINESS_TIMEZONE,
+  weekday: "long",
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+});
+const BOGOTA_TIME_FORMATTER = new Intl.DateTimeFormat("es-CO", {
+  timeZone: BUSINESS_TIMEZONE,
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true,
+});
 const BOGOTA_WEEKDAY_INDEX = {
   sun: 0,
   mon: 1,
@@ -9307,6 +9320,53 @@ function adminDashboardSection() {
   );
 }
 
+function roleLabelForDashboard(role) {
+  if (role === "barber") return "Barbero";
+  if (role === "super_admin") return "Super Administrador";
+  return "Administrador";
+}
+
+function renderAdminWelcomeCard(account, business) {
+  const accountName = account?.name || app.adminSession?.name || "Administrador";
+  const roleLabel = roleLabelForDashboard(account?.role || "admin");
+  const businessName = business?.name || "Barberia";
+  const now = new Date();
+  const rawDateLabel = BOGOTA_LONG_DATE_FORMATTER.format(now);
+  const todayLabel = rawDateLabel ? `${rawDateLabel.charAt(0).toUpperCase()}${rawDateLabel.slice(1)}` : "";
+  const timeLabel = BOGOTA_TIME_FORMATTER.format(now);
+  const online = typeof navigator === "undefined" ? true : navigator.onLine !== false;
+  const statusLabel = online ? "En linea" : "Sin conexion";
+
+  return `
+    <section class="dashboard-head admin-dashboard-hero">
+      <div class="admin-dashboard-hero__brand">
+        <div class="admin-dashboard-hero__copy">
+          <p class="eyebrow">Panel administrativo</p>
+          <h1>Bienvenido, ${escapeHTML(accountName)}</h1>
+          <span>${escapeHTML(`${roleLabel} · ${businessName}`)}</span>
+        </div>
+        <div class="admin-dashboard-hero__facts" aria-label="Resumen del entorno">
+          <article class="admin-dashboard-hero__fact">
+            <small>Fecha</small>
+            <strong>${escapeHTML(todayLabel)}</strong>
+          </article>
+          <article class="admin-dashboard-hero__fact">
+            <small>Hora actual</small>
+            <strong>${escapeHTML(timeLabel)}</strong>
+          </article>
+          <article class="admin-dashboard-hero__fact">
+            <small>Estado del sistema</small>
+            <strong class="admin-dashboard-hero__status ${online ? "is-online" : "is-offline"}">${escapeHTML(statusLabel)}</strong>
+          </article>
+        </div>
+      </div>
+      <div class="admin-dashboard-hero__side">
+        <button class="secondary-action" data-admin-logout>Cerrar sesion</button>
+      </div>
+    </section>
+  `;
+}
+
 function clientHistorySummary(record) {
   if (!record?.clientName && !record?.whatsapp) return `<p class="microcopy">Sin historial disponible.</p>`;
   const businessId = record?.negocioId || currentBusinessId();
@@ -9418,19 +9478,7 @@ function renderAdminV2() {
   const currentBusinessRecord = currentBusiness();
 
   return appShell(`
-    <section class="dashboard-head admin-dashboard-hero">
-      <div class="admin-dashboard-hero__brand">
-        <div class="admin-dashboard-hero__logo">${businessLogoMarkup(currentBusinessRecord)}</div>
-        <div class="admin-dashboard-hero__copy">
-          <p class="eyebrow">Centro de operaciones</p>
-          <h1>${escapeHTML(currentBusinessRecord?.name || "ADMINISTRADOR")}</h1>
-          <span>${escapeHTML(app.adminSession.name || "Administrador")} - ${escapeHTML(app.adminSession.user || "")}</span>
-        </div>
-      </div>
-      <div class="admin-dashboard-hero__side">
-        <button class="secondary-action" data-admin-logout>Cerrar sesion</button>
-      </div>
-    </section>
+    ${renderAdminWelcomeCard(adminAccount, currentBusinessRecord)}
 
     ${
       !selected || app.adminView === "home"

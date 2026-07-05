@@ -1818,28 +1818,8 @@ input:focus {
 
 .admin-dashboard-hero__brand {
   min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 18px;
-}
-
-.admin-dashboard-hero__logo {
-  flex: 0 0 auto;
-  width: 82px;
-  height: 82px;
   display: grid;
-  place-items: center;
-  padding: 10px;
-  border-radius: 24px;
-  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--color-primary) 10%, transparent), rgba(255, 255, 255, 0.02));
-  box-shadow: var(--inner-light);
-}
-
-.admin-dashboard-hero__logo .brand-mark {
-  width: 100%;
-  height: 100%;
-  margin: 0;
+  gap: 18px;
 }
 
 .admin-dashboard-hero__copy {
@@ -1857,6 +1837,59 @@ input:focus {
   color: var(--muted);
   font-size: 15px;
   font-weight: 700;
+}
+
+.admin-dashboard-hero__facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-dashboard-hero__fact {
+  min-width: 0;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 18%, transparent);
+  background: linear-gradient(160deg, rgba(10, 18, 24, 0.9), rgba(10, 18, 24, 0.68));
+  display: grid;
+  gap: 6px;
+  box-shadow: var(--inner-light);
+}
+
+.admin-dashboard-hero__fact small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-dashboard-hero__fact strong {
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.admin-dashboard-hero__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-dashboard-hero__status::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 20%, transparent);
+}
+
+.admin-dashboard-hero__status.is-online {
+  color: #6fffb1;
+}
+
+.admin-dashboard-hero__status.is-offline {
+  color: #fba8a0;
 }
 
 .admin-dashboard-hero__side {
@@ -2049,10 +2082,8 @@ input:focus {
     align-items: flex-start;
   }
 
-  .admin-dashboard-hero__logo {
-    width: 66px;
-    height: 66px;
-    border-radius: 20px;
+  .admin-dashboard-hero__facts {
+    grid-template-columns: 1fr;
   }
 
   .admin-dashboard-hero__copy h1 {
