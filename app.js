@@ -9327,6 +9327,126 @@ function adminDashboardSection() {
   );
 }
 
+function renderAdminBarbersBoard(businessBarbers, waitingBarbers, counterSummary) {
+  return `<section class="admin-main admin-barber-board" id="admin-barbers-board">
+    <div class="section-title"><span>A</span><h2>Barberos</h2></div>
+    <p class="microcopy">Selecciona un barbero para abrir automaticamente su agenda del dia actual.</p>
+    ${
+      businessBarbers.length
+        ? `<div class="admin-barber-grid">
+          ${businessBarbers
+            .map(
+              (barber) => `<button class="barber-card admin-person-card ${barber.active ? "" : "inactive"}" data-admin-barber="${barber.id}">
+                ${avatar(barber, "md")}
+                <span class="barber-card-copy">
+                  <strong>${escapeHTML(barber.name)}</strong>
+                  <small>${barber.whatsapp ? displayPhone(barber.whatsapp) : "Sin WhatsApp"}</small>
+                  <small>Usuario: ${escapeHTML(barber.user)} · Clave protegida</small>
+                </span>
+                ${renderCounter(counterValue(counterSummary.weeklyByBarber, barber.id))}
+              </button>`
+            )
+            .join("")}
+        </div>`
+        : waitingBarbers
+          ? `<div class="empty-state-card">
+              <p>Sincronizando barberos del negocio...</p>
+              <p>Estamos validando la informacion mas reciente antes de mostrar un estado vacio.</p>
+            </div>`
+          : `<div class="empty-state-card">
+              <p>Aun no hay barberos creados en este negocio.</p>
+              <p>Crea el primer barbero desde el modulo Nuevo barbero para empezar a gestionar la agenda.</p>
+            </div>`
+    }
+  </section>`;
+}
+
+function renderAdminModuleToolbar(title) {
+  return `<section class="admin-main admin-module-toolbar-card">
+    <div class="admin-module-toolbar">
+      <button class="secondary-action" type="button" data-admin-module-back>Atras</button>
+      <div class="admin-module-toolbar__copy">
+        <p class="eyebrow">Panel administrativo</p>
+        <h2>${escapeHTML(title)}</h2>
+      </div>
+    </div>
+  </section>`;
+}
+
+function renderAdminModuleHub() {
+  return `<section class="admin-stack admin-dashboard-shell admin-module-hub">
+    ${renderAccordionPanel("dashboard-summary", "D", "Resumen de hoy", "", false)}
+    ${renderAccordionPanel("barbers", "A", "Barberos", "", false)}
+    ${renderAccordionPanel("new-barber", "+", "Nuevo barbero", "", false)}
+    ${renderAccordionPanel("attention-hours", "H", "Horarios de atencion", "", false)}
+    ${renderAccordionPanel("services", "S", "Servicios", "", false)}
+    ${renderAccordionPanel("dynamic-bg", "U", "Fondo dinamico", "", false)}
+    ${isPrincipalAdmin() ? renderAccordionPanel("admin-accounts", "U", "Gestionar administradores", "", false) : ""}
+  </section>`;
+}
+
+function renderAdminDedicatedModule(moduleId, context) {
+  const {
+    businessBarbers = [],
+    waitingBarbers = false,
+    counterSummary = { weeklyByBarber: {} },
+  } = context || {};
+
+  if (moduleId === "dashboard-summary") {
+    return `<section class="admin-stack admin-module-stack">
+      ${renderAdminModuleToolbar("Resumen de hoy")}
+      ${adminDashboardSection()}
+    </section>`;
+  }
+
+  if (moduleId === "barbers") {
+    return `<section class="admin-stack admin-module-stack">
+      ${renderAdminModuleToolbar("Barberos")}
+      ${renderAdminBarbersBoard(businessBarbers, waitingBarbers, counterSummary)}
+    </section>`;
+  }
+
+  if (moduleId === "new-barber") {
+    return `<section class="admin-stack admin-module-stack">
+      ${renderAdminModuleToolbar("Nuevo barbero")}
+      <section class="admin-main ds-crud-shell">
+        <div class="section-title"><span>+</span><h2>Nuevo barbero</h2></div>
+        ${barberEditorForm(null, "Crear barbero")}
+      </section>
+    </section>`;
+  }
+
+  if (moduleId === "attention-hours") {
+    return `<section class="admin-stack admin-module-stack">
+      ${renderAdminModuleToolbar("Horarios de atencion")}
+      ${attentionHoursSection()}
+    </section>`;
+  }
+
+  if (moduleId === "services") {
+    return `<section class="admin-stack admin-module-stack">
+      ${renderAdminModuleToolbar("Servicios")}
+      ${servicesSection()}
+    </section>`;
+  }
+
+  if (moduleId === "dynamic-bg") {
+    return `<section class="admin-stack admin-module-stack">
+      ${renderAdminModuleToolbar("Fondo dinamico")}
+      ${backgroundSettingsSection()}
+    </section>`;
+  }
+
+  if (moduleId === "admin-accounts" && isPrincipalAdmin()) {
+    return `<section class="admin-stack admin-module-stack">
+      ${renderAdminModuleToolbar("Gestionar administradores")}
+      ${adminAccountsSection()}
+    </section>`;
+  }
+
+  return renderAdminModuleHub();
+}
+
 function roleLabelForDashboard(role) {
   if (role === "barber") return "Barbero";
   if (role === "super_admin") return "Super Administrador";
@@ -9483,51 +9603,21 @@ function renderAdminV2() {
     .filter(Boolean);
   const singleSelectedRecord = selectedRecords.length === 1 ? selectedRecords[0] : null;
   const currentBusinessRecord = currentBusiness();
+  const dashboardMode = !selected || app.adminView === "home";
+  const activeAdminModule = dashboardMode ? app.adminOpenPanel || "" : "";
 
   return appShell(`
     ${renderAdminWelcomeCard(adminAccount, currentBusinessRecord)}
 
     ${
-      !selected || app.adminView === "home"
-        ? `<section class="admin-stack admin-dashboard-shell">
-        ${adminDashboardSection()}
-        <section class="admin-main admin-barber-board" id="admin-barbers-board">
-          <div class="section-title"><span>A</span><h2>Barberos</h2></div>
-          <p class="microcopy">Selecciona un barbero para abrir automaticamente su agenda del dia actual.</p>
-          ${
-            businessBarbers.length
-              ? `<div class="admin-barber-grid">
-            ${businessBarbers
-              .map(
-                (barber) => `<button class="barber-card admin-person-card ${barber.active ? "" : "inactive"}" data-admin-barber="${barber.id}">
-                  ${avatar(barber, "md")}
-                  <span class="barber-card-copy">
-                    <strong>${escapeHTML(barber.name)}</strong>
-                    <small>${barber.whatsapp ? displayPhone(barber.whatsapp) : "Sin WhatsApp"}</small>
-                    <small>Usuario: ${escapeHTML(barber.user)} · Clave protegida</small>
-                  </span>
-                  ${renderCounter(counterValue(counterSummary.weeklyByBarber, barber.id))}
-                </button>`
-              )
-              .join("")}
-          </div>`
-              : waitingBarbers
-                ? `<div class="empty-state-card">
-                  <p>Sincronizando barberos del negocio...</p>
-                  <p>Estamos validando la informacion mas reciente antes de mostrar un estado vacio.</p>
-                </div>`
-                : `<div class="empty-state-card">
-                  <p>Aun no hay barberos creados en este negocio.</p>
-                  <p>Crea el primer barbero desde el modulo Nuevo barbero para empezar a gestionar la agenda.</p>
-                </div>`
-          }
-        </section>
-        ${renderAccordionPanel("new-barber", "+", "Nuevo barbero", app.adminOpenPanel === "new-barber" ? barberEditorForm(null, "Crear barbero") : "", app.adminOpenPanel === "new-barber")}
-        ${renderAccordionPanel("attention-hours", "H", "Horarios de atencion", app.adminOpenPanel === "attention-hours" ? attentionHoursSection() : "", app.adminOpenPanel === "attention-hours")}
-        ${renderAccordionPanel("services", "S", "Servicios", app.adminOpenPanel === "services" ? servicesSection() : "", app.adminOpenPanel === "services")}
-        ${renderAccordionPanel("dynamic-bg", "U", "Fondo dinamico", app.adminOpenPanel === "dynamic-bg" ? backgroundSettingsSection() : "", app.adminOpenPanel === "dynamic-bg")}
-        ${isPrincipalAdmin() ? renderAccordionPanel("admin-accounts", "U", "Gestionar administradores", app.adminOpenPanel === "admin-accounts" ? adminAccountsSection() : "", app.adminOpenPanel === "admin-accounts") : ""}
-      </section>`
+      dashboardMode
+        ? activeAdminModule
+          ? renderAdminDedicatedModule(activeAdminModule, {
+              businessBarbers,
+              waitingBarbers,
+              counterSummary,
+            })
+          : renderAdminModuleHub()
         : ""
     }
 
@@ -11800,10 +11890,18 @@ function bindEvents() {
     });
   });
 
+  document.querySelectorAll("[data-admin-module-back]").forEach((button) => {
+    button.addEventListener("click", () => {
+      app.adminOpenPanel = "";
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-admin-home]").forEach((button) => {
     button.addEventListener("click", () => {
       app.adminView = "home";
       app.adminBarberId = "";
+      app.adminOpenPanel = "";
       app.adminScheduleView = "hours";
       app.selectedDate = todayISO();
       app.adminSelectedSlots = [];
