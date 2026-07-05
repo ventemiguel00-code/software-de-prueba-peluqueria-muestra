@@ -9373,10 +9373,10 @@ function renderAdminModuleToolbar(title) {
   </section>`;
 }
 
-function renderAdminModuleHub() {
+function renderAdminModuleHub(businessBarbers, waitingBarbers, counterSummary) {
   return `<section class="admin-stack admin-dashboard-shell admin-module-hub">
     ${renderAccordionPanel("dashboard-summary", "D", "Resumen de hoy", "", false)}
-    ${renderAccordionPanel("barbers", "A", "Barberos", "", false)}
+    ${renderAdminBarbersBoard(businessBarbers, waitingBarbers, counterSummary)}
     ${renderAccordionPanel("new-barber", "+", "Nuevo barbero", "", false)}
     ${renderAccordionPanel("attention-hours", "H", "Horarios de atencion", "", false)}
     ${renderAccordionPanel("services", "S", "Servicios", "", false)}
@@ -9605,19 +9605,20 @@ function renderAdminV2() {
   const currentBusinessRecord = currentBusiness();
   const dashboardMode = !selected || app.adminView === "home";
   const activeAdminModule = dashboardMode ? app.adminOpenPanel || "" : "";
+  const visibleAdminModule = activeAdminModule === "barbers" ? "" : activeAdminModule;
 
   return appShell(`
     ${renderAdminWelcomeCard(adminAccount, currentBusinessRecord)}
 
     ${
       dashboardMode
-        ? activeAdminModule
-          ? renderAdminDedicatedModule(activeAdminModule, {
+        ? visibleAdminModule
+          ? renderAdminDedicatedModule(visibleAdminModule, {
               businessBarbers,
               waitingBarbers,
               counterSummary,
             })
-          : renderAdminModuleHub()
+          : renderAdminModuleHub(businessBarbers, waitingBarbers, counterSummary)
         : ""
     }
 
