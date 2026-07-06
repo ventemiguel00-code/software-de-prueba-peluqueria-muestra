@@ -5185,6 +5185,10 @@ function loadScopedBusinessSession(baseKey, businessSlug, legacyKey = baseKey) {
 }
 
 function saveScopedBusinessSession(baseKey, businessSlug, value, legacyKey = baseKey) {
+  if (!value) {
+    clearScopedBusinessSession(baseKey, businessSlug, legacyKey);
+    return null;
+  }
   const role = baseKey === BARBER_SESSION_KEY ? "barber" : "admin";
   const normalized = normalizePersistentSession(value, {
     role,
@@ -11555,12 +11559,13 @@ function bindEvents() {
         businessSlug: account.businessSlug || app.currentBusinessSlug,
         active: account.active !== false,
       }) || account;
+      const resolvedAdminBusinessId = hydratedAccount.businessId || business?.id || currentBusinessId() || "";
       app.adminSession = {
         id: hydratedAccount.id,
         user: hydratedAccount.user,
         name: hydratedAccount.name,
         role: hydratedAccount.role,
-        businessId: currentBusinessId(),
+        businessId: resolvedAdminBusinessId,
         token: randomSessionToken("admin"),
         deviceId: getDeviceId(),
         startedAt: new Date().toISOString(),
@@ -11575,7 +11580,7 @@ function bindEvents() {
       app.selectedDate = todayISO();
       app.adminSelectedSlots = [];
       app.adminSession.businessSlug = app.currentBusinessSlug;
-      app.adminSession.fingerprint = buildSessionFingerprint("admin", app.currentBusinessSlug, currentBusinessId());
+      app.adminSession.fingerprint = buildSessionFingerprint("admin", app.currentBusinessSlug, resolvedAdminBusinessId);
       clearAuthAttemptState("admin", app.currentBusinessSlug, user);
       await claimRemoteSession("admin", app.adminSession);
       saveScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug, app.adminSession);
@@ -12461,16 +12466,17 @@ function bindEvents() {
       return;
     }
     app.barberLoginError = "";
+    const resolvedBarberBusinessId = barber.businessId || business?.id || currentBusinessId() || "";
     app.barberSession = {
       id: barber.id,
-      businessId: currentBusinessId(),
+      businessId: resolvedBarberBusinessId,
       businessSlug: app.currentBusinessSlug,
       token: randomSessionToken("barber"),
       deviceId: getDeviceId(),
       startedAt: new Date().toISOString(),
       lastSeenAt: new Date().toISOString(),
       role: "barber",
-      fingerprint: buildSessionFingerprint("barber", app.currentBusinessSlug, currentBusinessId()),
+      fingerprint: buildSessionFingerprint("barber", app.currentBusinessSlug, resolvedBarberBusinessId),
     };
     clearAuthAttemptState("barber", app.currentBusinessSlug, user);
     app.barberDate = todayISO();
