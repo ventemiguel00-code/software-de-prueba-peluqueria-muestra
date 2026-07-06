@@ -5246,26 +5246,27 @@ function isSessionExpired(session, context = {}) {
 
 function refreshSessionHeartbeat(baseKey, businessSlug, session, context = {}, legacyKey = baseKey) {
   if (!session) return null;
+  const nextFingerprint = buildSessionFingerprint(
+    context.role || session.role || "session",
+    context.businessSlug || session.businessSlug || businessSlug || DEFAULT_BUSINESS_SLUG,
+    context.businessId || session.businessId || ""
+  );
+  const previousHeartbeat = new Date(session.lastSeenAt || session.startedAt || 0).getTime();
+  const shouldRefresh =
+    !Number.isFinite(previousHeartbeat) ||
+    Date.now() - previousHeartbeat > SESSION_HEARTBEAT_MS ||
+    nextFingerprint !== session.fingerprint;
+  if (!shouldRefresh) return session;
+
   const nextSession = {
     ...session,
     lastSeenAt: new Date().toISOString(),
-    fingerprint: buildSessionFingerprint(
-      context.role || session.role || "session",
-      context.businessSlug || session.businessSlug || businessSlug || DEFAULT_BUSINESS_SLUG,
-      context.businessId || session.businessId || ""
-    ),
+    fingerprint: nextFingerprint,
   };
-  const previousHeartbeat = new Date(session.lastSeenAt || session.startedAt || 0).getTime();
-  if (
-    !Number.isFinite(previousHeartbeat) ||
-    Date.now() - previousHeartbeat > SESSION_HEARTBEAT_MS ||
-    nextSession.fingerprint !== session.fingerprint
-  ) {
-    if (baseKey === SUPER_ADMIN_SESSION_KEY) {
-      saveSuperAdminSession(nextSession);
-    } else {
-      saveScopedBusinessSession(baseKey, businessSlug, nextSession, legacyKey);
-    }
+  if (baseKey === SUPER_ADMIN_SESSION_KEY) {
+    saveSuperAdminSession(nextSession);
+  } else {
+    saveScopedBusinessSession(baseKey, businessSlug, nextSession, legacyKey);
   }
   return nextSession;
 }
