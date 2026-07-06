@@ -425,6 +425,11 @@ function displayPhone(raw) {
   return `+${digits.slice(0, 2)} ${digits.slice(2, 5)} ${digits.slice(5, 8)} ${digits.slice(8)}`;
 }
 
+function sessionStartTimeLabel(session) {
+  const startedAt = session?.startedAt ? new Date(session.startedAt) : new Date();
+  return BOGOTA_TIME_FORMATTER.format(startedAt);
+}
+
 function slugify(value) {
   return String(value || "")
     .normalize("NFD")
@@ -9522,7 +9527,7 @@ function renderAdminWelcomeCard(account, business) {
   const now = new Date();
   const rawDateLabel = BOGOTA_LONG_DATE_FORMATTER.format(now);
   const todayLabel = rawDateLabel ? `${rawDateLabel.charAt(0).toUpperCase()}${rawDateLabel.slice(1)}` : "";
-  const timeLabel = BOGOTA_TIME_FORMATTER.format(now);
+  const timeLabel = sessionStartTimeLabel(app.adminSession);
   const online = typeof navigator === "undefined" ? true : navigator.onLine !== false;
   const statusLabel = online ? "En linea" : "Sin conexion";
 
@@ -9540,7 +9545,7 @@ function renderAdminWelcomeCard(account, business) {
             <strong>${escapeHTML(todayLabel)}</strong>
           </article>
           <article class="admin-dashboard-hero__fact">
-            <small>Hora actual</small>
+            <small>Hora de ingreso</small>
             <strong>${escapeHTML(timeLabel)}</strong>
           </article>
           <article class="admin-dashboard-hero__fact">
@@ -9570,7 +9575,7 @@ function renderBarberWelcomeCard(barber, business, counterSummary) {
   const now = new Date();
   const rawDateLabel = BOGOTA_LONG_DATE_FORMATTER.format(now);
   const todayLabel = rawDateLabel ? `${rawDateLabel.charAt(0).toUpperCase()}${rawDateLabel.slice(1)}` : "";
-  const timeLabel = BOGOTA_TIME_FORMATTER.format(now);
+  const timeLabel = sessionStartTimeLabel(app.barberSession);
   const online = typeof navigator === "undefined" ? true : navigator.onLine !== false;
   const statusLabel = online ? "En linea" : "Sin conexion";
 
@@ -9588,7 +9593,7 @@ function renderBarberWelcomeCard(barber, business, counterSummary) {
             <strong>${escapeHTML(todayLabel)}</strong>
           </article>
           <article class="admin-dashboard-hero__fact">
-            <small>Hora actual</small>
+            <small>Hora de ingreso</small>
             <strong>${escapeHTML(timeLabel)}</strong>
           </article>
           <article class="admin-dashboard-hero__fact">
@@ -12586,7 +12591,7 @@ document.addEventListener("visibilitychange", () => {
 
 window.setInterval(() => {
   if (document.visibilityState !== "visible") return;
-  if (!app?.superAdminSession && !app?.adminSession && !app?.barberSession) return;
+  if (!app?.superAdminSession) return;
   scheduleRender();
 }, REMOTE_SESSION_VALIDATE_MS);
 
