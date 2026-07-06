@@ -1897,6 +1897,11 @@ input:focus {
   gap: 12px;
 }
 
+.admin-dashboard-hero__metrics {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .admin-dashboard-hero__fact {
   min-width: 0;
   padding: 16px 18px;
@@ -1919,6 +1924,33 @@ input:focus {
 .admin-dashboard-hero__fact strong {
   font-size: 16px;
   line-height: 1.35;
+}
+
+.admin-dashboard-hero__metric {
+  min-width: 0;
+  min-height: 0;
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 18%, transparent);
+  background: linear-gradient(160deg, rgba(10, 18, 24, 0.9), rgba(10, 18, 24, 0.68));
+  display: grid;
+  gap: 4px;
+  box-shadow: var(--inner-light);
+}
+
+.admin-dashboard-hero__metric small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.admin-dashboard-hero__metric strong {
+  color: var(--white);
+  font-size: 20px;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
 }
 
 .admin-dashboard-hero__status {
@@ -2209,6 +2241,10 @@ input:focus {
     grid-template-columns: 1fr;
   }
 
+  .admin-dashboard-hero__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .admin-dashboard-hero__copy h1 {
     font-size: clamp(28px, 8vw, 38px);
   }
@@ -2242,9 +2278,18 @@ input:focus {
 }
 
 @media (max-width: 480px) {
+  .admin-dashboard-hero__metrics,
   .ds-metric-grid,
   .dashboard-cards {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-dashboard-hero__metric {
+    padding: 11px 12px;
+  }
+
+  .admin-dashboard-hero__metric strong {
+    font-size: 18px;
   }
 }
 

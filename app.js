@@ -7751,6 +7751,51 @@ function barberSummaryCards(barber, anchorDate, viewer = "barber") {
   ]);
 }
 
+function buildAdminDashboardSummary(businessId, anchorDate = todayISO()) {
+  const businessAppointments = store.state.appointments.filter((item) => item.negocioId === businessId);
+  const todayAppointments = businessAppointments.filter((item) => item.date === anchorDate);
+  const currentWeekDates = getWeekDatesMemo(dateAnchor(anchorDate)).filter((date) => date <= anchorDate);
+  const currentWeekSet = new Set(currentWeekDates);
+  const reservedToday = todayAppointments.filter((item) => COUNTABLE_STATUSES.has(item.status)).length;
+  const realizedToday = todayAppointments.filter(isRealizedAppointment);
+  const realizedWeek = businessAppointments.filter(
+    (item) => isRealizedAppointment(item) && currentWeekSet.has(item.date)
+  );
+  const incomeToday = realizedToday.reduce((sum, appointment) => sum + serviceValueForAppointment(appointment), 0);
+  const incomeWeek = realizedWeek.reduce((sum, appointment) => sum + serviceValueForAppointment(appointment), 0);
+  const gainsToday = realizedToday.reduce(
+    (acc, appointment) => {
+      const income = calculateAppointmentIncome(appointment);
+      acc.admin += income.admin;
+      acc.barber += income.barber;
+      return acc;
+    },
+    { admin: 0, barber: 0 }
+  );
+
+  return {
+    reservedToday,
+    incomeToday,
+    incomeWeek,
+    adminGainToday: gainsToday.admin,
+    barberGainToday: gainsToday.barber,
+  };
+}
+
+function renderDashboardHeroMetrics(items = []) {
+  if (!items.length) return "";
+  return `<div class="admin-dashboard-hero__metrics ds-stat-grid" aria-label="Resumen de hoy">
+    ${items
+      .map(
+        (item) => `<article class="admin-dashboard-hero__metric ds-stat-card">
+          <small>${escapeHTML(item.label)}</small>
+          <strong>${escapeHTML(String(item.value))}</strong>
+        </article>`
+      )
+      .join("")}
+  </div>`;
+}
+
 function adminAccountsSection() {
   const accounts = adminAccountsForBusiness(currentBusinessId());
   return `<section class="admin-main ds-crud-shell">
@@ -9302,27 +9347,7 @@ function backgroundSettingsSection() {
 
 function adminDashboardSection() {
   const businessId = currentBusinessId();
-  const today = todayISO();
-  const businessAppointments = store.state.appointments.filter((item) => item.negocioId === businessId);
-  const todayAppointments = businessAppointments.filter((item) => item.date === today);
-  const currentWeekDates = getWeekDatesMemo(dateAnchor(today)).filter((date) => date <= today);
-  const currentWeekSet = new Set(currentWeekDates);
-  const reservedToday = todayAppointments.filter((item) => COUNTABLE_STATUSES.has(item.status)).length;
-  const realizedToday = todayAppointments.filter(isRealizedAppointment);
-  const realizedWeek = businessAppointments.filter(
-    (item) => isRealizedAppointment(item) && currentWeekSet.has(item.date)
-  );
-  const incomeToday = realizedToday.reduce((sum, appointment) => sum + serviceValueForAppointment(appointment), 0);
-  const incomeWeek = realizedWeek.reduce((sum, appointment) => sum + serviceValueForAppointment(appointment), 0);
-  const gainsToday = realizedToday.reduce(
-    (acc, appointment) => {
-      const income = calculateAppointmentIncome(appointment);
-      acc.admin += income.admin;
-      acc.barber += income.barber;
-      return acc;
-    },
-    { admin: 0, barber: 0 }
-  );
+  const summary = buildAdminDashboardSummary(businessId, todayISO());
   const open = app.adminOpenPanel === "dashboard-summary";
 
   return renderAccordionPanel(
@@ -9332,11 +9357,11 @@ function adminDashboardSection() {
     `
       <div class="dashboard-cards ds-metric-grid">
         ${[
-          dsMetricCard({ icon: "reservations", label: "Reservas de hoy", value: reservedToday }),
-          dsMetricCard({ icon: "income", label: "Ingresos de hoy", value: formatCOP(incomeToday) }),
-          dsMetricCard({ icon: "income", label: "Ingresos de la semana actual", value: formatCOP(incomeWeek) }),
-          dsMetricCard({ icon: "admin", label: "Ganancias del administrador", value: formatCOP(gainsToday.admin) }),
-          dsMetricCard({ icon: "barbers", label: "Ganancias de los barberos", value: formatCOP(gainsToday.barber) }),
+          dsMetricCard({ icon: "reservations", label: "Reservas de hoy", value: summary.reservedToday }),
+          dsMetricCard({ icon: "income", label: "Ingresos de hoy", value: formatCOP(summary.incomeToday) }),
+          dsMetricCard({ icon: "income", label: "Ingresos de la semana actual", value: formatCOP(summary.incomeWeek) }),
+          dsMetricCard({ icon: "admin", label: "Ganancias del administrador", value: formatCOP(summary.adminGainToday) }),
+          dsMetricCard({ icon: "barbers", label: "Ganancias de los barberos", value: formatCOP(summary.barberGainToday) }),
         ].join("")}
       </div>
       <label class="toggle-line sound-toggle"><input type="checkbox" data-sound-toggle ${app.soundEnabled ? "checked" : ""} /> Sonido sutil para nueva reserva</label>
@@ -9393,7 +9418,6 @@ function renderAdminModuleToolbar(title) {
 
 function renderAdminModuleHub(businessBarbers, waitingBarbers, counterSummary) {
   return `<section class="admin-stack admin-dashboard-shell admin-module-hub">
-    ${renderAccordionPanel("dashboard-summary", "D", "Resumen de hoy", "", false)}
     ${renderAdminBarbersBoard(businessBarbers, waitingBarbers, counterSummary)}
     ${renderAccordionPanel("new-barber", "+", "Nuevo barbero", "", false)}
     ${renderAccordionPanel("attention-hours", "H", "Horarios de atencion", "", false)}
@@ -9475,6 +9499,7 @@ function renderAdminWelcomeCard(account, business) {
   const accountName = account?.name || app.adminSession?.name || "Administrador";
   const roleLabel = roleLabelForDashboard(account?.role || "admin");
   const businessName = business?.name || "Barberia";
+  const summary = buildAdminDashboardSummary(currentBusinessId(), todayISO());
   const now = new Date();
   const rawDateLabel = BOGOTA_LONG_DATE_FORMATTER.format(now);
   const todayLabel = rawDateLabel ? `${rawDateLabel.charAt(0).toUpperCase()}${rawDateLabel.slice(1)}` : "";
@@ -9504,6 +9529,13 @@ function renderAdminWelcomeCard(account, business) {
             <strong class="admin-dashboard-hero__status ${online ? "is-online" : "is-offline"}">${escapeHTML(statusLabel)}</strong>
           </article>
         </div>
+        ${renderDashboardHeroMetrics([
+          { label: "Reservas hoy", value: summary.reservedToday },
+          { label: "Ingresos hoy", value: formatCOP(summary.incomeToday) },
+          { label: "Ingresos semana", value: formatCOP(summary.incomeWeek) },
+          { label: "Ganancia admin", value: formatCOP(summary.adminGainToday) },
+          { label: "Ganancia barberos", value: formatCOP(summary.barberGainToday) },
+        ])}
       </div>
       <div class="admin-dashboard-hero__side">
         <button class="secondary-action" data-admin-logout>Cerrar sesion</button>
@@ -9515,6 +9547,7 @@ function renderAdminWelcomeCard(account, business) {
 function renderBarberWelcomeCard(barber, business, counterSummary) {
   const accountName = barber?.name || app.barberSession?.name || "Barbero";
   const businessName = business?.name || "Barberia";
+  const summary = buildBarberSummary(barber.id, todayISO());
   const now = new Date();
   const rawDateLabel = BOGOTA_LONG_DATE_FORMATTER.format(now);
   const todayLabel = rawDateLabel ? `${rawDateLabel.charAt(0).toUpperCase()}${rawDateLabel.slice(1)}` : "";
@@ -9543,11 +9576,13 @@ function renderBarberWelcomeCard(barber, business, counterSummary) {
             <small>Estado del sistema</small>
             <strong class="admin-dashboard-hero__status ${online ? "is-online" : "is-offline"}">${escapeHTML(statusLabel)}</strong>
           </article>
-          <article class="admin-dashboard-hero__fact">
-            <small>Reservas semanales</small>
-            <strong>${escapeHTML(String(counterValue(counterSummary.weeklyByBarber, barber?.id)))}</strong>
-          </article>
         </div>
+        ${renderDashboardHeroMetrics([
+          { label: "Reservas hoy", value: summary.reservationsToday },
+          { label: "Ganancias hoy", value: formatCOP(summary.barberGainToday) },
+          { label: "Ganancias semana", value: formatCOP(summary.barberGainWeek) },
+          { label: "Reservas semana", value: counterValue(counterSummary.weeklyByBarber, barber?.id) },
+        ])}
       </div>
       <div class="admin-dashboard-hero__side">
         <button class="secondary-action" data-logout>Cerrar sesion</button>
@@ -9559,6 +9594,7 @@ function renderBarberWelcomeCard(barber, business, counterSummary) {
 function renderBarberModuleToolbar(title) {
   return `<section class="admin-main admin-module-toolbar-card">
     <div class="admin-module-toolbar">
+      <button class="secondary-action" type="button" data-barber-module-back>Atras</button>
       <div class="admin-module-toolbar__copy">
         <p class="eyebrow">Panel barbero</p>
         <h2>${escapeHTML(title)}</h2>
@@ -9664,10 +9700,9 @@ function renderBarberModuleHub() {
     <section class="admin-main ds-card barber-dashboard-home">
       <div class="section-title"><span>I</span><h2>Dashboard del barbero</h2></div>
       <div class="super-admin-module-grid barber-module-grid">
-        ${renderBarberModuleCard("summary", "01", "Resumen de hoy", "Consulta tus ganancias y reservas del dia en una vista compacta.")}
-        ${renderBarberModuleCard("agenda", "02", "Agenda del dia", "Visualiza los horarios, reservas, bloqueos y citas fijadas del dia seleccionado.")}
-        ${renderBarberModuleCard("days", "03", "Seleccionar dia", "Explora la semana y cambia rapidamente la fecha activa de tu agenda.")}
-        ${renderBarberModuleCard("profile", "04", "Perfil", "Revisa tu cuenta, contacto, estado actual y el negocio al que perteneces.")}
+        ${renderBarberModuleCard("agenda", "01", "Agenda del dia", "Visualiza los horarios, reservas, bloqueos y citas fijadas del dia seleccionado.")}
+        ${renderBarberModuleCard("days", "02", "Seleccionar dia", "Explora la semana y cambia rapidamente la fecha activa de tu agenda.")}
+        ${renderBarberModuleCard("profile", "03", "Perfil", "Revisa tu cuenta, contacto, estado actual y el negocio al que perteneces.")}
       </div>
     </section>
   </section>`;
@@ -9675,13 +9710,6 @@ function renderBarberModuleHub() {
 
 function renderBarberDedicatedModule(moduleId, context) {
   const { barber, business, rows = [], counterSummary, hasOperationalRows = false } = context || {};
-
-  if (moduleId === "summary") {
-    return `<section class="admin-stack admin-module-stack barber-module-stack">
-      ${renderBarberModuleToolbar("Resumen de hoy")}
-      ${barberSummaryCards(barber, todayISO(), "barber")}
-    </section>`;
-  }
 
   if (moduleId === "agenda") {
     return `<section class="admin-stack admin-module-stack barber-module-stack">
@@ -9818,7 +9846,8 @@ function renderAdminV2() {
   const currentBusinessRecord = currentBusiness();
   const dashboardMode = !selected || app.adminView === "home";
   const activeAdminModule = dashboardMode ? app.adminOpenPanel || "" : "";
-  const visibleAdminModule = activeAdminModule === "barbers" ? "" : activeAdminModule;
+  const visibleAdminModule =
+    activeAdminModule === "barbers" || activeAdminModule === "dashboard-summary" ? "" : activeAdminModule;
 
   return appShell(`
     ${renderAdminWelcomeCard(adminAccount, currentBusinessRecord)}
@@ -10079,7 +10108,7 @@ function renderBarberV2() {
   const counterSummary = buildCounterSummary(app.barberDate);
   const hasOperationalRows = rows.some(({ status, dayBlocked, appointment }) => dayBlocked || status !== "available" || appointment);
   const business = currentBusiness();
-  const activeBarberModule = app.barberOpenPanel || "agenda";
+  const activeBarberModule = app.barberOpenPanel === "summary" ? "agenda" : app.barberOpenPanel || "agenda";
 
   return appShell(`
     ${renderBarberWelcomeCard(barber, business, counterSummary)}
