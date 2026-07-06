@@ -7482,8 +7482,7 @@ function renderPublic() {
         <div class="public-booking-form-v2__footer">
           <button class="primary-action public-confirm-submit-v2" ${app.bookingSubmitting ? "disabled" : ""}>${app.bookingSubmitting ? "Reservando..." : "Confirmar cita"}</button>
         </div>
-      </form>
-      <p class="microcopy public-confirmation-note-v2">Disponibilidad validada en tiempo real para evitar reservas duplicadas en el mismo horario.</p>`;
+      </form>`;
   }
 
   return renderPublicBookingShell({
@@ -9560,6 +9559,7 @@ function renderBarberWelcomeCard(barber, business, counterSummary) {
 function renderBarberModuleToolbar(title) {
   return `<section class="admin-main admin-module-toolbar-card">
     <div class="admin-module-toolbar">
+      <button class="secondary-action" type="button" data-barber-module-back>Atras</button>
       <div class="admin-module-toolbar__copy">
         <p class="eyebrow">Panel barbero</p>
         <h2>${escapeHTML(title)}</h2>
