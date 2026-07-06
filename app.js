@@ -6445,9 +6445,28 @@ function isCountableAppointment(item) {
   return item && COUNTABLE_STATUSES.has(item.status);
 }
 
+const dashboardSummaryCache = {
+  counter: { businessId: null, anchorDate: null, appointmentsRef: null, appointmentsLength: -1, value: null },
+  barber: new Map(),
+  admin: new Map(),
+};
+
 function buildCounterSummary(anchorDate) {
+  const businessId = currentBusinessId();
+  const appointments = getBusinessBucket(businessId).appointments;
+  const cached = dashboardSummaryCache.counter;
+  if (
+    cached.businessId === businessId &&
+    cached.anchorDate === anchorDate &&
+    cached.appointmentsRef === appointments &&
+    cached.appointmentsLength === appointments.length &&
+    cached.value
+  ) {
+    return cached.value;
+  }
+
   const activeWeekDates = new Set(getWeekDatesMemo(dateAnchor(anchorDate)));
-  return getBusinessBucket(currentBusinessId()).appointments.reduce(
+  const summary = appointments.reduce(
     (summary, appointment) => {
       if (!isCountableAppointment(appointment) || !activeWeekDates.has(appointment.date)) return summary;
       summary.weeklyByBarber[appointment.barberId] =
@@ -6460,6 +6479,15 @@ function buildCounterSummary(anchorDate) {
     },
     { weeklyByBarber: {}, dailyByBarber: {} }
   );
+
+  dashboardSummaryCache.counter = {
+    businessId,
+    anchorDate,
+    appointmentsRef: appointments,
+    appointmentsLength: appointments.length,
+    value: summary,
+  };
+  return summary;
 }
 
 function counterValue(group, barberId) {
@@ -7080,7 +7108,18 @@ function calculateAppointmentIncome(appointment) {
 }
 
 function buildBarberSummary(barberId, anchorDate) {
-  const appointments = getBusinessBucket(currentBusinessId()).appointments;
+  const businessId = currentBusinessId();
+  const appointments = getBusinessBucket(businessId).appointments;
+  const cacheKey = `${businessId}|${barberId}|${anchorDate}`;
+  const cached = dashboardSummaryCache.barber.get(cacheKey);
+  if (
+    cached &&
+    cached.appointmentsRef === appointments &&
+    cached.appointmentsLength === appointments.length
+  ) {
+    return cached.value;
+  }
+
   const todayReservations = appointments.filter(
     (item) =>
       item.barberId === barberId &&
@@ -7107,12 +7146,18 @@ function buildBarberSummary(barberId, anchorDate) {
   const weeklyBarberGain = weekAppointments
     .filter(isRealizedAppointment)
     .reduce((sum, appointment) => sum + calculateAppointmentIncome(appointment).barber, 0);
-  return {
+  const summary = {
     reservationsToday: todayReservations.length,
     incomeToday: totals.income,
     barberGainToday: totals.barber,
     barberGainWeek: weeklyBarberGain,
   };
+  dashboardSummaryCache.barber.set(cacheKey, {
+    appointmentsRef: appointments,
+    appointmentsLength: appointments.length,
+    value: summary,
+  });
+  return summary;
 }
 
 function barberOffersService(barberId, serviceId) {
@@ -7777,7 +7822,18 @@ function barberSummaryCards(barber, anchorDate, viewer = "barber") {
 }
 
 function buildAdminDashboardSummary(businessId, anchorDate = todayISO()) {
-  const businessAppointments = store.state.appointments.filter((item) => item.negocioId === businessId);
+  const appointments = store.state.appointments;
+  const cacheKey = `${businessId}|${anchorDate}`;
+  const cached = dashboardSummaryCache.admin.get(cacheKey);
+  if (
+    cached &&
+    cached.appointmentsRef === appointments &&
+    cached.appointmentsLength === appointments.length
+  ) {
+    return cached.value;
+  }
+
+  const businessAppointments = appointments.filter((item) => item.negocioId === businessId);
   const todayAppointments = businessAppointments.filter((item) => item.date === anchorDate);
   const currentWeekDates = getWeekDatesMemo(dateAnchor(anchorDate)).filter((date) => date <= anchorDate);
   const currentWeekSet = new Set(currentWeekDates);
@@ -7798,13 +7854,19 @@ function buildAdminDashboardSummary(businessId, anchorDate = todayISO()) {
     { admin: 0, barber: 0 }
   );
 
-  return {
+  const summary = {
     reservedToday,
     incomeToday,
     incomeWeek,
     adminGainToday: gainsToday.admin,
     barberGainToday: gainsToday.barber,
   };
+  dashboardSummaryCache.admin.set(cacheKey, {
+    appointmentsRef: appointments,
+    appointmentsLength: appointments.length,
+    value: summary,
+  });
+  return summary;
 }
 
 function renderDashboardHeroMetrics(items = []) {
