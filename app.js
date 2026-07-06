@@ -867,7 +867,7 @@ function getBusinessBucket(businessId = currentBusinessId()) {
     derivedBusinessCache.stateRef = store.state;
     derivedBusinessCache.buckets = new Map();
   }
-  const id = businessId || DEFAULT_BUSINESS_ID;
+  const id = businessId || "";
   if (derivedBusinessCache.buckets.has(id)) return derivedBusinessCache.buckets.get(id);
   const bucket = buildBusinessBucketFromState(store.state, id);
   const liveStore = runtimeStore();
@@ -5609,6 +5609,17 @@ function currentBusiness() {
   );
 }
 
+function visualBusinessSnapshot() {
+  const slug = String(app?.currentBusinessSlug || "").trim().toLowerCase();
+  const current = currentBusiness() || neutralBootstrapBusiness();
+  app.lastValidBusinessBySlug = app.lastValidBusinessBySlug || {};
+  if (slug && current && !isPlaceholderBusiness(current) && !current.isBootstrap) {
+    app.lastValidBusinessBySlug[slug] = current;
+    return current;
+  }
+  return (slug && app.lastValidBusinessBySlug[slug]) || current;
+}
+
 function requestedBusiness() {
   const activeApp = app && typeof app === "object" ? app : null;
   if (activeApp?.view === "super-admin") return null;
@@ -6262,8 +6273,16 @@ function saveBackgroundMedia(media, businessId = currentBusinessId()) {
 
 function currentBackgroundMedia() {
   const businessId = currentBusinessId();
-  if (!businessId) return null;
-  return loadBackgroundMedia(businessId);
+  const slug = String(app?.currentBusinessSlug || "").trim().toLowerCase();
+  app.lastValidBackgroundBySlug = app.lastValidBackgroundBySlug || {};
+  if (businessId) {
+    const media = loadBackgroundMedia(businessId);
+    if (slug && media) {
+      app.lastValidBackgroundBySlug[slug] = media;
+    }
+    return media || (slug ? app.lastValidBackgroundBySlug[slug] || null : null);
+  }
+  return slug ? app.lastValidBackgroundBySlug[slug] || null : null;
 }
 
 function loadSoundPreference() {
@@ -6540,7 +6559,7 @@ function renderLayoutShell() {
       </div>
     `;
   }
-  const business = currentBusiness() || neutralBootstrapBusiness();
+  const business = visualBusinessSnapshot() || neutralBootstrapBusiness();
   const shellType = routeShellType();
   const tabs = shellType === "internal"
     ? [
@@ -6610,7 +6629,7 @@ function refreshPersistentShellBrand() {
     applyThemeColorsToRoot(visualColorsForBusiness(neutralBootstrapBusiness()));
     return;
   }
-  const business = currentBusiness() || neutralBootstrapBusiness();
+  const business = visualBusinessSnapshot() || neutralBootstrapBusiness();
   const colors = visualColorsForBusiness(business);
   applyThemeColorsToRoot(colors);
   const brand = document.querySelector(".brand");
@@ -7265,7 +7284,7 @@ function renderPublic() {
   const showPublicPrices = publicPricesVisibleForBusiness(businessId);
   const servicesLoadState = publicServices.length ? { loading: false, slow: false, error: "" } : publicServicesLoadState(businessId);
   const iconLoadState = publicServiceIconsLoadState(businessId, publicServices);
-  const servicesLoading = (!publicServices.length && servicesLoadState.loading) || (publicServices.length && iconLoadState.loading);
+  const servicesLoading = !publicServices.length && servicesLoadState.loading;
   businessDataLoading = businessDataLoading || servicesLoading;
   const activeBarbers = app.selectedServiceId ? barbersForService(app.selectedServiceId) : store.activeBarbersByBusiness(businessId);
   const waitingBarbersForPublic = !activeBarbers.length && isBusinessDataRefreshPending(businessId);
@@ -9594,6 +9613,7 @@ function renderBarberWelcomeCard(barber, business, counterSummary) {
 function renderBarberModuleToolbar(title) {
   return `<section class="admin-main admin-module-toolbar-card">
     <div class="admin-module-toolbar">
+      <button class="secondary-action" type="button" data-barber-module-back>Atras</button>
       <div class="admin-module-toolbar__copy">
         <p class="eyebrow">Panel barbero</p>
         <h2>${escapeHTML(title)}</h2>
@@ -10307,12 +10327,11 @@ function render() {
   ensurePersistentBackground();
   app.backgroundMedia = currentBackgroundMedia();
   const shellSignature = app.view === "super-admin"
-    ? ["super-admin", "global", store.remoteLoadedScopeKey || "idle", String(Boolean(app.superAdminSession))].join("|")
+    ? ["super-admin", "global"].join("|")
     : [
         routeShellType(),
+        app.view,
         app.currentBusinessSlug || DEFAULT_BUSINESS_SLUG,
-        currentBusinessResolution().status || "idle",
-        requestedBusiness()?.id || currentBusinessId() || "pending",
       ].join("|");
   if (root.dataset.shellReady !== "true" || root.dataset.shellSignature !== shellSignature) {
     root.innerHTML = renderLayoutShell();
@@ -12205,6 +12224,13 @@ function bindEvents() {
       app.barberOpenPanel = panel;
       if (panel === "days") app.barberScheduleView = "days";
       if (panel === "agenda") app.barberScheduleView = "hours";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-barber-module-back]").forEach((button) => {
+    button.addEventListener("click", () => {
+      app.barberOpenPanel = "";
       render();
     });
   });

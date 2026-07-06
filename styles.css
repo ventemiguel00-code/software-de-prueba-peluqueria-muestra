@@ -2415,14 +2415,14 @@ input:focus {
 .admin-slots {
   display: grid;
   gap: 10px;
-  content-visibility: auto;
-  contain-intrinsic-size: 880px;
+  content-visibility: visible;
+  contain-intrinsic-size: auto;
 }
 
 .admin-barber-grid,
 .slot-grid {
-  content-visibility: auto;
-  contain-intrinsic-size: 720px;
+  content-visibility: visible;
+  contain-intrinsic-size: auto;
 }
 
 .slot-row {
@@ -4207,9 +4207,9 @@ textarea:focus {
 .barber-card,
 .slot-row,
 .dashboard-cards div {
-  content-visibility: auto;
-  contain-intrinsic-size: 1px 220px;
-  contain: layout paint style;
+  content-visibility: visible;
+  contain-intrinsic-size: auto;
+  contain: none;
 }
 
 .topbar,
@@ -4224,7 +4224,7 @@ textarea:focus {
 .super-business-summary__logo img,
 .super-admin-logo-preview img,
 .business-logo-mark img {
-  content-visibility: auto;
+  content-visibility: visible;
 }
 
 @media (max-width: 720px) {
