@@ -9613,7 +9613,6 @@ function renderBarberWelcomeCard(barber, business, counterSummary) {
 function renderBarberModuleToolbar(title) {
   return `<section class="admin-main admin-module-toolbar-card">
     <div class="admin-module-toolbar">
-      <button class="secondary-action" type="button" data-barber-module-back>Atras</button>
       <div class="admin-module-toolbar__copy">
         <p class="eyebrow">Panel barbero</p>
         <h2>${escapeHTML(title)}</h2>
@@ -12224,13 +12223,6 @@ function bindEvents() {
       app.barberOpenPanel = panel;
       if (panel === "days") app.barberScheduleView = "days";
       if (panel === "agenda") app.barberScheduleView = "hours";
-      render();
-    });
-  });
-
-  document.querySelectorAll("[data-barber-module-back]").forEach((button) => {
-    button.addEventListener("click", () => {
-      app.barberOpenPanel = "";
       render();
     });
   });
