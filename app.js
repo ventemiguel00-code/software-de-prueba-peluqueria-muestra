@@ -7631,7 +7631,7 @@ function renderBarber() {
   const counterSummary = buildCounterSummary(date);
   const business = currentBusiness();
   const hasOperationalRows = rows.some(({ status, dayBlocked, appointment }) => dayBlocked || status !== "available" || appointment);
-  const activeBarberModule = app.barberOpenPanel || "";
+  const activeBarberModule = app.barberOpenPanel || "agenda";
   return appShell(`
     ${renderBarberWelcomeCard(barber, business, counterSummary)}
     ${
@@ -10081,7 +10081,7 @@ function renderBarberV2() {
   const counterSummary = buildCounterSummary(app.barberDate);
   const hasOperationalRows = rows.some(({ status, dayBlocked, appointment }) => dayBlocked || status !== "available" || appointment);
   const business = currentBusiness();
-  const activeBarberModule = app.barberOpenPanel || "";
+  const activeBarberModule = app.barberOpenPanel || "agenda";
 
   return appShell(`
     ${renderBarberWelcomeCard(barber, business, counterSummary)}
@@ -12370,7 +12370,7 @@ function bindEvents() {
     clearAuthAttemptState("barber", app.currentBusinessSlug, user);
     app.barberDate = todayISO();
     store.state.meta.selectedDate = app.barberDate;
-    app.barberOpenPanel = "";
+    app.barberOpenPanel = "agenda";
     app.barberScheduleView = "hours";
     await claimRemoteSession("barber", app.barberSession);
     saveScopedBusinessSession(BARBER_SESSION_KEY, app.currentBusinessSlug, app.barberSession);
