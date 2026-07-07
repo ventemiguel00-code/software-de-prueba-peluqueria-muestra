@@ -12436,7 +12436,8 @@ function bindEvents() {
 
   document.querySelector("#barber-login")?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget instanceof HTMLFormElement ? event.currentTarget : null;
+    const form = new FormData(formElement || undefined);
     const user = String(form.get("user") || "").trim();
     const business = currentBusiness();
     if (isPlaceholderBusiness(business)) {
@@ -12460,8 +12461,10 @@ function bindEvents() {
       : await findBarberAccount(user, password, currentBusinessId());
     if (!barber) {
       app.barberLoginError = "Usuario o contrasena incorrectos para este negocio.";
-      event.currentTarget.classList.add("shake");
-      setTimeout(() => event.currentTarget.classList.remove("shake"), 500);
+      if (formElement) {
+        formElement.classList.add("shake");
+        setTimeout(() => formElement.classList.remove("shake"), 500);
+      }
       render();
       return;
     }
