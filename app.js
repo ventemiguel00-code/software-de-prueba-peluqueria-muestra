@@ -4151,6 +4151,35 @@ class StudioStore {
     return data?.publicUrl || "";
   }
 
+  async uploadBusinessBackgroundVideo(businessId, file) {
+    if (!this.supabase || !businessId || !file) return null;
+    const extension = archiveExtension(file.name) || "mp4";
+    const cleanExtension = ["mp4", "webm"].includes(extension) ? extension : "mp4";
+    const filePath = `${businessId}/background-video.${cleanExtension}`;
+    const { error } = await this.supabase.storage
+      .from("logos-negocios")
+      .upload(filePath, file, {
+        cacheControl: "3600",
+        upsert: true,
+        contentType: file.type || `video/${cleanExtension}`,
+      });
+    if (error) throw error;
+    const { data } = this.supabase.storage.from("logos-negocios").getPublicUrl(filePath);
+    const cacheBustedUrl = data?.publicUrl ? `${data.publicUrl}?v=${Date.now()}` : "";
+    return cacheBustedUrl
+      ? {
+          type: "video",
+          src: cacheBustedUrl,
+          storageBucket: "logos-negocios",
+          storagePath: filePath,
+          mime: file.type || `video/${cleanExtension}`,
+          name: file.name || `background-video.${cleanExtension}`,
+          size: file.size || 0,
+          savedAt: new Date().toISOString(),
+        }
+      : null;
+  }
+
   async updateBusinessLogoRemote(businessId, logoUrl) {
     if (!this.supabase || !businessId || !logoUrl) return true;
     const { error } = await this.supabase
@@ -11963,6 +11992,7 @@ function bindEvents() {
       name: file.name,
       mime: file.type,
       size: file.size,
+      file,
       src: await fileToDataURL(file),
       savedAt: new Date().toISOString(),
     };
@@ -11973,11 +12003,16 @@ function bindEvents() {
   document.querySelector("#background-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!app.pendingBackgroundVideo) return;
-    app.backgroundMedia = app.pendingBackgroundVideo;
-    saveBackgroundMedia(app.backgroundMedia);
+    let nextBackgroundMedia = app.pendingBackgroundVideo;
     try {
+      if (app.pendingBackgroundVideo.file) {
+        nextBackgroundMedia = await store.uploadBusinessBackgroundVideo(currentBusinessId(), app.pendingBackgroundVideo.file);
+        if (!nextBackgroundMedia?.src) {
+          throw new Error("No fue posible obtener la URL publica del video.");
+        }
+      }
       await store.upsertBusinessSettingsRemote(currentBusinessId(), {
-        environment_archive_meta: { backgroundMedia: app.backgroundMedia },
+        environment_archive_meta: { backgroundMedia: nextBackgroundMedia },
       });
     } catch (error) {
       app.backgroundMessage = "No fue posible guardar el fondo de esta barberia.";
@@ -11985,6 +12020,8 @@ function bindEvents() {
       render();
       return;
     }
+    app.backgroundMedia = nextBackgroundMedia;
+    saveBackgroundMedia(app.backgroundMedia);
     app.pendingBackgroundVideo = null;
     app.backgroundMessage = "Video guardado como fondo activo.";
     render();
