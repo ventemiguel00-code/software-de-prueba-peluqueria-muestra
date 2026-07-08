@@ -3140,6 +3140,7 @@ class StudioStore {
       const stableBucketHasBusinessData = Boolean(
         stableBucket.barbers.length || stableBucket.services.length || stableBucket.barberServices.length
       );
+      const cachedBackgroundMedia = scopedBusinessId ? loadBackgroundMedia(scopedBusinessId) : null;
       const cachedPrefetchedPublicServices =
         !force && isPublicRoute && scopedBusinessId ? this.getCachedPublicServices(scopedBusinessId) || [] : [];
       const cachedPrefetchedPublicIcons =
@@ -3160,6 +3161,10 @@ class StudioStore {
         scopedBusinessId &&
         stableBucketHasBusinessData &&
         this.hasFreshStableBusinessData(scopedBusinessId, { needsFull: route.view === "admin" });
+      const needsScopedSettingsHydration = Boolean(
+        scopedBusinessId &&
+        (!cachedBackgroundMedia || !this.businessSettingsByBusiness.has(scopedBusinessId))
+      );
       if (scopedBusinessId) {
         this.beginResourceLoading("barbers", scopedBusinessId, syncScopeKey);
         this.beginResourceLoading("services", scopedBusinessId, syncScopeKey);
@@ -3200,7 +3205,9 @@ class StudioStore {
               isPublicRoute || route.view === "barber" ? query.eq("active", true) : query
             ),
         canReuseStableBusinessData ? Promise.resolve(stableQueryResult) : queryScoped("barber_services", "created_at", true),
-        canReuseStableBusinessData ? Promise.resolve(stableQueryResult) : queryScoped("business_settings", "created_at", true),
+        canReuseStableBusinessData && !needsScopedSettingsHydration
+          ? Promise.resolve(stableQueryResult)
+          : queryScoped("business_settings", "created_at", true),
         cachedServiceIconRows
           ? Promise.resolve({ data: cachedServiceIconRows, error: null, fromStateCache: true })
           : canReusePrefetchedPublicData
