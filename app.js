@@ -6295,6 +6295,11 @@ function currentBackgroundMedia() {
   return slug ? app.lastValidBackgroundBySlug[slug] || null : null;
 }
 
+function shouldRenderPublicBackgroundVideo() {
+  const pathname = String(location?.pathname || "");
+  return app.view === "public" && pathname.startsWith("/barberia/");
+}
+
 function loadSoundPreference() {
   return localStorage.getItem(SOUND_PREF_KEY) === "true";
 }
@@ -6545,7 +6550,8 @@ function avatar(barber, size = "lg") {
 function renderGlobalBackground() {
   const backgroundMedia = currentBackgroundMedia();
   const useStaticSuperAdminBg = app.view === "super-admin";
-  const isVideo = backgroundMedia?.type === "video";
+  const usePublicVideo = shouldRenderPublicBackgroundVideo();
+  const isVideo = backgroundMedia?.type === "video" && usePublicVideo;
   const videoMarkup = !useStaticSuperAdminBg && isVideo
     ? `<video class="global-bg-video" src="${backgroundMedia.src}" autoplay muted loop playsinline preload="metadata" poster="/assets/atelier-luxury-hero.png"></video>`
     : "";
@@ -6561,8 +6567,9 @@ function renderGlobalBackground() {
 function ensurePersistentBackground() {
   const existing = document.querySelector(".global-bg");
   const backgroundMedia = currentBackgroundMedia();
+  const backgroundVideoVisible = shouldRenderPublicBackgroundVideo() && backgroundMedia?.type === "video";
   const backgroundScope = app.view === "super-admin" ? "super-admin" : currentBusinessId();
-  const signature = `${backgroundScope}|${backgroundMedia?.type || "image"}|${backgroundMedia?.src || ""}`;
+  const signature = `${backgroundScope}|${backgroundVideoVisible ? "video" : "image"}|${backgroundVideoVisible ? backgroundMedia?.src || "" : ""}`;
   if (!existing) {
     document.body.insertAdjacentHTML("afterbegin", renderGlobalBackground());
     document.body.dataset.backgroundSignature = signature;
