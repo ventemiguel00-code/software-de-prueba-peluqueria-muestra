@@ -6320,9 +6320,15 @@ function saveBackgroundMedia(media, businessId = currentBusinessId()) {
 function currentBackgroundMedia() {
   const businessId = currentBusinessId();
   const slug = String(app?.currentBusinessSlug || "").trim().toLowerCase();
+  const settingsMedia = businessId
+    ? runtimeStore()?.businessSettingsForBusiness?.(businessId)?.meta?.backgroundMedia || null
+    : null;
   app.lastValidBackgroundBySlug = app.lastValidBackgroundBySlug || {};
   if (businessId) {
-    const media = loadBackgroundMedia(businessId);
+    const media = settingsMedia || loadBackgroundMedia(businessId);
+    if (settingsMedia) {
+      saveBackgroundMedia(settingsMedia, businessId);
+    }
     if (slug && media) {
       app.lastValidBackgroundBySlug[slug] = media;
     }
