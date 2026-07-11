@@ -1379,7 +1379,7 @@ function applyBusinessSettingsThemeColors(businesses = [], settingsRows = []) {
     settingsByBusiness.has(business.id)
       ? (() => {
           const row = settingsByBusiness.get(business.id);
-          const meta = row.environment_archive_meta || {};
+          const meta = normalizeBusinessSettingsMeta(row.environment_archive_meta);
           return normalizeBusiness({
             ...business,
             ...(row.theme_override ? { theme: row.theme_override } : {}),
@@ -1961,9 +1961,22 @@ function mapRowToAdminAccount(row, businesses = []) {
 
 function mergeBusinessSettingsMeta(currentMeta, patchMeta) {
   return {
-    ...(currentMeta && typeof currentMeta === "object" ? currentMeta : {}),
-    ...(patchMeta && typeof patchMeta === "object" ? patchMeta : {}),
+    ...normalizeBusinessSettingsMeta(currentMeta),
+    ...normalizeBusinessSettingsMeta(patchMeta),
   };
+}
+
+function normalizeBusinessSettingsMeta(meta) {
+  if (!meta) return {};
+  if (typeof meta === "string") {
+    try {
+      const parsed = JSON.parse(meta);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return meta && typeof meta === "object" ? meta : {};
 }
 
 class StudioStore {
@@ -4053,7 +4066,7 @@ class StudioStore {
       (rows || []).map((row) => [row.business_id || DEFAULT_BUSINESS_ID, row])
     );
     rowsByBusiness.forEach((row, businessId) => {
-      const meta = row?.environment_archive_meta || {};
+      const meta = normalizeBusinessSettingsMeta(row?.environment_archive_meta);
       const hasPublicPriceSetting =
         Object.prototype.hasOwnProperty.call(row || {}, "show_public_prices") ||
         Object.prototype.hasOwnProperty.call(meta, "showPublicPrices") ||
@@ -4080,7 +4093,7 @@ class StudioStore {
     if (scopedBusinessId) {
       const row = rowsByBusiness.get(scopedBusinessId);
       const hasRemoteMeta = row && Object.prototype.hasOwnProperty.call(row, "environment_archive_meta");
-      const meta = row?.environment_archive_meta || {};
+      const meta = normalizeBusinessSettingsMeta(row?.environment_archive_meta);
       const backgroundMedia = meta?.backgroundMedia || null;
       if (backgroundMedia) {
         map[scopedBusinessId] = backgroundMedia;
@@ -4103,7 +4116,7 @@ class StudioStore {
       this.state.businesses.forEach((business) => {
         const row = rowsByBusiness.get(business.id);
         const hasRemoteMeta = row && Object.prototype.hasOwnProperty.call(row, "environment_archive_meta");
-        const meta = row?.environment_archive_meta || {};
+        const meta = normalizeBusinessSettingsMeta(row?.environment_archive_meta);
         const backgroundMedia = meta?.backgroundMedia || null;
         if (backgroundMedia) {
           map[business.id] = backgroundMedia;
@@ -4127,6 +4140,10 @@ class StudioStore {
 
     this.state.businesses = [...businessesById.values()];
     localStorage.setItem(BACKGROUND_MEDIA_BY_BUSINESS_KEY, JSON.stringify(map));
+    if (typeof app !== "undefined") {
+      app.backgroundMedia = currentBackgroundMedia();
+      ensurePersistentBackground();
+    }
   }
 
   businessSettingsForBusiness(businessId = currentBusinessId()) {
@@ -6351,7 +6368,7 @@ function currentBackgroundMedia() {
       if (slug) {
         delete app.lastValidBackgroundBySlug[slug];
       }
-      return cachedMedia || null;
+      return null;
     }
     const media = cachedMedia;
     if (slug && media) {
