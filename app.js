@@ -425,11 +425,6 @@ function displayPhone(raw) {
   return `+${digits.slice(0, 2)} ${digits.slice(2, 5)} ${digits.slice(5, 8)} ${digits.slice(8)}`;
 }
 
-function sessionStartTimeLabel(session) {
-  const startedAt = session?.startedAt ? new Date(session.startedAt) : new Date();
-  return BOGOTA_TIME_FORMATTER.format(startedAt);
-}
-
 function slugify(value) {
   return String(value || "")
     .normalize("NFD")
@@ -2038,6 +2033,12 @@ class StudioStore {
       if (event.key === PERF_QUERY_METRICS_KEY || event.key === PERF_QUERY_LOG_ENABLED_KEY) {
         return;
       }
+      if (event.key === BACKGROUND_MEDIA_BY_BUSINESS_KEY || event.key === BACKGROUND_MEDIA_KEY) {
+        app.backgroundMedia = currentBackgroundMedia();
+        ensurePersistentBackground();
+        scheduleRender();
+        return;
+      }
       if (event.key === APP_KEY) {
         const incomingState = this.loadLocalState();
         if (this.shouldIgnoreCrossScopeLocalSync(incomingState)) {
@@ -3140,9 +3141,10 @@ class StudioStore {
       const stableBucketHasBusinessData = Boolean(
         stableBucket.barbers.length || stableBucket.services.length || stableBucket.barberServices.length
       );
-      const cachedBackgroundMedia = scopedBusinessId ? loadBackgroundMedia(scopedBusinessId) : null;
       const cachedPrefetchedPublicServices =
         !force && isPublicRoute && scopedBusinessId ? this.getCachedPublicServices(scopedBusinessId) || [] : [];
+      const cachedBackgroundMedia =
+        !force && scopedBusinessId ? loadBackgroundMedia(scopedBusinessId) : null;
       const cachedPrefetchedPublicIcons =
         !force && isPublicRoute ? cachedPublicServiceIcons() : [];
       const prefetchedPublicIconIds = new Set(
@@ -5221,10 +5223,6 @@ function loadScopedBusinessSession(baseKey, businessSlug, legacyKey = baseKey) {
 }
 
 function saveScopedBusinessSession(baseKey, businessSlug, value, legacyKey = baseKey) {
-  if (!value) {
-    clearScopedBusinessSession(baseKey, businessSlug, legacyKey);
-    return null;
-  }
   const role = baseKey === BARBER_SESSION_KEY ? "barber" : "admin";
   const normalized = normalizePersistentSession(value, {
     role,
@@ -5286,27 +5284,26 @@ function isSessionExpired(session, context = {}) {
 
 function refreshSessionHeartbeat(baseKey, businessSlug, session, context = {}, legacyKey = baseKey) {
   if (!session) return null;
-  const nextFingerprint = buildSessionFingerprint(
-    context.role || session.role || "session",
-    context.businessSlug || session.businessSlug || businessSlug || DEFAULT_BUSINESS_SLUG,
-    context.businessId || session.businessId || ""
-  );
-  const previousHeartbeat = new Date(session.lastSeenAt || session.startedAt || 0).getTime();
-  const shouldRefresh =
-    !Number.isFinite(previousHeartbeat) ||
-    Date.now() - previousHeartbeat > SESSION_HEARTBEAT_MS ||
-    nextFingerprint !== session.fingerprint;
-  if (!shouldRefresh) return session;
-
   const nextSession = {
     ...session,
     lastSeenAt: new Date().toISOString(),
-    fingerprint: nextFingerprint,
+    fingerprint: buildSessionFingerprint(
+      context.role || session.role || "session",
+      context.businessSlug || session.businessSlug || businessSlug || DEFAULT_BUSINESS_SLUG,
+      context.businessId || session.businessId || ""
+    ),
   };
-  if (baseKey === SUPER_ADMIN_SESSION_KEY) {
-    saveSuperAdminSession(nextSession);
-  } else {
-    saveScopedBusinessSession(baseKey, businessSlug, nextSession, legacyKey);
+  const previousHeartbeat = new Date(session.lastSeenAt || session.startedAt || 0).getTime();
+  if (
+    !Number.isFinite(previousHeartbeat) ||
+    Date.now() - previousHeartbeat > SESSION_HEARTBEAT_MS ||
+    nextSession.fingerprint !== session.fingerprint
+  ) {
+    if (baseKey === SUPER_ADMIN_SESSION_KEY) {
+      saveSuperAdminSession(nextSession);
+    } else {
+      saveScopedBusinessSession(baseKey, businessSlug, nextSession, legacyKey);
+    }
   }
   return nextSession;
 }
@@ -6317,29 +6314,52 @@ function saveBackgroundMedia(media, businessId = currentBusinessId()) {
   }
 }
 
+function refreshBackgroundPresentation({ rerender = false } = {}) {
+  app.backgroundMedia = currentBackgroundMedia();
+  ensurePersistentBackground();
+  if (rerender) {
+    render();
+  } else {
+    scheduleRender();
+  }
+}
+
+function shouldRenderPublicBackgroundVideo() {
+  const pathname = String(location?.pathname || "");
+  return app.view === "public" && pathname.startsWith("/barberia/");
+}
+
 function currentBackgroundMedia() {
   const businessId = currentBusinessId();
   const slug = String(app?.currentBusinessSlug || "").trim().toLowerCase();
+  const activeStore = runtimeStore();
   const settingsMedia = businessId
-    ? runtimeStore()?.businessSettingsForBusiness?.(businessId)?.meta?.backgroundMedia || null
+    ? activeStore?.businessSettingsForBusiness?.(businessId)?.meta?.backgroundMedia || null
     : null;
+  const hasHydratedSettings = Boolean(businessId && activeStore?.businessSettingsByBusiness?.has?.(businessId));
   app.lastValidBackgroundBySlug = app.lastValidBackgroundBySlug || {};
   if (businessId) {
-    const media = settingsMedia || loadBackgroundMedia(businessId);
-    if (settingsMedia) {
-      saveBackgroundMedia(settingsMedia, businessId);
+    const cachedMedia = loadBackgroundMedia(businessId);
+    if (hasHydratedSettings) {
+      if (settingsMedia) {
+        saveBackgroundMedia(settingsMedia, businessId);
+        if (slug) {
+          app.lastValidBackgroundBySlug[slug] = settingsMedia;
+        }
+        return settingsMedia;
+      }
+      if (slug) {
+        delete app.lastValidBackgroundBySlug[slug];
+      }
+      return cachedMedia || null;
     }
+    const media = cachedMedia;
     if (slug && media) {
       app.lastValidBackgroundBySlug[slug] = media;
     }
     return media || (slug ? app.lastValidBackgroundBySlug[slug] || null : null);
   }
   return slug ? app.lastValidBackgroundBySlug[slug] || null : null;
-}
-
-function shouldRenderPublicBackgroundVideo() {
-  const pathname = String(location?.pathname || "");
-  return app.view === "public" && pathname.startsWith("/barberia/");
 }
 
 function loadSoundPreference() {
@@ -6496,28 +6516,9 @@ function isCountableAppointment(item) {
   return item && COUNTABLE_STATUSES.has(item.status);
 }
 
-const dashboardSummaryCache = {
-  counter: { businessId: null, anchorDate: null, appointmentsRef: null, appointmentsLength: -1, value: null },
-  barber: new Map(),
-  admin: new Map(),
-};
-
 function buildCounterSummary(anchorDate) {
-  const businessId = currentBusinessId();
-  const appointments = getBusinessBucket(businessId).appointments;
-  const cached = dashboardSummaryCache.counter;
-  if (
-    cached.businessId === businessId &&
-    cached.anchorDate === anchorDate &&
-    cached.appointmentsRef === appointments &&
-    cached.appointmentsLength === appointments.length &&
-    cached.value
-  ) {
-    return cached.value;
-  }
-
   const activeWeekDates = new Set(getWeekDatesMemo(dateAnchor(anchorDate)));
-  const summary = appointments.reduce(
+  return getBusinessBucket(currentBusinessId()).appointments.reduce(
     (summary, appointment) => {
       if (!isCountableAppointment(appointment) || !activeWeekDates.has(appointment.date)) return summary;
       summary.weeklyByBarber[appointment.barberId] =
@@ -6530,15 +6531,6 @@ function buildCounterSummary(anchorDate) {
     },
     { weeklyByBarber: {}, dailyByBarber: {} }
   );
-
-  dashboardSummaryCache.counter = {
-    businessId,
-    anchorDate,
-    appointmentsRef: appointments,
-    appointmentsLength: appointments.length,
-    value: summary,
-  };
-  return summary;
 }
 
 function counterValue(group, barberId) {
@@ -7161,18 +7153,7 @@ function calculateAppointmentIncome(appointment) {
 }
 
 function buildBarberSummary(barberId, anchorDate) {
-  const businessId = currentBusinessId();
-  const appointments = getBusinessBucket(businessId).appointments;
-  const cacheKey = `${businessId}|${barberId}|${anchorDate}`;
-  const cached = dashboardSummaryCache.barber.get(cacheKey);
-  if (
-    cached &&
-    cached.appointmentsRef === appointments &&
-    cached.appointmentsLength === appointments.length
-  ) {
-    return cached.value;
-  }
-
+  const appointments = getBusinessBucket(currentBusinessId()).appointments;
   const todayReservations = appointments.filter(
     (item) =>
       item.barberId === barberId &&
@@ -7199,18 +7180,12 @@ function buildBarberSummary(barberId, anchorDate) {
   const weeklyBarberGain = weekAppointments
     .filter(isRealizedAppointment)
     .reduce((sum, appointment) => sum + calculateAppointmentIncome(appointment).barber, 0);
-  const summary = {
+  return {
     reservationsToday: todayReservations.length,
     incomeToday: totals.income,
     barberGainToday: totals.barber,
     barberGainWeek: weeklyBarberGain,
   };
-  dashboardSummaryCache.barber.set(cacheKey, {
-    appointmentsRef: appointments,
-    appointmentsLength: appointments.length,
-    value: summary,
-  });
-  return summary;
 }
 
 function barberOffersService(barberId, serviceId) {
@@ -7875,18 +7850,7 @@ function barberSummaryCards(barber, anchorDate, viewer = "barber") {
 }
 
 function buildAdminDashboardSummary(businessId, anchorDate = todayISO()) {
-  const appointments = store.state.appointments;
-  const cacheKey = `${businessId}|${anchorDate}`;
-  const cached = dashboardSummaryCache.admin.get(cacheKey);
-  if (
-    cached &&
-    cached.appointmentsRef === appointments &&
-    cached.appointmentsLength === appointments.length
-  ) {
-    return cached.value;
-  }
-
-  const businessAppointments = appointments.filter((item) => item.negocioId === businessId);
+  const businessAppointments = store.state.appointments.filter((item) => item.negocioId === businessId);
   const todayAppointments = businessAppointments.filter((item) => item.date === anchorDate);
   const currentWeekDates = getWeekDatesMemo(dateAnchor(anchorDate)).filter((date) => date <= anchorDate);
   const currentWeekSet = new Set(currentWeekDates);
@@ -7907,19 +7871,13 @@ function buildAdminDashboardSummary(businessId, anchorDate = todayISO()) {
     { admin: 0, barber: 0 }
   );
 
-  const summary = {
+  return {
     reservedToday,
     incomeToday,
     incomeWeek,
     adminGainToday: gainsToday.admin,
     barberGainToday: gainsToday.barber,
   };
-  dashboardSummaryCache.admin.set(cacheKey, {
-    appointmentsRef: appointments,
-    appointmentsLength: appointments.length,
-    value: summary,
-  });
-  return summary;
 }
 
 function renderDashboardHeroMetrics(items = []) {
@@ -9643,7 +9601,7 @@ function renderAdminWelcomeCard(account, business) {
   const now = new Date();
   const rawDateLabel = BOGOTA_LONG_DATE_FORMATTER.format(now);
   const todayLabel = rawDateLabel ? `${rawDateLabel.charAt(0).toUpperCase()}${rawDateLabel.slice(1)}` : "";
-  const timeLabel = sessionStartTimeLabel(app.adminSession);
+  const timeLabel = BOGOTA_TIME_FORMATTER.format(now);
   const online = typeof navigator === "undefined" ? true : navigator.onLine !== false;
   const statusLabel = online ? "En linea" : "Sin conexion";
 
@@ -9661,7 +9619,7 @@ function renderAdminWelcomeCard(account, business) {
             <strong>${escapeHTML(todayLabel)}</strong>
           </article>
           <article class="admin-dashboard-hero__fact">
-            <small>Hora de ingreso</small>
+            <small>Hora actual</small>
             <strong>${escapeHTML(timeLabel)}</strong>
           </article>
           <article class="admin-dashboard-hero__fact">
@@ -9691,7 +9649,7 @@ function renderBarberWelcomeCard(barber, business, counterSummary) {
   const now = new Date();
   const rawDateLabel = BOGOTA_LONG_DATE_FORMATTER.format(now);
   const todayLabel = rawDateLabel ? `${rawDateLabel.charAt(0).toUpperCase()}${rawDateLabel.slice(1)}` : "";
-  const timeLabel = sessionStartTimeLabel(app.barberSession);
+  const timeLabel = BOGOTA_TIME_FORMATTER.format(now);
   const online = typeof navigator === "undefined" ? true : navigator.onLine !== false;
   const statusLabel = online ? "En linea" : "Sin conexion";
 
@@ -9709,7 +9667,7 @@ function renderBarberWelcomeCard(barber, business, counterSummary) {
             <strong>${escapeHTML(todayLabel)}</strong>
           </article>
           <article class="admin-dashboard-hero__fact">
-            <small>Hora de ingreso</small>
+            <small>Hora actual</small>
             <strong>${escapeHTML(timeLabel)}</strong>
           </article>
           <article class="admin-dashboard-hero__fact">
@@ -9734,6 +9692,7 @@ function renderBarberWelcomeCard(barber, business, counterSummary) {
 function renderBarberModuleToolbar(title) {
   return `<section class="admin-main admin-module-toolbar-card">
     <div class="admin-module-toolbar">
+      <button class="secondary-action" type="button" data-barber-module-back>Atras</button>
       <div class="admin-module-toolbar__copy">
         <p class="eyebrow">Panel barbero</p>
         <h2>${escapeHTML(title)}</h2>
@@ -11608,13 +11567,12 @@ function bindEvents() {
         businessSlug: account.businessSlug || app.currentBusinessSlug,
         active: account.active !== false,
       }) || account;
-      const resolvedAdminBusinessId = hydratedAccount.businessId || business?.id || currentBusinessId() || "";
       app.adminSession = {
         id: hydratedAccount.id,
         user: hydratedAccount.user,
         name: hydratedAccount.name,
         role: hydratedAccount.role,
-        businessId: resolvedAdminBusinessId,
+        businessId: currentBusinessId(),
         token: randomSessionToken("admin"),
         deviceId: getDeviceId(),
         startedAt: new Date().toISOString(),
@@ -11629,7 +11587,7 @@ function bindEvents() {
       app.selectedDate = todayISO();
       app.adminSelectedSlots = [];
       app.adminSession.businessSlug = app.currentBusinessSlug;
-      app.adminSession.fingerprint = buildSessionFingerprint("admin", app.currentBusinessSlug, resolvedAdminBusinessId);
+      app.adminSession.fingerprint = buildSessionFingerprint("admin", app.currentBusinessSlug, currentBusinessId());
       clearAuthAttemptState("admin", app.currentBusinessSlug, user);
       await claimRemoteSession("admin", app.adminSession);
       saveScopedBusinessSession(ADMIN_SESSION_KEY, app.currentBusinessSlug, app.adminSession);
@@ -12037,7 +11995,7 @@ function bindEvents() {
     saveBackgroundMedia(app.backgroundMedia);
     app.pendingBackgroundVideo = null;
     app.backgroundMessage = "Video guardado como fondo activo.";
-    render();
+    refreshBackgroundPresentation({ rerender: true });
   });
 
   document.querySelector("[data-reset-background]")?.addEventListener("click", async () => {
@@ -12055,7 +12013,7 @@ function bindEvents() {
       return;
     }
     app.backgroundMessage = "Fondo estatico restaurado.";
-    render();
+    refreshBackgroundPresentation({ rerender: true });
   });
 
   document.querySelector("[data-sound-toggle]")?.addEventListener("change", (event) => {
@@ -12357,6 +12315,13 @@ function bindEvents() {
     });
   });
 
+  document.querySelectorAll("[data-barber-module-back]").forEach((button) => {
+    button.addEventListener("click", () => {
+      app.barberOpenPanel = "";
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-admin-slot]").forEach((button) => {
     button.addEventListener("click", () => {
       const time = button.dataset.adminSlot;
@@ -12493,8 +12458,7 @@ function bindEvents() {
 
   document.querySelector("#barber-login")?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const formElement = event.currentTarget instanceof HTMLFormElement ? event.currentTarget : null;
-    const form = new FormData(formElement || undefined);
+    const form = new FormData(event.currentTarget);
     const user = String(form.get("user") || "").trim();
     const business = currentBusiness();
     if (isPlaceholderBusiness(business)) {
@@ -12518,25 +12482,22 @@ function bindEvents() {
       : await findBarberAccount(user, password, currentBusinessId());
     if (!barber) {
       app.barberLoginError = "Usuario o contrasena incorrectos para este negocio.";
-      if (formElement) {
-        formElement.classList.add("shake");
-        setTimeout(() => formElement.classList.remove("shake"), 500);
-      }
+      event.currentTarget.classList.add("shake");
+      setTimeout(() => event.currentTarget.classList.remove("shake"), 500);
       render();
       return;
     }
     app.barberLoginError = "";
-    const resolvedBarberBusinessId = barber.businessId || business?.id || currentBusinessId() || "";
     app.barberSession = {
       id: barber.id,
-      businessId: resolvedBarberBusinessId,
+      businessId: currentBusinessId(),
       businessSlug: app.currentBusinessSlug,
       token: randomSessionToken("barber"),
       deviceId: getDeviceId(),
       startedAt: new Date().toISOString(),
       lastSeenAt: new Date().toISOString(),
       role: "barber",
-      fingerprint: buildSessionFingerprint("barber", app.currentBusinessSlug, resolvedBarberBusinessId),
+      fingerprint: buildSessionFingerprint("barber", app.currentBusinessSlug, currentBusinessId()),
     };
     clearAuthAttemptState("barber", app.currentBusinessSlug, user);
     app.barberDate = todayISO();
@@ -12720,7 +12681,7 @@ document.addEventListener("visibilitychange", () => {
 
 window.setInterval(() => {
   if (document.visibilityState !== "visible") return;
-  if (!app?.superAdminSession) return;
+  if (!app?.superAdminSession && !app?.adminSession && !app?.barberSession) return;
   scheduleRender();
 }, REMOTE_SESSION_VALIDATE_MS);
 
