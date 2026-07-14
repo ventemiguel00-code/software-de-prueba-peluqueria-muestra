@@ -9615,7 +9615,7 @@ function renderAdminWelcomeCard(account, business) {
   const roleLabel = roleLabelForDashboard(account?.role || "admin");
   const businessName = business?.name || "Barberia";
   const summary = buildAdminDashboardSummary(currentBusinessId(), todayISO());
-  const now = new Date();
+  const now = new Date(app.adminSession?.startedAt || new Date().toISOString());
   const rawDateLabel = BOGOTA_LONG_DATE_FORMATTER.format(now);
   const todayLabel = rawDateLabel ? `${rawDateLabel.charAt(0).toUpperCase()}${rawDateLabel.slice(1)}` : "";
   const timeLabel = BOGOTA_TIME_FORMATTER.format(now);
@@ -9636,7 +9636,7 @@ function renderAdminWelcomeCard(account, business) {
             <strong>${escapeHTML(todayLabel)}</strong>
           </article>
           <article class="admin-dashboard-hero__fact">
-            <small>Hora actual</small>
+            <small>Hora de ingreso</small>
             <strong>${escapeHTML(timeLabel)}</strong>
           </article>
           <article class="admin-dashboard-hero__fact">
@@ -9663,7 +9663,7 @@ function renderBarberWelcomeCard(barber, business, counterSummary) {
   const accountName = barber?.name || app.barberSession?.name || "Barbero";
   const businessName = business?.name || "Barberia";
   const summary = buildBarberSummary(barber.id, todayISO());
-  const now = new Date();
+  const now = new Date(app.barberSession?.startedAt || new Date().toISOString());
   const rawDateLabel = BOGOTA_LONG_DATE_FORMATTER.format(now);
   const todayLabel = rawDateLabel ? `${rawDateLabel.charAt(0).toUpperCase()}${rawDateLabel.slice(1)}` : "";
   const timeLabel = BOGOTA_TIME_FORMATTER.format(now);
@@ -9684,7 +9684,7 @@ function renderBarberWelcomeCard(barber, business, counterSummary) {
             <strong>${escapeHTML(todayLabel)}</strong>
           </article>
           <article class="admin-dashboard-hero__fact">
-            <small>Hora actual</small>
+            <small>Hora de ingreso</small>
             <strong>${escapeHTML(timeLabel)}</strong>
           </article>
           <article class="admin-dashboard-hero__fact">
@@ -9709,7 +9709,6 @@ function renderBarberWelcomeCard(barber, business, counterSummary) {
 function renderBarberModuleToolbar(title) {
   return `<section class="admin-main admin-module-toolbar-card">
     <div class="admin-module-toolbar">
-      <button class="secondary-action" type="button" data-barber-module-back>Atras</button>
       <div class="admin-module-toolbar__copy">
         <p class="eyebrow">Panel barbero</p>
         <h2>${escapeHTML(title)}</h2>
