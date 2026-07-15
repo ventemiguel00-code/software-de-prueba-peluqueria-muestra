@@ -2041,6 +2041,27 @@ class StudioStore {
           return;
         }
         this.state = incomingState;
+        const changedBusinessId =
+          event.data.businessId ||
+          event.data.record?.negocioId ||
+          event.data.record?.businessId ||
+          event.data.record?.business_id ||
+          this.scopedBusinessIdForRoute(resolveRoute(location.pathname)) ||
+          "";
+        if (changedBusinessId) {
+          const changedDate =
+            event.data.record?.date ||
+            event.data.record?.day ||
+            incomingState?.meta?.selectedDate ||
+            this.state?.meta?.selectedDate ||
+            todayISO();
+          const currentScopeKey = this.currentRuntimeScopeKey(resolveRoute(location.pathname));
+          this.syncResourceViewFromState("barbers", changedBusinessId, currentScopeKey);
+          this.syncResourceViewFromState("services", changedBusinessId, currentScopeKey);
+          this.syncResourceViewFromState("appointments", changedBusinessId, currentScopeKey, {
+            dateKey: changedDate,
+          });
+        }
         this.invalidateBusinessBuckets();
         invalidateDerivedBusinessCache();
         this.emit(event.data);
@@ -2063,6 +2084,20 @@ class StudioStore {
           return;
         }
         this.state = incomingState;
+        const changedBusinessId = this.scopedBusinessIdForRoute(resolveRoute(location.pathname)) || "";
+        if (changedBusinessId) {
+          const changedDate =
+            incomingState?.meta?.selectedDate ||
+            this.state?.meta?.selectedDate ||
+            app.selectedDate ||
+            todayISO();
+          const currentScopeKey = this.currentRuntimeScopeKey(resolveRoute(location.pathname));
+          this.syncResourceViewFromState("barbers", changedBusinessId, currentScopeKey);
+          this.syncResourceViewFromState("services", changedBusinessId, currentScopeKey);
+          this.syncResourceViewFromState("appointments", changedBusinessId, currentScopeKey, {
+            dateKey: changedDate,
+          });
+        }
         this.invalidateBusinessBuckets();
         invalidateDerivedBusinessCache();
         this.emit({ type: "SYNC" });
@@ -7682,6 +7717,7 @@ function renderPublic() {
     </div>`;
     bookingCardActions = `<button class="secondary-action public-step-four-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action public-step-four-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action public-step-four-action" type="button" data-reset-day>Cambiar fecha</button>`;
     bookingCardBody = `<div class="public-slot-grid-v2">
+      ${app.bookingError ? `<p class="form-feedback error public-slot-feedback">${escapeHTML(app.bookingError)}</p>` : ""}
       ${
         availabilityLoadState.loading
           ? `<div class="business-component-skeleton public-component-skeleton public-service-skeleton"><span></span><span></span></div>`
