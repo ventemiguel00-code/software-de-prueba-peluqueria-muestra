@@ -6071,6 +6071,89 @@ function buildBookingCalendarIcs(confirmation = app.bookingConfirmation) {
   };
 }
 
+function bookingCalendarDeviceProfile() {
+  const userAgent = String(
+    navigator?.userAgent ||
+      navigator?.vendor ||
+      window?.opera ||
+      ""
+  ).toLowerCase();
+  const isAndroid = /android/.test(userAgent);
+  const isIOS = /iphone|ipad|ipod/.test(userAgent) || (/macintosh/.test(userAgent) && navigator?.maxTouchPoints > 1);
+  return {
+    isAndroid,
+    isIOS,
+    isDesktop: !isAndroid && !isIOS,
+  };
+}
+
+function buildGoogleCalendarTemplateUrl(confirmation = app.bookingConfirmation) {
+  if (!confirmation?.appointmentId || !confirmation?.businessId || !confirmation?.date || !confirmation?.startTime) {
+    throw new Error("La reserva confirmada no tiene suficiente informacion para abrir el calendario.");
+  }
+  const resolvedBusiness = currentBusiness();
+  const resolvedBusinessId = currentBusinessId();
+  if (!resolvedBusiness || isPlaceholderBusiness(resolvedBusiness) || !resolvedBusinessId) {
+    throw new Error("El negocio aun no esta listo para abrir el calendario.");
+  }
+  if (resolvedBusinessId !== confirmation.businessId) {
+    throw new Error("La reserva confirmada no pertenece al negocio visible actualmente.");
+  }
+  const businessName = confirmation.businessName || resolvedBusiness.name || "Barberia";
+  const durationMinutes = bookingDurationMinutes(confirmation);
+  const endTime = addMinutesToSlot(confirmation.startTime, durationMinutes);
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: `Cita en ${businessName}`,
+    dates: `${formatICalBogotaDateTime(confirmation.date, confirmation.startTime)}/${formatICalBogotaDateTime(confirmation.date, endTime)}`,
+    details: [
+      `Servicio: ${confirmation.serviceName || "Servicio"}`,
+      `Barbero: ${confirmation.barberName || "Barbero"}`,
+      confirmation.businessWhatsapp ? `WhatsApp: ${displayPhone(confirmation.businessWhatsapp)}` : "",
+      `Reserva: ${confirmation.appointmentId}`,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    location: confirmation.businessAddress || "",
+    ctz: "America/Bogota",
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function openBookingCalendarIcs(confirmation = app.bookingConfirmation) {
+  const calendarFile = buildBookingCalendarIcs(confirmation);
+  const blob = new Blob([calendarFile.content], { type: "text/calendar;charset=utf-8" });
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.rel = "noopener";
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  const profile = bookingCalendarDeviceProfile();
+  if (profile.isIOS) {
+    anchor.target = "_blank";
+  } else {
+    anchor.download = calendarFile.filename;
+  }
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 4000);
+}
+
+function openBookingCalendarUrl(url) {
+  const popup = window.open(url, "_blank", "noopener,noreferrer");
+  if (popup) return true;
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  return true;
+}
+
 function setBookingCalendarError(message = "") {
   if (!app.bookingConfirmation) return;
   app.bookingConfirmation = {
@@ -6080,7 +6163,7 @@ function setBookingCalendarError(message = "") {
   };
 }
 
-function triggerBookingCalendarDownload() {
+function triggerBookingCalendarAction() {
   if (!app.bookingConfirmation || app.bookingConfirmation.calendarPending) return;
   try {
     app.bookingConfirmation = {
@@ -6089,18 +6172,13 @@ function triggerBookingCalendarDownload() {
       calendarError: "",
     };
     render();
-    const calendarFile = buildBookingCalendarIcs(app.bookingConfirmation);
-    const blob = new Blob([calendarFile.content], { type: "text/calendar;charset=utf-8" });
-    const objectUrl = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = objectUrl;
-    anchor.download = calendarFile.filename;
-    anchor.rel = "noopener";
-    anchor.style.display = "none";
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    const profile = bookingCalendarDeviceProfile();
+    if (profile.isIOS) {
+      openBookingCalendarIcs(app.bookingConfirmation);
+    } else {
+      const googleCalendarUrl = buildGoogleCalendarTemplateUrl(app.bookingConfirmation);
+      openBookingCalendarUrl(googleCalendarUrl);
+    }
     if (app.bookingConfirmation) {
       app.bookingConfirmation = {
         ...app.bookingConfirmation,
@@ -6146,8 +6224,8 @@ function renderBookingConfirmationDialog() {
         </div>
       </div>
       <div class="booking-confirm-card-v2__calendar-copy">
-        <strong>Deseas agregar esta cita al calendario de tu telefono?</strong>
-        <p>Recibiras un recordatorio una hora antes.</p>
+        <strong>Agrega esta cita a tu calendario.</strong>
+        <p>El evento se abrira con los datos completos para que solo tengas que confirmar.</p>
       </div>
       ${app.bookingConfirmation.calendarError ? `<p class="form-feedback error booking-confirm-card-v2__calendar-error">${escapeHTML(app.bookingConfirmation.calendarError)}</p>` : ""}
       <div class="booking-confirm-card-v2__tips">
@@ -11721,7 +11799,7 @@ function bindEvents() {
   });
 
   document.querySelector("[data-add-booking-calendar]")?.addEventListener("click", () => {
-    triggerBookingCalendarDownload();
+    triggerBookingCalendarAction();
   });
 
   document.querySelector("[data-close-booking-confirm]")?.addEventListener("click", () => {
