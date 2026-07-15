@@ -9,6 +9,7 @@ const hasSupabaseBrowserClient =
 
 const STATUS = {
   available: { label: "Disponible", short: "Libre", tone: "available" },
+  pending: { label: "Confirmando...", short: "Pend.", tone: "fixed" },
   reserved: { label: "Ocupado", short: "Ocupado", tone: "reserved" },
   fixed: { label: "Cita fija", short: "Fija", tone: "fixed" },
   blocked: { label: "Bloqueado", short: "Bloq.", tone: "blocked" },
@@ -533,6 +534,10 @@ function slotRange(time, businessId = currentBusinessId()) {
   const start = parseSlotTime(time);
   const end = addMinutesToSlot(time, businessScheduleConfig(businessId).slotDurationMinutes);
   return `${formatAmPm(start.hour, start.minute)} - ${formatAmPm(end.hour, end.minute)}`;
+}
+
+function publicSlotKey(businessId, barberId, date, time) {
+  return `${businessId || "global"}:${barberId || "sin-barbero"}:${date || "sin-fecha"}:${time || "sin-hora"}`;
 }
 
 function perfLogsEnabled() {
@@ -2424,7 +2429,7 @@ class StudioStore {
     return [...(bucket[resourceKey] || [])];
   }
 
-  beginResourceLoading(resourceKey, businessId, syncScopeKey = "") {
+  beginResourceLoading(resourceKey, businessId, syncScopeKey = "", scopeMeta = null) {
     if (!RESOURCE_VIEW_KEYS.includes(resourceKey) || !businessId) return;
     const currentRows = this.snapshotResourceRows(resourceKey, businessId, this.state);
     const previous = this.resourceViewEntry(resourceKey, businessId, syncScopeKey);
@@ -2434,11 +2439,17 @@ class StudioStore {
       lastValidData: previous?.lastValidData?.length ? previous.lastValidData : currentRows,
       confirmedEmpty: false,
       error: "",
+      scopeMeta: scopeMeta || previous?.scopeMeta || null,
       updatedAt: Date.now(),
     });
   }
 
-  commitResourceLoading(resourceKey, businessId, rows = [], { syncScopeKey = "", success = true, error = "" } = {}) {
+  commitResourceLoading(
+    resourceKey,
+    businessId,
+    rows = [],
+    { syncScopeKey = "", success = true, error = "", scopeMeta = null } = {}
+  ) {
     if (!RESOURCE_VIEW_KEYS.includes(resourceKey) || !businessId) return;
     const previous = this.resourceViewEntry(resourceKey, businessId, syncScopeKey);
     const normalizedRows = Array.isArray(rows) ? rows : [];
@@ -2460,11 +2471,12 @@ class StudioStore {
       lastValidData: nextLastValidData,
       confirmedEmpty: Boolean(success && normalizedRows.length === 0),
       error: success ? "" : String(error || ""),
+      scopeMeta: scopeMeta || previous?.scopeMeta || null,
       updatedAt: Date.now(),
     });
   }
 
-  syncResourceViewFromState(resourceKey, businessId, syncScopeKey = "") {
+  syncResourceViewFromState(resourceKey, businessId, syncScopeKey = "", scopeMeta = null) {
     if (!RESOURCE_VIEW_KEYS.includes(resourceKey) || !businessId) return;
     const rows = this.snapshotResourceRows(resourceKey, businessId, this.state);
     const previous = this.resourceViewEntry(resourceKey, businessId, syncScopeKey);
@@ -2474,6 +2486,7 @@ class StudioStore {
       lastValidData: rows.length ? rows : previous?.lastValidData || [],
       confirmedEmpty: rows.length === 0,
       error: "",
+      scopeMeta: scopeMeta || previous?.scopeMeta || null,
       updatedAt: Date.now(),
     });
   }
@@ -3183,7 +3196,16 @@ class StudioStore {
       if (scopedBusinessId) {
         this.beginResourceLoading("barbers", scopedBusinessId, syncScopeKey);
         this.beginResourceLoading("services", scopedBusinessId, syncScopeKey);
-        this.beginResourceLoading("appointments", scopedBusinessId, syncScopeKey);
+        this.beginResourceLoading(
+          "appointments",
+          scopedBusinessId,
+          syncScopeKey,
+          isPublicRoute
+            ? { dateKey: publicDate }
+            : isInternalRoute
+              ? { dateRangeKey: `${weekStartDate}:${weekEndDate}` }
+              : null
+        );
       }
       const cachedServiceIconRows =
         !force && Array.isArray(this.state.serviceIcons) && this.state.serviceIcons.length
@@ -3299,6 +3321,11 @@ class StudioStore {
             syncScopeKey,
             success: !appointmentsBaseResult.error,
             error: appointmentsBaseResult.error?.message || "",
+            scopeMeta: isPublicRoute
+              ? { dateKey: publicDate }
+              : isInternalRoute
+                ? { dateRangeKey: `${weekStartDate}:${weekEndDate}` }
+                : null,
           }
         );
       }
@@ -3371,6 +3398,9 @@ class StudioStore {
           syncScopeKey: activeSyncScopeKey,
           success: false,
           error: error?.message || "",
+          scopeMeta: resolveRoute(location.pathname).view === "public"
+            ? { dateKey: this.state?.meta?.selectedDate || todayISO() }
+            : null,
         });
       }
       this.remoteReady = true;
@@ -4495,12 +4525,72 @@ class StudioStore {
     return this.businessBucket(negocioId).appointmentBySlot.get(`${barberId}|${date}|${time}`);
   }
 
+  removeAppointmentBySlot(barberId, date, time, negocioId = currentBusinessId(), predicate = null, options = {}) {
+    if (!this.barberBelongsToBusiness(barberId, negocioId)) return null;
+    const existing = this.getAppointment(barberId, date, time, negocioId);
+    if (!existing) return null;
+    if (typeof predicate === "function" && !predicate(existing)) return existing;
+    this.state.appointments = this.state.appointments.filter((item) => item.id !== existing.id);
+    this.persist({
+      type: "DELETE",
+      table: "appointments",
+      record: existing,
+      businessId: negocioId,
+      skipRemote: Boolean(options.skipRemote),
+    });
+    return existing;
+  }
+
+  markPublicSlotPending(payload) {
+    const negocioId = payload.negocioId || currentBusinessId();
+    const appointment = this.upsertAppointment({
+      ...payload,
+      negocioId,
+      status: "pending",
+      source: payload.source || "public_pending",
+    }, { skipRemote: true });
+    if (appointment) {
+      this.syncResourceViewFromState("appointments", negocioId, "", { dateKey: payload.date });
+    }
+    return appointment;
+  }
+
+  resolvePublicSlotState(payload, status = "reserved") {
+    const negocioId = payload.negocioId || currentBusinessId();
+    const existing = this.getAppointment(payload.barberId, payload.date, payload.time, negocioId);
+    const appointment = this.upsertAppointment({
+      ...payload,
+      id: existing?.id || payload.id,
+      negocioId,
+      status,
+      source: payload.source || (status === "reserved" ? "public" : "public_pending"),
+    }, { skipRemote: true });
+    if (appointment) {
+      this.syncResourceViewFromState("appointments", negocioId, "", { dateKey: payload.date });
+    }
+    return appointment;
+  }
+
+  revertPublicPendingSlot(payload) {
+    const negocioId = payload.negocioId || currentBusinessId();
+    const removed = this.removeAppointmentBySlot(
+      payload.barberId,
+      payload.date,
+      payload.time,
+      negocioId,
+      (item) => item.status === "pending" || String(item.source || "").startsWith("public"),
+      { skipRemote: true }
+    );
+    this.syncResourceViewFromState("appointments", negocioId, "", { dateKey: payload.date });
+    return removed;
+  }
+
   isDayBlocked(barberId, date, negocioId = currentBusinessId()) {
     if (!this.barberBelongsToBusiness(barberId, negocioId)) return false;
     return this.businessBucket(negocioId).blockedDayKeys.has(`${barberId}|${date}`);
   }
 
-  upsertAppointment(payload) {
+  upsertAppointment(payload, options = {}) {
     const negocioId = payload.negocioId || currentBusinessId();
     if (!this.barberBelongsToBusiness(payload.barberId, negocioId)) return null;
     const existing = this.getAppointment(payload.barberId, payload.date, payload.time, negocioId);
@@ -4522,12 +4612,22 @@ class StudioStore {
       this.state.appointments = this.state.appointments.map((item) =>
         item.id === existing.id ? appointment : item
       );
-      this.persist({ type: "UPDATE", table: "appointments", record: appointment });
+      this.persist({
+        type: "UPDATE",
+        table: "appointments",
+        record: appointment,
+        skipRemote: Boolean(options.skipRemote),
+      });
       return appointment;
     }
 
     this.state.appointments.push(appointment);
-    this.persist({ type: "INSERT", table: "appointments", record: appointment });
+    this.persist({
+      type: "INSERT",
+      table: "appointments",
+      record: appointment,
+      skipRemote: Boolean(options.skipRemote),
+    });
     return appointment;
   }
 
@@ -4545,7 +4645,7 @@ class StudioStore {
       return {
         ok: false,
         code: "slot_taken",
-        message: "Este horario ya no esta disponible. Por favor selecciona otro.",
+        message: "Este horario acaba de ser reservado. Selecciona otro disponible.",
       };
     }
 
@@ -4560,53 +4660,71 @@ class StudioStore {
     };
 
     if (!this.supabase) {
-      this.upsertAppointment(appointment);
-      return { ok: true, appointment };
+      this.resolvePublicSlotState(appointment, "reserved");
+      return { ok: true, appointment: this.getAppointment(payload.barberId, payload.date, payload.time, negocioId) || appointment };
     }
 
-    const { data: remoteExisting, error: remoteLookupError } = await this.supabase
-      .from("appointments")
-      .select("id,status")
-      .eq("business_id", negocioId)
-      .eq("barber_id", payload.barberId)
-      .eq("date", payload.date)
-      .eq("time", payload.time)
-      .limit(1);
+    this.markPublicSlotPending(appointment);
 
-    if (remoteLookupError) throw remoteLookupError;
+    try {
+      const { data: remoteExisting, error: remoteLookupError } = await this.supabase
+        .from("appointments")
+        .select("id,status")
+        .eq("business_id", negocioId)
+        .eq("barber_id", payload.barberId)
+        .eq("date", payload.date)
+        .eq("time", payload.time)
+        .limit(1);
 
-    if ((remoteExisting || []).length) {
-      return {
-        ok: false,
-        code: "slot_taken",
-        message: "Este horario ya no esta disponible. Por favor selecciona otro.",
-      };
-    }
+      if (remoteLookupError) throw remoteLookupError;
 
-    const { error: insertError } = await this.supabase
-      .from("appointments")
-      .insert(mapAppointmentToRow(appointment));
-
-    if (insertError) {
-      if (insertError.code === "23505") {
+      if ((remoteExisting || []).length) {
+        this.resolvePublicSlotState(
+          {
+            ...appointment,
+            clientName: "",
+            whatsapp: "",
+            source: "public_conflict",
+          },
+          "reserved"
+        );
         return {
           ok: false,
           code: "slot_taken",
-          message: "Este horario ya no esta disponible. Por favor selecciona otro.",
+          message: "Este horario acaba de ser reservado. Selecciona otro disponible.",
         };
       }
-      throw insertError;
-    }
 
-    this.state.appointments.push(appointment);
-    this.invalidateBusinessBuckets();
-    invalidateDerivedBusinessCache();
-    this.state = this.stateWithRuntimeScope(this.state);
-    persistAppStateSnapshot(this.state);
-    const localEvent = { type: "INSERT", table: "appointments", record: appointment, source: "public_remote_safe" };
-    this.emit(localEvent);
-    this.channel?.postMessage(localEvent);
-    return { ok: true, appointment };
+      const { error: insertError } = await this.supabase
+        .from("appointments")
+        .insert(mapAppointmentToRow(appointment));
+
+      if (insertError) {
+        if (insertError.code === "23505") {
+          this.resolvePublicSlotState(
+            {
+              ...appointment,
+              clientName: "",
+              whatsapp: "",
+              source: "public_conflict",
+            },
+            "reserved"
+          );
+          return {
+            ok: false,
+            code: "slot_taken",
+            message: "Este horario acaba de ser reservado. Selecciona otro disponible.",
+          };
+        }
+        throw insertError;
+      }
+
+      const syncedAppointment = this.resolvePublicSlotState(appointment, "reserved") || appointment;
+      return { ok: true, appointment: syncedAppointment };
+    } catch (error) {
+      this.revertPublicPendingSlot(appointment);
+      throw error;
+    }
   }
 
   deleteAppointment(id, negocioId = currentBusinessId()) {
@@ -5853,6 +5971,29 @@ function isBusinessDataRefreshPending(businessId = currentBusinessId()) {
   return Date.now() - startedAt < EMPTY_BUSINESS_DATA_LOADING_MS;
 }
 
+function publicAppointmentsLoadState(businessId = currentBusinessId(), date = "") {
+  const entry = store.resourceViewEntry?.("appointments", businessId) || null;
+  const rows = Array.isArray(entry?.data) ? entry.data : [];
+  const lastValidRows = Array.isArray(entry?.lastValidData) ? entry.lastValidData : [];
+  const scopedDate = String(entry?.scopeMeta?.dateKey || "");
+  const selectedDate = String(date || "");
+  const matchesCurrentDate =
+    selectedDate &&
+    (rows.some((item) => item.date === selectedDate) ||
+      lastValidRows.some((item) => item.date === selectedDate) ||
+      (scopedDate === selectedDate && entry?.confirmedEmpty));
+  return {
+    loading: Boolean(
+      selectedDate &&
+        (entry?.loading ||
+          (scopedDate && scopedDate !== selectedDate) ||
+          (!matchesCurrentDate && isBusinessDataRefreshPending(businessId)))
+    ),
+    confirmedEmpty: Boolean(selectedDate && scopedDate === selectedDate && entry && !entry.loading && entry.confirmedEmpty),
+    error: String(entry?.error || ""),
+  };
+}
+
 function businessLoadingShell(title = "Preparando entorno") {
   return appShell(`
     <section class="admin-main business-component-loading">
@@ -6512,12 +6653,14 @@ function isUnavailableSlot(date, time, status) {
 
 function publicSlotLabel(status, dayBlocked) {
   if (status === "available") return "Disponible";
+  if (status === "pending") return "Confirmando...";
   return dayBlocked ? "No disponible" : "Ocupado";
 }
 
 function publicSlotStateTag(status, dayBlocked, expired) {
   if (expired) return "NO DISPONIBLE";
   if (dayBlocked || status === "blocked") return "BLOQUEADO";
+  if (status === "pending") return "CONFIRMANDO";
   if (status === "fixed") return "FIJADA";
   if (status === "reserved") return "OCUPADO";
   return "DISPONIBLE";
@@ -7388,6 +7531,9 @@ function renderPublic() {
   const hasSelectedService = Boolean(selectedService);
   const hasSelectedDay = hasSelectedBarber && app.publicDaySelected;
   const hasSelectedSlot = hasSelectedDay && Boolean(app.selectedSlot);
+  const availabilityLoadState = hasSelectedDay
+    ? publicAppointmentsLoadState(businessId, app.selectedDate)
+    : { loading: false, confirmedEmpty: false, error: "" };
   const availability = hasSelectedDay
     ? slotRowsForBarberDate(selected.id, app.selectedDate, businessId)
     : [];
@@ -7511,7 +7657,9 @@ function renderPublic() {
 
   if (currentStep === "slots") {
     bookingCardTitle = "Seleccionar horario";
-    bookingCardMicrocopy = "Elige un horario disponible para completar la reserva.";
+    bookingCardMicrocopy = availabilityLoadState.loading
+      ? "Validando disponibilidad real del barbero..."
+      : "Elige un horario disponible para completar la reserva.";
     bookingCardSummary = `<div class="public-step-four-summary">
       ${publicSelectionPill({
         icon: "services",
@@ -7534,17 +7682,23 @@ function renderPublic() {
     </div>`;
     bookingCardActions = `<button class="secondary-action public-step-four-action" type="button" data-reset-service>Cambiar servicio</button><button class="secondary-action public-step-four-action" type="button" data-reset-barber>Cambiar barbero</button><button class="secondary-action public-step-four-action" type="button" data-reset-day>Cambiar fecha</button>`;
     bookingCardBody = `<div class="public-slot-grid-v2">
-      ${availability
+      ${
+        availabilityLoadState.loading
+          ? `<div class="business-component-skeleton public-component-skeleton public-service-skeleton"><span></span><span></span></div>`
+          : availabilityLoadState.error
+            ? `<div class="empty-state-card"><p>No fue posible validar la disponibilidad en este momento.</p></div>`
+            : availability
         .map(({ time, status, appointment, dayBlocked }) => {
           const unavailable = isUnavailableSlot(app.selectedDate, time, status);
           const disabled = status !== "available" || unavailable;
-          const visualState = disabled ? "Ocupado" : "Disponible";
+          const visualState = unavailable ? "No disponible" : publicSlotLabel(status, dayBlocked);
           return `<button class="slot public-slot-card-v2 ${STATUS[status].tone} ${unavailable ? "unavailable" : ""} ${time === app.selectedSlot ? "picked" : ""}" data-slot="${time}" ${disabled ? "disabled" : ""}>
             <small class="public-slot-card-v2__state">${visualState}</small>
             <strong class="public-slot-card-v2__time">${slotRange(time)}</strong>
           </button>`;
         })
-        .join("")}
+        .join("")
+      }
     </div>`;
   }
 
@@ -11400,6 +11554,7 @@ function bindEvents() {
       store.state.meta.selectedDate = app.selectedDate;
       app.publicDaySelected = true;
       app.selectedSlot = "";
+      store.beginResourceLoading("appointments", currentBusinessId(), "", { dateKey: app.selectedDate });
       store.queueRemoteSync({ quiet: true, origin: "public-date-change", component: "PublicAgenda", hook: "datePicker" });
       render();
     });
@@ -11490,7 +11645,7 @@ function bindEvents() {
     if (!app.selectedServiceId || !app.selectedBarberId || !app.selectedSlot) return;
     app.bookingError = "";
     if (!isPublicSlotBookable(app.selectedBarberId, app.selectedDate, app.selectedSlot)) {
-      app.bookingError = "Este horario ya no esta disponible. Por favor selecciona otro.";
+      app.bookingError = "Este horario acaba de ser reservado. Selecciona otro disponible.";
       app.selectedSlot = "";
       render();
       return;
@@ -12676,6 +12831,31 @@ store.subscribe((state, event) => {
   if (event.type === "INSERT" && event.table === "appointments" && event.record?.source === "public") {
     app.lastEvent = `Nueva reserva: ${event.record.clientName || "Cliente"}`;
     playReservationSound();
+  }
+  const affectedSlotKey =
+    event?.record && (event.table === "appointments" || event.table === "blocked_days")
+      ? publicSlotKey(
+          event.record.negocioId || event.record.businessId || event.record.business_id || "",
+          event.record.barberId || event.record.barber_id || "",
+          event.record.date || "",
+          event.record.time || ""
+        )
+      : "";
+  const currentSlotKey =
+    app.selectedBarberId && app.selectedDate && app.selectedSlot
+      ? publicSlotKey(currentBusinessId(), app.selectedBarberId, app.selectedDate, app.selectedSlot)
+      : "";
+  if (
+    !app.bookingSubmitting &&
+    !app.bookingConfirmation &&
+    currentSlotKey &&
+    affectedSlotKey &&
+    currentSlotKey === affectedSlotKey &&
+    (event.table === "appointments" || event.table === "blocked_days") &&
+    ["INSERT", "UPDATE"].includes(event.type)
+  ) {
+    app.selectedSlot = "";
+    app.bookingError = "Este horario acaba de ser reservado por otra persona. Selecciona otro horario disponible.";
   }
   if (document.visibilityState === "visible") scheduleRender();
 });
