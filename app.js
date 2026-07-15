@@ -5956,6 +5956,166 @@ function businessWhatsappForBusiness(business = currentBusiness(), businessId = 
   );
 }
 
+function businessAddressForBusiness(business = currentBusiness(), businessId = business?.id || currentBusinessId()) {
+  const settings = store.businessSettingsForBusiness(businessId);
+  const meta = settings?.meta || {};
+  return String(
+    business?.address ||
+      business?.location ||
+      business?.direccion ||
+      meta.address ||
+      meta.direccion ||
+      meta.businessAddress ||
+      meta.contactAddress ||
+      meta.locationAddress ||
+      meta.location ||
+      ""
+  ).trim();
+}
+
+function bookingDurationMinutes(confirmation = app.bookingConfirmation) {
+  const explicitDuration = Number(
+    confirmation?.serviceDurationMinutes ??
+      confirmation?.serviceDuration ??
+      confirmation?.durationMinutes ??
+      confirmation?.duration
+  );
+  if (explicitDuration > 0) return explicitDuration;
+  return businessScheduleConfig(confirmation?.businessId || currentBusinessId()).slotDurationMinutes;
+}
+
+function padICalNumber(value) {
+  return String(Math.max(0, Number(value) || 0)).padStart(2, "0");
+}
+
+function formatICalBogotaDateTime(date, time) {
+  const { year, month, day } = parseISODateParts(date);
+  const parsedTime = parseSlotTime(time || "00:00");
+  return `${String(year).padStart(4, "0")}${padICalNumber(month)}${padICalNumber(day)}T${padICalNumber(parsedTime.hour)}${padICalNumber(parsedTime.minute)}00`;
+}
+
+function formatICalUtcStamp(date = new Date()) {
+  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function escapeICalText(value) {
+  return String(value ?? "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\r\n/g, "\\n")
+    .replace(/\n/g, "\\n")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;");
+}
+
+function foldICalLine(line) {
+  const source = String(line || "");
+  if (source.length <= 74) return source;
+  const chunks = [];
+  for (let index = 0; index < source.length; index += 74) {
+    const segment = source.slice(index, index + 74);
+    chunks.push(index === 0 ? segment : ` ${segment}`);
+  }
+  return chunks.join("\r\n");
+}
+
+function buildBookingCalendarIcs(confirmation = app.bookingConfirmation) {
+  if (!confirmation?.appointmentId || !confirmation?.businessId || !confirmation?.date || !confirmation?.startTime) {
+    throw new Error("La reserva confirmada no tiene suficiente informacion para crear el calendario.");
+  }
+  const resolvedBusiness = currentBusiness();
+  const resolvedBusinessId = currentBusinessId();
+  if (!resolvedBusiness || isPlaceholderBusiness(resolvedBusiness) || !resolvedBusinessId) {
+    throw new Error("El negocio aun no esta listo para generar el calendario.");
+  }
+  if (resolvedBusinessId !== confirmation.businessId) {
+    throw new Error("La reserva confirmada no pertenece al negocio visible actualmente.");
+  }
+  const businessName = confirmation.businessName || resolvedBusiness.name || "Barberia";
+  const durationMinutes = bookingDurationMinutes(confirmation);
+  const endTime = addMinutesToSlot(confirmation.startTime, durationMinutes);
+  const uid = `${confirmation.appointmentId}-${confirmation.businessId}@barber-saas`;
+  const summary = `Cita en ${businessName}`;
+  const description = [
+    `Servicio: ${confirmation.serviceName || "Servicio"}`,
+    `Barbero: ${confirmation.barberName || "Barbero"}`,
+    confirmation.businessWhatsapp ? `WhatsApp: ${displayPhone(confirmation.businessWhatsapp)}` : "",
+    `Reserva: ${confirmation.appointmentId}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Barber SaaS//Agenda Publica//ES",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "BEGIN:VEVENT",
+    `UID:${uid}`,
+    `DTSTAMP:${formatICalUtcStamp(new Date())}`,
+    `DTSTART;TZID=America/Bogota:${formatICalBogotaDateTime(confirmation.date, confirmation.startTime)}`,
+    `DTEND;TZID=America/Bogota:${formatICalBogotaDateTime(confirmation.date, endTime)}`,
+    `SUMMARY:${escapeICalText(summary)}`,
+    `DESCRIPTION:${escapeICalText(description)}`,
+    confirmation.businessAddress ? `LOCATION:${escapeICalText(confirmation.businessAddress)}` : "",
+    "BEGIN:VALARM",
+    "TRIGGER:-PT1H",
+    "ACTION:DISPLAY",
+    `DESCRIPTION:${escapeICalText(`Tu cita en ${businessName} es en 1 hora`)}`,
+    "END:VALARM",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].filter(Boolean);
+  return {
+    filename: `reserva-${confirmation.appointmentId}.ics`,
+    content: `${lines.map(foldICalLine).join("\r\n")}\r\n`,
+  };
+}
+
+function setBookingCalendarError(message = "") {
+  if (!app.bookingConfirmation) return;
+  app.bookingConfirmation = {
+    ...app.bookingConfirmation,
+    calendarPending: false,
+    calendarError: String(message || "").trim(),
+  };
+}
+
+function triggerBookingCalendarDownload() {
+  if (!app.bookingConfirmation || app.bookingConfirmation.calendarPending) return;
+  try {
+    app.bookingConfirmation = {
+      ...app.bookingConfirmation,
+      calendarPending: true,
+      calendarError: "",
+    };
+    render();
+    const calendarFile = buildBookingCalendarIcs(app.bookingConfirmation);
+    const blob = new Blob([calendarFile.content], { type: "text/calendar;charset=utf-8" });
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = calendarFile.filename;
+    anchor.rel = "noopener";
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    if (app.bookingConfirmation) {
+      app.bookingConfirmation = {
+        ...app.bookingConfirmation,
+        calendarPending: false,
+        calendarError: "",
+      };
+      render();
+    }
+  } catch (error) {
+    console.error(error);
+    setBookingCalendarError("La reserva quedo confirmada, pero no fue posible abrir el calendario en este dispositivo.");
+    render();
+  }
+}
+
 function renderBookingConfirmationDialog() {
   if (!app.bookingConfirmation) return "";
   const businessPhone = businessWhatsappForBusiness();
@@ -5985,13 +6145,19 @@ function renderBookingConfirmationDialog() {
           <span>WhatsApp</span><strong>${escapeHTML(app.bookingConfirmation.whatsapp)}</strong>
         </div>
       </div>
+      <div class="booking-confirm-card-v2__calendar-copy">
+        <strong>Deseas agregar esta cita al calendario de tu telefono?</strong>
+        <p>Recibiras un recordatorio una hora antes.</p>
+      </div>
+      ${app.bookingConfirmation.calendarError ? `<p class="form-feedback error booking-confirm-card-v2__calendar-error">${escapeHTML(app.bookingConfirmation.calendarError)}</p>` : ""}
       <div class="booking-confirm-card-v2__tips">
         <span class="booking-confirm-card-v2__tips-title">Recomendaciones</span>
         <p>Llega unos minutos antes, mantente atento al WhatsApp y usa este mismo chat si necesitas reprogramar.</p>
       </div>
       <div class="button-row booking-confirm-card-v2__actions">
+        <button class="primary-action booking-confirm-card-v2__calendar" type="button" data-add-booking-calendar ${app.bookingConfirmation.calendarPending ? "disabled" : ""}>${app.bookingConfirmation.calendarPending ? "Preparando calendario..." : "Agregar a mi calendario"}</button>
         ${businessPhone ? `<a class="secondary-action booking-confirm-card-v2__whatsapp" href="https://wa.me/${businessPhone}" target="_blank" rel="noreferrer">Abrir WhatsApp</a>` : ""}
-        <button class="primary-action booking-confirm-card-v2__close" type="button" data-close-booking-confirm>Entendido</button>
+        <button class="secondary-action booking-confirm-card-v2__close" type="button" data-close-booking-confirm>Entendido</button>
       </div>
     </div>
   </dialog>`;
@@ -11524,13 +11690,25 @@ function bindEvents() {
         render();
         return;
       }
+      const resolvedBusiness = currentBusiness();
+      const resolvedBusinessId = currentBusinessId();
       app.bookingConfirmation = {
         clientName,
         whatsapp,
+        appointmentId: result.appointment?.id || "",
+        businessId: result.appointment?.negocioId || resolvedBusinessId || "",
+        businessSlug: app.currentBusinessSlug || "",
+        businessName: resolvedBusiness?.name || "Barberia",
+        businessWhatsapp: businessWhatsappForBusiness(resolvedBusiness, resolvedBusinessId || result.appointment?.negocioId || ""),
+        businessAddress: businessAddressForBusiness(resolvedBusiness, resolvedBusinessId || result.appointment?.negocioId || ""),
         serviceName: service?.name || "Servicio",
         barberName: barber?.name || "Barbero",
         date: app.selectedDate,
         range: slotRange(app.selectedSlot),
+        startTime: app.selectedSlot,
+        serviceDurationMinutes: businessScheduleConfig(resolvedBusinessId || result.appointment?.negocioId || "").slotDurationMinutes,
+        calendarPending: false,
+        calendarError: "",
       };
       app.bookingSubmitting = false;
       render();
@@ -11540,6 +11718,10 @@ function bindEvents() {
       app.bookingError = "No fue posible completar la reserva en este momento. Intenta nuevamente.";
       render();
     }
+  });
+
+  document.querySelector("[data-add-booking-calendar]")?.addEventListener("click", () => {
+    triggerBookingCalendarDownload();
   });
 
   document.querySelector("[data-close-booking-confirm]")?.addEventListener("click", () => {

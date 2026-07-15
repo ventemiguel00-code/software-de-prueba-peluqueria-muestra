@@ -4669,25 +4669,12 @@ body[data-device="mobile"] *::after {
     url("./assets/atelier-luxury-hero.png") center/cover;
 }
 
-.public-reservation-hero-v2 .hero-bg.video-backed {
-  background:
-    linear-gradient(180deg, rgba(4, 8, 14, 0.24), rgba(4, 8, 14, 0.08) 34%, rgba(4, 8, 14, 0.22)),
-    radial-gradient(circle at 18% 18%, rgba(0, 191, 255, 0.1), transparent 24rem),
-    radial-gradient(circle at 82% 22%, rgba(65, 236, 255, 0.06), transparent 22rem);
-}
-
 .public-reservation-hero-v2__overlay {
   position: absolute;
   inset: 0;
   background:
     linear-gradient(180deg, rgba(3, 7, 11, 0.08), rgba(3, 7, 11, 0.24)),
     linear-gradient(120deg, rgba(7, 14, 22, 0.42) 0%, rgba(7, 14, 22, 0.18) 44%, rgba(7, 14, 22, 0.4) 100%);
-}
-
-.public-reservation-hero-v2 .hero-bg.video-backed + .public-reservation-hero-v2__overlay {
-  background:
-    linear-gradient(180deg, rgba(3, 7, 11, 0.06), rgba(3, 7, 11, 0.18)),
-    linear-gradient(120deg, rgba(7, 14, 22, 0.28) 0%, rgba(7, 14, 22, 0.12) 44%, rgba(7, 14, 22, 0.24) 100%);
 }
 
 .public-reservation-hero-v2__content {
@@ -6011,10 +5998,42 @@ body[data-device="mobile"] *::after {
   line-height: 1.5;
 }
 
+.booking-confirm-card-v2__calendar-copy {
+  display: grid;
+  gap: 6px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(82, 197, 255, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.01)),
+    linear-gradient(155deg, rgba(8, 14, 20, 0.88), rgba(12, 21, 29, 0.84));
+}
+
+.booking-confirm-card-v2__calendar-copy strong {
+  color: #f5fbff;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.booking-confirm-card-v2__calendar-copy p {
+  margin: 0;
+  color: rgba(224, 236, 248, 0.72);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.booking-confirm-card-v2__calendar-error {
+  margin: 0;
+}
+
 .booking-confirm-card-v2__actions {
   justify-content: flex-end;
   align-items: center;
   gap: 10px;
+}
+
+.booking-confirm-card-v2__calendar {
+  min-width: 220px;
 }
 
 .booking-confirm-card-v2__whatsapp {
@@ -6133,6 +6152,7 @@ body[data-device="mobile"] *::after {
     grid-template-columns: 1fr;
   }
 
+  .booking-confirm-card-v2__calendar,
   .booking-confirm-card-v2__whatsapp,
   .booking-confirm-card-v2__close {
     width: 100%;
@@ -6154,6 +6174,10 @@ body[data-device="mobile"] *::after {
 
   .booking-confirm-card-v2__summary {
     padding: 16px 14px;
+  }
+
+  .booking-confirm-card-v2__calendar-copy {
+    padding: 14px;
   }
 
   .booking-confirm-card-v2__row {
