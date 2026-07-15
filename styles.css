@@ -5998,42 +5998,10 @@ body[data-device="mobile"] *::after {
   line-height: 1.5;
 }
 
-.booking-confirm-card-v2__calendar-copy {
-  display: grid;
-  gap: 6px;
-  padding: 16px 18px;
-  border-radius: 20px;
-  border: 1px solid rgba(82, 197, 255, 0.14);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.01)),
-    linear-gradient(155deg, rgba(8, 14, 20, 0.88), rgba(12, 21, 29, 0.84));
-}
-
-.booking-confirm-card-v2__calendar-copy strong {
-  color: #f5fbff;
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.booking-confirm-card-v2__calendar-copy p {
-  margin: 0;
-  color: rgba(224, 236, 248, 0.72);
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.booking-confirm-card-v2__calendar-error {
-  margin: 0;
-}
-
 .booking-confirm-card-v2__actions {
   justify-content: flex-end;
   align-items: center;
   gap: 10px;
-}
-
-.booking-confirm-card-v2__calendar {
-  min-width: 220px;
 }
 
 .booking-confirm-card-v2__whatsapp {
@@ -6152,7 +6120,6 @@ body[data-device="mobile"] *::after {
     grid-template-columns: 1fr;
   }
 
-  .booking-confirm-card-v2__calendar,
   .booking-confirm-card-v2__whatsapp,
   .booking-confirm-card-v2__close {
     width: 100%;
@@ -6174,10 +6141,6 @@ body[data-device="mobile"] *::after {
 
   .booking-confirm-card-v2__summary {
     padding: 16px 14px;
-  }
-
-  .booking-confirm-card-v2__calendar-copy {
-    padding: 14px;
   }
 
   .booking-confirm-card-v2__row {
